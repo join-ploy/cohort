@@ -15,6 +15,29 @@ export function buildSetupRunnerCommand(
   return `bash ${quotePosixArg(runnerScriptPath)}`
 }
 
+/**
+ * Build a runner command that terminates the parent shell (PTY) when the runner
+ * exits, preserving the runner's exit code. Use this from the script-runner
+ * (run/setup) IPC handlers where the user expects the PTY to close when their
+ * script finishes — not from issue-command flows that should keep the shell
+ * interactive afterward.
+ */
+export function buildSelfTerminatingScriptCommand(
+  runnerScriptPath: string,
+  platform: SetupRunnerCommandPlatform
+): string {
+  const base = buildSetupRunnerCommand(runnerScriptPath, platform)
+  // Why: cmd.exe's sequential operator is `&` (unconditional, like `;` in posix);
+  // `exit /b %ERRORLEVEL%` propagates the runner's exit code to the parent cmd.
+  // The WSL UNC branch returns `bash …` and falls through to the posix suffix —
+  // which works inside WSL bash but is inert when typed into a cmd/PowerShell
+  // host. Documented as a best-effort limitation for that niche path.
+  if (platform === 'windows' && !isWslUncPath(runnerScriptPath)) {
+    return `${base} & exit /b %ERRORLEVEL%`
+  }
+  return `${base}; exit $?`
+}
+
 function isWslUncPath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
   return /^\/\/(wsl\.localhost|wsl\$)\//.test(normalized)
