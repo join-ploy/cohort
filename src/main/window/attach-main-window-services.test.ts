@@ -303,18 +303,19 @@ describe('attachMainWindowServices', () => {
       activateWorktree: (
         repoId: string,
         worktreeId: string,
-        setup?: { runnerScriptPath: string; envVars: Record<string, string> }
+        startup?: { command: string; env?: Record<string, string> }
       ) => void
     }
 
     notifier.worktreesChanged('repo-1')
     notifier.reposChanged()
+    // Why: Phase 7 dropped the `setup` payload from activateWorktree —
+    // setup PTYs are now owned by main's setup-script registry and
+    // surfaced via `setup:started`. The notifier still threads an
+    // optional `startup` for explicit launches; verify it forwards.
     notifier.activateWorktree('repo-1', 'wt-1', {
-      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-      envVars: {
-        ORCA_ROOT_PATH: '/tmp/repo',
-        ORCA_WORKTREE_PATH: '/tmp/worktrees/wt-1'
-      }
+      command: 'claude',
+      env: { ORCA_WORKTREE_PATH: '/tmp/worktrees/wt-1' }
     })
 
     expect(sendMock.mock.calls).toEqual([
@@ -325,12 +326,9 @@ describe('attachMainWindowServices', () => {
         {
           repoId: 'repo-1',
           worktreeId: 'wt-1',
-          setup: {
-            runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-            envVars: {
-              ORCA_ROOT_PATH: '/tmp/repo',
-              ORCA_WORKTREE_PATH: '/tmp/worktrees/wt-1'
-            }
+          startup: {
+            command: 'claude',
+            env: { ORCA_WORKTREE_PATH: '/tmp/worktrees/wt-1' }
           }
         }
       ]

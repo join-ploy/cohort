@@ -15,6 +15,7 @@ import SearchPanel from './Search'
 import ChecksPanel from './ChecksPanel'
 import PortsPanel from './PortsPanel'
 import RunPanel from './RunPanel'
+import SetupPanel from './SetupPanel'
 import {
   ACTIVITY_ITEMS,
   ActivityBarButton,
@@ -206,12 +207,7 @@ function RightSidebarInner(): React.JSX.Element {
         {effectiveTab === 'checks' && <ChecksPanel />}
         {effectiveTab === 'ports' && <PortsPanel />}
         {effectiveTab === 'run' && <RunPanel />}
-        {/* Phase 7 will replace this placeholder with the real SetupPanel. */}
-        {effectiveTab === 'setup' && (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-            Coming soon
-          </div>
-        )}
+        {effectiveTab === 'setup' && <SetupPanel />}
       </div>
     </div>
   )

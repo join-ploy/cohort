@@ -1121,14 +1121,14 @@ export function useIpcEvents(): void {
       })
     )
 
-    // Why: per-repo run-script lifecycle. Main owns the runPtyByRepo registry
-    // (src/main/ipc/run-script.ts) and broadcasts `run:started` / `run:exited`;
-    // the slice mirrors those into per-worktree status so the activity-bar dot
-    // and Run panel reflect live state. Setup-script equivalents
-    // (`setup:started` / `setup:exited`) are not wired here yet — they arrive
-    // in Phase 7. The slice already exposes handleSetupStarted /
-    // handleSetupExited, so the wiring will be a one-liner when those IPC
-    // events ship.
+    // Why: per-repo run-script + per-worktree setup-script lifecycle. Main
+    // owns the runPtyByRepo and setupPtyByWorktree registries
+    // (src/main/ipc/run-script.ts, setup-script.ts) and broadcasts
+    // `run:started` / `run:exited` and `setup:started` / `setup:exited`.
+    // The scripts slice mirrors those into per-worktree status so the
+    // activity-bar dots and Run/Setup panels reflect live state. Setup
+    // events fire on auto-spawn at worktree-create as well as on user
+    // Re-run, so the SetupPanel reacts identically in both cases.
     unsubs.push(
       window.api.runScript.onStarted((event) => {
         useAppStore.getState().handleRunStarted({
@@ -1140,6 +1140,22 @@ export function useIpcEvents(): void {
     unsubs.push(
       window.api.runScript.onExited((event) => {
         useAppStore.getState().handleRunExited({
+          worktreeId: event.worktreeId,
+          code: event.code
+        })
+      })
+    )
+    unsubs.push(
+      window.api.setupScript.onStarted((event) => {
+        useAppStore.getState().handleSetupStarted({
+          worktreeId: event.worktreeId,
+          ptyId: event.ptyId
+        })
+      })
+    )
+    unsubs.push(
+      window.api.setupScript.onExited((event) => {
+        useAppStore.getState().handleSetupExited({
           worktreeId: event.worktreeId,
           code: event.code
         })

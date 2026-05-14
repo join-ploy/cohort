@@ -232,7 +232,19 @@ describe('useIpcEvents updater integration', () => {
             return () => {}
           }
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -438,7 +450,19 @@ describe('useIpcEvents updater integration', () => {
           onPortForwardsChanged: () => () => {},
           onDetectedPortsChanged: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -665,7 +689,19 @@ describe('useIpcEvents updater integration', () => {
           onDetectedPortsChanged: () => () => {},
           onCredentialResolved: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -945,7 +981,19 @@ describe('useIpcEvents browser tab close routing', () => {
           onTerminalFitOverrideChanged: () => () => {},
           onTerminalDriverChanged: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -1149,7 +1197,19 @@ describe('useIpcEvents browser tab close routing', () => {
           onTerminalFitOverrideChanged: () => () => {},
           onTerminalDriverChanged: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -1348,7 +1408,19 @@ describe('useIpcEvents browser tab close routing', () => {
           onTerminalFitOverrideChanged: () => () => {},
           onTerminalDriverChanged: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -1556,7 +1628,19 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onTerminalFitOverrideChanged: () => () => {},
           onTerminalDriverChanged: () => () => {}
         },
-        agentStatus: { onSet: () => () => {} }
+        agentStatus: { onSet: () => () => {} },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        }
       }
     })
 
@@ -1568,11 +1652,9 @@ describe('useIpcEvents CLI-created worktree activation', () => {
       throw new Error('Expected onActivateWorktree listener to be registered')
     }
 
-    const setup = { runnerScriptPath: '/tmp/setup.sh', envVars: { FOO: 'bar' } }
     activateWorktreeListenerRef.current({
       repoId: 'repo-1',
-      worktreeId: 'wt-new',
-      setup
+      worktreeId: 'wt-new'
     })
 
     // Wait for the async IPC handler (it awaits fetchWorktrees before activating).
@@ -1586,11 +1668,11 @@ describe('useIpcEvents CLI-created worktree activation', () => {
     // The core regression guard: the handler must delegate to the canonical
     // activation helper (which records the visit in history) rather than
     // hand-rolling the activation steps and skipping recordWorktreeVisit.
-    // `setup` must be passed through the `setup` opt — not positionally
-    // mis-aliased into `startup`, which was a latent bug in the original
-    // hand-rolled path.
+    // Phase 7 removed the `setup` payload from the activation contract —
+    // the setup PTY is now owned by main and surfaced via setup:started
+    // events, so nothing setup-related travels through this call site.
     expect(activateAndRevealWorktree).toHaveBeenCalledTimes(1)
-    expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-new', { setup })
+    expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-new', { startup: undefined })
   })
 })
 
@@ -1750,6 +1832,18 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onSet: args.onSet,
           getSnapshot: args.getSnapshot ?? vi.fn(() => Promise.resolve([])),
           drop: args.drop ?? vi.fn()
+        },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
         }
       }
     }
