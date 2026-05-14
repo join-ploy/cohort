@@ -309,7 +309,7 @@ describe('getEffectiveHooks', () => {
   const makeRepo = (hookSettings?: {
     mode?: 'auto' | 'override'
     setupRunPolicy?: 'ask' | 'run-by-default' | 'skip-by-default'
-    scripts?: { setup: string; archive: string }
+    scripts?: { setup: string; archive: string; run?: string }
   }) =>
     ({
       id: 'test-id',
@@ -417,6 +417,24 @@ describe('getEffectiveHooks', () => {
       scripts: {
         setup: 'echo "legacy setup"',
         archive: 'echo "yaml archive"'
+      }
+    })
+  })
+
+  it('falls back to legacy persisted scripts.run when yaml is missing', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepo({
+      mode: 'override',
+      scripts: { setup: '', archive: '', run: 'echo legacy run' }
+    })
+    const result = getEffectiveHooks(repo)
+
+    expect(result).toEqual({
+      scripts: {
+        run: 'echo legacy run'
       }
     })
   })
