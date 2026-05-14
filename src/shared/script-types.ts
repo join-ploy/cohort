@@ -61,6 +61,9 @@ export type SetupStartFailureReason =
   | 'invalid-worktree'
   | 'no-provider'
   | 'spawn-failed'
+  // Why: setup is reserved for worktrees created via `git worktree add`. The
+  // primary working tree must never run setup — it's the user's checkout.
+  | 'primary-worktree'
 
 export type SetupStartResult =
   | { ok: true; ptyId: string }

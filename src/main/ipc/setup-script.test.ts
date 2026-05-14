@@ -203,6 +203,20 @@ describe('handleSetupStart', () => {
     expect(provider.spawn).toHaveBeenCalledTimes(1)
   })
 
+  it('returns primary-worktree and does not spawn when targeted worktree is the primary', async () => {
+    // Why: setup is only valid for worktrees created via `git worktree add`.
+    // The primary working tree (path === repo.path) must be rejected even
+    // when scripts.setup is configured, before any provider/spawn work.
+    const primaryWorktreeId = `${repo.id}::${repo.path}`
+    const result = await handleSetupStart(
+      { worktreeId: primaryWorktreeId },
+      { store: makeMultiRepoStore([repo]) as never }
+    )
+    expect(result).toEqual({ ok: false, reason: 'primary-worktree' })
+    expect(provider.spawn).not.toHaveBeenCalled()
+    expect(registry.get(primaryWorktreeId)).toBeNull()
+  })
+
   it('spawn-failed leaves registry clean; subsequent start succeeds', async () => {
     provider.spawn.mockReset().mockRejectedValueOnce(new Error('boom'))
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
