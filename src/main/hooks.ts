@@ -387,11 +387,22 @@ export function createIssueCommandRunnerScript(
   return createWorktreeRunnerScript(repo, worktreePath, command, 'issue-command-runner')
 }
 
+export function createRunRunnerScript(
+  repo: Repo,
+  worktreePath: string,
+  script: string
+): WorktreeSetupLaunch {
+  // Why: the per-repo `scripts.run` hook needs the same env scaffolding,
+  // fail-fast wrapping, and WSL path translation as setup; reusing the shared
+  // runner keeps the two hook flows in lockstep instead of forking behavior.
+  return createWorktreeRunnerScript(repo, worktreePath, script, 'run-runner')
+}
+
 function createWorktreeRunnerScript(
   repo: Repo,
   worktreePath: string,
   script: string,
-  runnerBaseName: 'setup-runner' | 'issue-command-runner'
+  runnerBaseName: 'setup-runner' | 'issue-command-runner' | 'run-runner'
 ): WorktreeSetupLaunch {
   const envVars = getSetupEnvVars(repo, worktreePath)
   // Why: WSL worktrees run on a Linux filesystem even though process.platform
