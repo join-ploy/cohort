@@ -519,17 +519,29 @@ const WorktreeCard = React.memo(function WorktreeCard({
                  hierarchy against the muted branch row below (muting the
                  title as well flattened the card — same reasoning as the
                  repo chip comment below). */}
-            <div
-              className={cn(
-                'text-[12px] truncate leading-tight text-foreground',
-                showUnreadEmphasis ? 'font-semibold' : 'font-normal'
+            <div className="flex flex-col min-w-0">
+              <div
+                className={cn(
+                  'text-[12px] truncate leading-tight text-foreground',
+                  showUnreadEmphasis ? 'font-semibold' : 'font-normal'
+                )}
+              >
+                {/* Why: the card root is a non-interactive <div>, so aria-label
+                     on it is announced inconsistently across screen readers.
+                     A visible-text prefix inside the accessible name is reliable. */}
+                {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
+                {worktree.displayName}
+              </div>
+              {/* Why: workspaceName is the immutable, DB-safe handle injected
+                   into setup/run/archive scripts as CONDUCTOR_WORKSPACE_NAME.
+                   Surfaced here so users can copy/grep the exact identifier
+                   their hooks see. Hidden when missing (defensive — backfill
+                   on persistence load makes a true gap rare). */}
+              {worktree.workspaceName && (
+                <span className="text-[10px] font-mono text-muted-foreground truncate leading-tight">
+                  {worktree.workspaceName}
+                </span>
               )}
-            >
-              {/* Why: the card root is a non-interactive <div>, so aria-label
-                   on it is announced inconsistently across screen readers.
-                   A visible-text prefix inside the accessible name is reliable. */}
-              {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
-              {worktree.displayName}
             </div>
 
             {/* Why: the primary worktree (the original clone directory) cannot be
