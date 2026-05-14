@@ -828,6 +828,7 @@ export type OrcaHooks = {
   scripts: {
     setup?: string // Runs after worktree is created
     archive?: string // Runs before worktree is archived
+    run?: string // User-triggered via Cmd+R
   }
   issueCommand?: string // Shared default command for linked GitHub issues
 }
@@ -841,6 +842,7 @@ export type RepoHookSettings = {
   scripts: {
     setup: string
     archive: string
+    run?: string
   }
 }
 

@@ -267,7 +267,8 @@ export function getDefaultRepoHookSettings(): RepoHookSettings {
     setupRunPolicy: 'run-by-default',
     scripts: {
       setup: '',
-      archive: ''
+      archive: '',
+      run: ''
     }
   }
 }
