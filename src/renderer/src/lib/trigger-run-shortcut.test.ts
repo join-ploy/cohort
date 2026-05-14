@@ -1,16 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { triggerRunShortcut } from './trigger-run-shortcut'
-import type { TriggerRunShortcutDeps } from './trigger-run-shortcut'
-import type { RunStartResult } from '../../../shared/script-types'
+import type { TriggerRunShortcutDeps, TriggerRunShortcutStoreSlice } from './trigger-run-shortcut'
+import type { RunStartArgs, RunStartResult } from '../../../shared/script-types'
 
-type StoreShape = {
-  activeWorktreeId: string | null
-  rightSidebarOpen: boolean
-  setRightSidebarOpen: ReturnType<typeof vi.fn>
-  setRightSidebarTab: ReturnType<typeof vi.fn>
-  repos: { id: string; displayName?: string }[]
-  worktreesByRepo: Record<string, { id: string; repoId: string }[]>
-}
+type StoreShape = TriggerRunShortcutStoreSlice
 
 function makeStore(overrides: Partial<StoreShape> = {}): StoreShape {
   return {
@@ -28,7 +21,7 @@ function makeStore(overrides: Partial<StoreShape> = {}): StoreShape {
 
 function makeDeps(args: {
   store: StoreShape
-  start: ReturnType<typeof vi.fn>
+  start: (args: RunStartArgs) => Promise<RunStartResult>
 }): TriggerRunShortcutDeps {
   return {
     store: { getState: () => args.store },

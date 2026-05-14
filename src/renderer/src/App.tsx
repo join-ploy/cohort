@@ -70,6 +70,7 @@ import { buildWorkspaceSessionPayload } from './lib/workspace-session'
 import { createSessionWriteSubscriber } from './lib/session-write-subscriber'
 import { applyDocumentTheme } from './lib/document-theme'
 import { isEditableTarget } from './lib/editable-target'
+import { getDefaultTriggerRunShortcutDeps, triggerRunShortcut } from './lib/trigger-run-shortcut'
 import {
   canGoBackWorktreeHistory,
   canGoForwardWorktreeHistory
@@ -825,6 +826,17 @@ function App(): React.JSX.Element {
         e.preventDefault()
         actions.setRightSidebarTab('ports')
         actions.setRightSidebarOpen(true)
+      }
+
+      // Cmd/Ctrl+R — start the active worktree's run script and surface the
+      // Run panel. Open-sidebar + tab-switch + IPC start are centralized in
+      // triggerRunShortcut so the Electron menu accelerator (which dispatches
+      // a `shortcut:run-script` IPC consumed in useIpcEvents) drives the same
+      // chain — preventing menu/keyboard divergence. Shift carve-out lets
+      // Shift+Cmd/Ctrl+R remain bound to the View menu's Force Reload.
+      if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        void triggerRunShortcut(getDefaultTriggerRunShortcutDeps(useAppStore))
       }
     }
 
