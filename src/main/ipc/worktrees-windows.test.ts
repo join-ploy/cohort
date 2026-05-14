@@ -107,6 +107,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     getRepo: vi.fn(),
     getSettings: vi.fn(),
     getWorktreeMeta: vi.fn(),
+    getAllWorktreeMeta: vi.fn(),
     setWorktreeMeta: vi.fn(),
     removeWorktreeMeta: vi.fn()
   }
@@ -135,6 +136,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     store.getRepo.mockReset()
     store.getSettings.mockReset()
     store.getWorktreeMeta.mockReset()
+    store.getAllWorktreeMeta.mockReset()
     store.setWorktreeMeta.mockReset()
     store.removeWorktreeMeta.mockReset()
 
@@ -170,6 +172,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
       workspaceDir: 'C:\\workspaces'
     })
     store.getWorktreeMeta.mockReturnValue(undefined)
+    store.getAllWorktreeMeta.mockReturnValue([])
     store.setWorktreeMeta.mockReturnValue({})
     getGitUsernameMock.mockReturnValue('')
     getDefaultBaseRefMock.mockReturnValue('origin/main')

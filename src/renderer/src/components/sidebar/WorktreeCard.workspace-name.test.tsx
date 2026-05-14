@@ -28,7 +28,10 @@ const mockState: StoreState = {
   issueCache: {},
   acknowledgedAgentsByPaneKey: {},
   retainedAgentStatuses: {},
-  liveAgentStatuses: {}
+  liveAgentStatuses: {},
+  agentStatusByPaneKey: {},
+  retainedAgentsByPaneKey: {},
+  agentStatusEpoch: 0
 }
 
 vi.mock('@/store', () => ({
