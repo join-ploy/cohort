@@ -318,6 +318,7 @@ describe('getActiveHookConfigKind', () => {
 describe('hasUnrecognizedOrcaYamlKeys', () => {
   it('returns true when the file contains only keys this version does not handle', async () => {
     const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
     vi.mocked(fs.readFileSync).mockReturnValue('futureFeature: |\n  some config\n')
 
     const { hasUnrecognizedOrcaYamlKeys } = await import('./hooks')
@@ -326,6 +327,7 @@ describe('hasUnrecognizedOrcaYamlKeys', () => {
 
   it('returns true when an unknown key has no trailing space (block-value form)', async () => {
     const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
     vi.mocked(fs.readFileSync).mockReturnValue('futureFeature:\n  nested: value\n')
 
     const { hasUnrecognizedOrcaYamlKeys } = await import('./hooks')
@@ -334,6 +336,7 @@ describe('hasUnrecognizedOrcaYamlKeys', () => {
 
   it('returns true when the file mixes recognised and unrecognised keys', async () => {
     const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
     vi.mocked(fs.readFileSync).mockReturnValue(
       'scripts:\n  setup: |\n    pnpm install\nnewFeature: enabled\n'
     )
@@ -344,8 +347,20 @@ describe('hasUnrecognizedOrcaYamlKeys', () => {
 
   it('returns false when the file contains only recognised keys', async () => {
     const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
     vi.mocked(fs.readFileSync).mockReturnValue(
       'scripts:\n  setup: |\n    pnpm install\nissueCommand: |\n  claude -p "test"\n'
+    )
+
+    const { hasUnrecognizedOrcaYamlKeys } = await import('./hooks')
+    expect(hasUnrecognizedOrcaYamlKeys('/test/repo')).toBe(false)
+  })
+
+  it('returns false when conductor.json is the active config (yaml-only check)', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/conductor.json')
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ scripts: { run: 'npm run dev' }, runScriptMode: 'nonconcurrent' })
     )
 
     const { hasUnrecognizedOrcaYamlKeys } = await import('./hooks')

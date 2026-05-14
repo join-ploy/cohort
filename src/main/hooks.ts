@@ -208,9 +208,14 @@ const RECOGNIZED_ORCA_YAML_KEYS = new Set(['scripts', 'issueCommand'])
 
 /**
  * Return true when `orca.yaml` contains at least one top-level key that this
- * version of Orca does not handle.
+ * version of Orca does not handle. Conductor schemas legitimately include
+ * unrelated keys (e.g. runScriptMode), so this check is yaml-only — flagging
+ * a conductor.json would produce a misleading "outdated Orca" warning.
  */
 export function hasUnrecognizedOrcaYamlKeys(repoPath: string): boolean {
+  if (getActiveHookConfigKind(repoPath) !== 'orca-yaml') {
+    return false
+  }
   try {
     const content = readFileSync(join(repoPath, 'orca.yaml'), 'utf-8')
     return content.split(/\r?\n/).some((line) => {
