@@ -12,6 +12,7 @@ import { registerRepoHandlers } from '../ipc/repos'
 import { registerWorktreeHandlers } from '../ipc/worktrees'
 import { registerPtyHandlers } from '../ipc/pty'
 import { registerDaemonManagementHandlers } from '../ipc/pty-management'
+import { registerRunScriptIpc } from '../ipc/run-script'
 import { registerSshHandlers } from '../ipc/ssh'
 import { browserManager } from '../browser/browser-manager'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from '../browser/browser-media-access'
@@ -58,6 +59,11 @@ export function attachMainWindowServices(
   // and ensures the handlers are re-installed on macOS app re-activation when
   // the main window is recreated.
   registerDaemonManagementHandlers()
+  // Why: per-repo single-instance run-script registry + run:start/run:stop IPC.
+  // Registered after the PTY handlers so the local provider is configured first;
+  // run-script imports getLocalPtyProvider/getSshPtyProvider at call time so
+  // ordering only affects the first invocation, not module load.
+  registerRunScriptIpc({ store })
   // Why: do not enumerate repo paths from background GC. `git worktree list`
   // can re-touch protected folders on macOS and trigger folder-access prompts.
   scheduleHistoryGc(async () => {

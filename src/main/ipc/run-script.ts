@@ -1,8 +1,19 @@
-// Why: per-repo single-instance run-script registry. The design (docs/plans/
-// 2026-05-14-per-repo-run-script-design.md "PTY ownership") requires at most one
-// run PTY per repo so that pressing Cmd+R in worktree B kills any in-flight run
-// in worktree A. The generation counter prevents a stale onExit (from a PTY
-// killed during a fast kill+respawn cycle) from clearing the fresh entry.
+// Why: per-repo single-instance run-script registry + IPC handlers. The design
+// (docs/plans/2026-05-14-per-repo-run-script-design.md "PTY ownership") requires
+// at most one run PTY per repo so that pressing Cmd+R in worktree B kills any
+// in-flight run in worktree A. The generation counter prevents a stale onExit
+// (from a PTY killed during a fast kill+respawn cycle) from clearing the fresh
+// entry.
+
+import { BrowserWindow, ipcMain } from 'electron'
+
+import { createRunRunnerScript, getEffectiveHooks } from '../hooks'
+import type { IPtyProvider } from '../providers/types'
+import type { Store } from '../persistence'
+import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
+import { parseWorktreeId } from './worktree-logic'
+
+import { getLocalPtyProvider, getSshPtyProvider } from './pty'
 
 type RunPtyEntry = {
   ptyId: string
@@ -40,3 +51,188 @@ function clear(): void {
 // mutating registry state directly. The IPC handlers in this file are the
 // production surface; tests poke the primitives.
 export const _testing = { get, set, clearIfMatches, clear, nextGen }
+
+// SIGINT (Ctrl-C) terminates with this code on POSIX shells; reuse the same
+// convention for renderer-initiated stops so the dot consistently flips to the
+// failure color when the user kills a run.
+const SIGINT_EXIT_CODE = 130
+
+export type RunStartResult =
+  | { ok: true; ptyId: string }
+  | { ok: false; reason: 'no-run-script' | 'repo-not-found' | 'invalid-worktree' | 'no-provider' }
+
+export type RunStopResult = { ok: true } | { ok: false; reason: 'not-running' | 'no-provider' }
+
+type RunIpcDeps = {
+  store: Store
+}
+
+function broadcast(channel: string, payload: unknown): void {
+  // Why: the run lifecycle dot must reach every visible Orca window, not only the
+  // most-recently-focused one. Multiple windows attached to the same main process
+  // each render the same right sidebar, so a per-window send would leave the
+  // others stuck on stale state.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, payload)
+    }
+  }
+}
+
+function getProviderForConnection(connectionId: string | null | undefined): IPtyProvider | null {
+  if (!connectionId) {
+    return getLocalPtyProvider()
+  }
+  return getSshPtyProvider(connectionId) ?? null
+}
+
+export async function handleRunStart(
+  args: { repoId: string; worktreeId: string },
+  deps: RunIpcDeps
+): Promise<RunStartResult> {
+  const repo = deps.store.getRepo(args.repoId)
+  if (!repo) {
+    return { ok: false, reason: 'repo-not-found' }
+  }
+
+  let worktreePath: string
+  try {
+    const parsed = parseWorktreeId(args.worktreeId)
+    worktreePath = parsed.worktreePath
+  } catch {
+    return { ok: false, reason: 'invalid-worktree' }
+  }
+
+  const hooks = getEffectiveHooks(repo, worktreePath)
+  const script = hooks?.scripts.run?.trim()
+  if (!script) {
+    return { ok: false, reason: 'no-run-script' }
+  }
+
+  const provider = getProviderForConnection(repo.connectionId)
+  if (!provider) {
+    return { ok: false, reason: 'no-provider' }
+  }
+
+  // Why: kill any prior PTY for this repo BEFORE spawning so the renderer paints
+  // the killed worktree's dot first, then the fresh worktree's amber dot. The
+  // previous worktree's tab/scrollback is preserved on the renderer side; we
+  // only reach here on user-driven Cmd+R, so the in-flight run is being
+  // intentionally replaced.
+  const prior = get(args.repoId)
+  if (prior) {
+    try {
+      await provider.shutdown(prior.ptyId, { immediate: true })
+    } catch (err) {
+      console.warn(
+        `[run-script] shutdown of prior pty ${prior.ptyId} failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+    clearIfMatches(args.repoId, prior.ptyId, prior.generation)
+    broadcast('run:exited', {
+      repoId: args.repoId,
+      worktreeId: prior.worktreeId,
+      code: SIGINT_EXIT_CODE
+    })
+  }
+
+  // Why: wrap the user-authored shell text the same way setup does, so non-zero
+  // exits propagate and ORCA_WORKTREE_PATH is set before exec. The wrapped
+  // script is launched via `command`, which the local PTY provider streams into
+  // the freshly-spawned shell after it signals shell-ready.
+  const wrapped = createRunRunnerScript(repo, worktreePath, script)
+  const generation = nextGen()
+  const command = buildSetupRunnerCommand(
+    wrapped.runnerScriptPath,
+    process.platform === 'win32' ? 'windows' : 'posix'
+  )
+
+  // Why: bind onExit BEFORE spawn returns is impossible because we need the new
+  // ptyId to filter, but onExit subscriptions for already-spawned PTYs are fine
+  // — node-pty fires synchronously after process exit, and the registry/event
+  // ordering only matters for cleanup correctness (see clearIfMatches guard).
+  let spawned: { id: string }
+  try {
+    spawned = await provider.spawn({
+      cols: 80,
+      rows: 24,
+      cwd: worktreePath,
+      env: wrapped.envVars,
+      command
+    })
+  } catch (err) {
+    console.error(
+      `[run-script] spawn failed for repo ${args.repoId}: ${err instanceof Error ? err.message : String(err)}`
+    )
+    throw err
+  }
+
+  set(args.repoId, { ptyId: spawned.id, worktreeId: args.worktreeId, generation })
+
+  // Why: filter the global onExit by ptyId. The clearIfMatches guard then makes
+  // the late-arriving exit of a superseded PTY a no-op, preventing it from
+  // erasing the live registry entry.
+  const unsubscribe = provider.onExit((payload) => {
+    if (payload.id !== spawned.id) {
+      return
+    }
+    unsubscribe()
+    clearIfMatches(args.repoId, spawned.id, generation)
+    broadcast('run:exited', {
+      repoId: args.repoId,
+      worktreeId: args.worktreeId,
+      code: payload.code
+    })
+  })
+
+  broadcast('run:started', {
+    repoId: args.repoId,
+    worktreeId: args.worktreeId,
+    ptyId: spawned.id
+  })
+
+  return { ok: true, ptyId: spawned.id }
+}
+
+export async function handleRunStop(
+  args: { repoId: string },
+  deps: RunIpcDeps
+): Promise<RunStopResult> {
+  const entry = get(args.repoId)
+  if (!entry) {
+    return { ok: false, reason: 'not-running' }
+  }
+
+  const repo = deps.store.getRepo(args.repoId)
+  // Why: the registry is the source of truth for "what is running"; if the repo
+  // record vanished mid-flight (rare but possible during repo removal) we still
+  // want to attempt the local-provider shutdown rather than leaking the PTY.
+  const provider = getProviderForConnection(repo?.connectionId)
+  if (!provider) {
+    return { ok: false, reason: 'no-provider' }
+  }
+
+  try {
+    await provider.shutdown(entry.ptyId, { immediate: true })
+  } catch (err) {
+    console.warn(
+      `[run-script] shutdown failed for ${entry.ptyId}: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+  clearIfMatches(args.repoId, entry.ptyId, entry.generation)
+  broadcast('run:exited', {
+    repoId: args.repoId,
+    worktreeId: entry.worktreeId,
+    code: SIGINT_EXIT_CODE
+  })
+  return { ok: true }
+}
+
+export function registerRunScriptIpc(deps: RunIpcDeps): void {
+  ipcMain.removeHandler('run:start')
+  ipcMain.removeHandler('run:stop')
+  ipcMain.handle('run:start', (_event, args: { repoId: string; worktreeId: string }) =>
+    handleRunStart(args, deps)
+  )
+  ipcMain.handle('run:stop', (_event, args: { repoId: string }) => handleRunStop(args, deps))
+}
