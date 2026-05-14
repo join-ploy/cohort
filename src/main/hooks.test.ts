@@ -2,7 +2,7 @@
 import type { Repo } from '../shared/types'
 
 import { describe, expect, it, vi } from 'vitest'
-import { parseOrcaYaml } from './hooks'
+import { parseConductorJson, parseOrcaYaml } from './hooks'
 
 // Mock fs and path used by loadHooks
 vi.mock('fs', () => ({
@@ -159,6 +159,44 @@ describe('parseOrcaYaml', () => {
       },
       issueCommand: 'claude -p "Read issue #{{issue}}"'
     })
+  })
+})
+
+describe('parseConductorJson', () => {
+  it('parses scripts.setup, scripts.run, and scripts.archive from a conductor.json', () => {
+    const json = JSON.stringify({
+      scripts: { setup: 'npm install', run: 'npm run dev', archive: 'echo bye' }
+    })
+    const result = parseConductorJson(json)
+    expect(result?.scripts.setup).toBe('npm install')
+    expect(result?.scripts.run).toBe('npm run dev')
+    expect(result?.scripts.archive).toBe('echo bye')
+  })
+
+  it('silently ignores unknown top-level keys', () => {
+    const json = JSON.stringify({
+      scripts: { run: 'npm run dev' },
+      runScriptMode: 'nonconcurrent',
+      extraField: 42
+    })
+    const result = parseConductorJson(json)
+    expect(result?.scripts.run).toBe('npm run dev')
+  })
+
+  it('returns null for an empty object', () => {
+    expect(parseConductorJson('{}')).toBeNull()
+  })
+
+  it('returns null when scripts block exists but is empty', () => {
+    expect(parseConductorJson(JSON.stringify({ scripts: {} }))).toBeNull()
+  })
+
+  it('returns null on malformed JSON', () => {
+    expect(parseConductorJson('{ this is not json')).toBeNull()
+  })
+
+  it('returns null when scripts is not an object', () => {
+    expect(parseConductorJson(JSON.stringify({ scripts: 'pnpm dev' }))).toBeNull()
   })
 })
 
