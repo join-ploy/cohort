@@ -177,6 +177,7 @@ describe('registerWorktreeHandlers', () => {
     getSparsePresets: vi.fn(),
     getSettings: vi.fn(),
     getWorktreeMeta: vi.fn(),
+    getAllWorktreeMeta: vi.fn(),
     setWorktreeMeta: vi.fn(),
     removeWorktreeMeta: vi.fn()
   }
@@ -225,6 +226,7 @@ describe('registerWorktreeHandlers', () => {
       store.getSparsePresets,
       store.getSettings,
       store.getWorktreeMeta,
+      store.getAllWorktreeMeta,
       store.setWorktreeMeta,
       store.removeWorktreeMeta,
       killAllProcessesForWorktreeMock,
@@ -270,6 +272,7 @@ describe('registerWorktreeHandlers', () => {
       workspaceDir: '/workspace'
     })
     store.getWorktreeMeta.mockReturnValue(undefined)
+    store.getAllWorktreeMeta.mockReturnValue({})
     store.setWorktreeMeta.mockReturnValue({})
     getGitUsernameMock.mockReturnValue('')
     getDefaultBaseRefMock.mockReturnValue('origin/main')
@@ -401,6 +404,145 @@ describe('registerWorktreeHandlers', () => {
         displayName: 'Fix: dashboards for PRs'
       })
     })
+  })
+
+  it('auto-generates a workspaceName when none is provided', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard'
+    })
+
+    const recorded = store.setWorktreeMeta.mock.calls[0][1]
+    expect(recorded).toMatchObject({
+      workspaceName: expect.stringMatching(/^[a-z][a-z0-9_]{0,15}$/)
+    })
+  })
+
+  it('persists a caller-supplied workspaceName when valid', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      workspaceName: 'wise_panther'
+    })
+
+    expect(store.setWorktreeMeta).toHaveBeenCalledWith(
+      'repo-1::/workspace/improve-dashboard',
+      expect.objectContaining({ workspaceName: 'wise_panther' })
+    )
+  })
+
+  it('rejects an invalid workspaceName format with a clear error', async () => {
+    await expect(
+      handlers['worktrees:create'](null, {
+        repoId: 'repo-1',
+        name: 'improve-dashboard',
+        workspaceName: 'Bad-Name'
+      })
+    ).rejects.toThrow(/lowercase|workspace name/i)
+  })
+
+  it('rejects a workspaceName that is already in use by a sibling', async () => {
+    store.getAllWorktreeMeta.mockReturnValue({
+      'repo-1::/workspace/other': {
+        displayName: 'other',
+        workspaceName: 'wise_panther',
+        comment: '',
+        linkedIssue: null,
+        linkedPR: null,
+        linkedLinearIssue: null,
+        isArchived: false,
+        isUnread: false,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0
+      }
+    })
+
+    await expect(
+      handlers['worktrees:create'](null, {
+        repoId: 'repo-1',
+        name: 'improve-dashboard',
+        workspaceName: 'wise_panther'
+      })
+    ).rejects.toThrow(/already in use/i)
+  })
+
+  it('avoids collisions when generating workspaceName for back-to-back creates', async () => {
+    // First create — store sees no siblings, picks workspaceName "X".
+    // Second create — store now reports the first sibling, so the generator
+    // must pick something different. Use the helper's branch-conflict pattern
+    // (auto-suffix path) so two calls land in distinct git paths.
+    let firstAssigned: string | null = null
+    store.setWorktreeMeta.mockImplementation((_id, meta) => {
+      if (typeof meta.workspaceName === 'string' && firstAssigned === null) {
+        firstAssigned = meta.workspaceName
+      }
+      return meta
+    })
+
+    listWorktreesMock.mockResolvedValueOnce([
+      {
+        path: '/workspace/wt-a',
+        head: 'a',
+        branch: 'wt-a',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    await handlers['worktrees:create'](null, { repoId: 'repo-1', name: 'wt-a' })
+
+    expect(firstAssigned).not.toBeNull()
+    store.getAllWorktreeMeta.mockReturnValue({
+      'repo-1::/workspace/wt-a': {
+        displayName: '',
+        workspaceName: firstAssigned!,
+        comment: '',
+        linkedIssue: null,
+        linkedPR: null,
+        linkedLinearIssue: null,
+        isArchived: false,
+        isUnread: false,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0
+      }
+    })
+
+    listWorktreesMock.mockResolvedValueOnce([
+      {
+        path: '/workspace/wt-b',
+        head: 'b',
+        branch: 'wt-b',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    await handlers['worktrees:create'](null, { repoId: 'repo-1', name: 'wt-b' })
+
+    const secondCallMeta = store.setWorktreeMeta.mock.calls.at(-1)![1]
+    expect(secondCallMeta.workspaceName).not.toBe(firstAssigned)
   })
 
   it('persists linked issue and PR metadata during local create', async () => {

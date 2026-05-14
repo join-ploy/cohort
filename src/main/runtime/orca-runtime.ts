@@ -142,12 +142,14 @@ import type { Store } from '../persistence'
 import type { StatsCollector } from '../stats/collector'
 import { AgentDetector } from '../stats/agent-detector'
 import {
+  collectTakenWorkspaceNamesForRepo,
   computeBranchName,
   computeWorktreePath,
   ensurePathWithinWorkspace,
   formatWorktreeRemovalError,
   isOrphanedWorktreeError,
   mergeWorktree,
+  resolveWorkspaceNameForCreate,
   sanitizeWorktreeName,
   shouldSetDisplayName,
   areWorktreePathsEqual
@@ -3832,8 +3834,16 @@ export class OrcaRuntimeService {
 
     const worktreeId = `${repo.id}::${created.path}`
     const now = Date.now()
+    // Why: CLI/RPC create has no user-facing field to seed the workspace name,
+    // so always generate one from the same adjective_noun pool the IPC path
+    // uses. Match the IPC path's collision avoidance against existing siblings.
+    const workspaceName = resolveWorkspaceNameForCreate(
+      undefined,
+      collectTakenWorkspaceNamesForRepo(repo.id, this.store.getAllWorktreeMeta())
+    )
     const meta = this.store.setWorktreeMeta(worktreeId, {
       lastActivityAt: now,
+      workspaceName,
       // See createRemoteWorktree: createdAt grants the new worktree a grace
       // window in Recent sort so ambient PTY bumps in OTHER worktrees can't
       // push it down before the user has had a chance to notice it. Smart-sort

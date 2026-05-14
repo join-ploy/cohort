@@ -41,7 +41,9 @@ import {
   ensurePathWithinWorkspace,
   shouldSetDisplayName,
   mergeWorktree,
-  areWorktreePathsEqual
+  areWorktreePathsEqual,
+  collectTakenWorkspaceNamesForRepo,
+  resolveWorkspaceNameForCreate
 } from './worktree-logic'
 import { invalidateAuthorizedRootsCache } from './filesystem-auth'
 import { createWorktreeSymlinks } from './worktree-symlinks'
@@ -193,6 +195,14 @@ export async function createRemoteWorktree(
     ? sanitizeWorktreeDisplayName(args.displayName)
     : undefined
 
+  // Why: validate caller-supplied workspaceName upfront so a bad value never
+  // touches the remote git surface. Recomputed at meta-write time below.
+  const initialTakenWorkspaceNames = collectTakenWorkspaceNamesForRepo(
+    repo.id,
+    store.getAllWorktreeMeta()
+  )
+  resolveWorkspaceNameForCreate(args.workspaceName, initialTakenWorkspaceNames)
+
   // Get git username from remote
   let username = ''
   try {
@@ -311,8 +321,16 @@ export async function createRemoteWorktree(
 
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
+  // Why: validate caller-supplied workspaceName (or generate one) before
+  // setWorktreeMeta so the rejection surfaces as a clean IPC error rather
+  // than a half-created worktree with no name.
+  const workspaceName = resolveWorkspaceNameForCreate(
+    args.workspaceName,
+    collectTakenWorkspaceNamesForRepo(repo.id, store.getAllWorktreeMeta())
+  )
   const metaUpdates: Partial<WorktreeMeta> = {
     lastActivityAt: now,
+    workspaceName,
     // Why: grants the new worktree a short grace window at the top of the
     // Recent sort. During worktree creation (git fetch + add can take several
     // seconds) other worktrees get ambient PTY bumps that would otherwise
@@ -357,6 +375,16 @@ export async function createLocalWorktree(
   const requestedDisplayName = args.displayName
     ? sanitizeWorktreeDisplayName(args.displayName)
     : undefined
+
+  // Why: validate the caller-supplied workspaceName upfront so a bad value
+  // rejects the create BEFORE any side effects (git fetch, branch creation).
+  // The final value is recomputed at meta-write time too — uniqueness can
+  // change between this check and that write if a parallel create lands first.
+  const initialTakenWorkspaceNames = collectTakenWorkspaceNamesForRepo(
+    repo.id,
+    store.getAllWorktreeMeta()
+  )
+  resolveWorkspaceNameForCreate(args.workspaceName, initialTakenWorkspaceNames)
 
   // Why (§3.3): determine the base branch (and therefore the remote we need to
   // fetch) FIRST, so the fetch can overlap all pre-create work below. Neither
@@ -594,11 +622,20 @@ export async function createLocalWorktree(
 
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
+  // Why: see createRemoteWorktree — validate or generate the workspaceName
+  // before setWorktreeMeta so a bad caller-supplied name fails the create
+  // cleanly (the git worktree is already created at this point but the meta
+  // write is the last persistent step).
+  const workspaceName = resolveWorkspaceNameForCreate(
+    args.workspaceName,
+    collectTakenWorkspaceNamesForRepo(repo.id, store.getAllWorktreeMeta())
+  )
   const metaUpdates: Partial<WorktreeMeta> = {
     // Stamp activity so the worktree sorts into its final position
     // immediately — prevents scroll-to-reveal racing with a later
     // bumpWorktreeActivity that would re-sort the list.
     lastActivityAt: now,
+    workspaceName,
     // See createRemoteWorktree above: createdAt protects the newly-created
     // worktree from ambient PTY bumps in other worktrees for CREATE_GRACE_MS.
     createdAt: now,

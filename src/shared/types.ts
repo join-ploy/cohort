@@ -891,6 +891,10 @@ export type CreateWorktreeArgs = {
    *  branch/path seed. Used when a workspace is created from a GitHub or
    *  Linear artifact whose title should remain readable in the sidebar. */
   displayName?: string
+  /** Optional caller-supplied workspaceName. Validated server-side against
+   *  WORKSPACE_NAME_PATTERN and uniqueness within the repo. When omitted,
+   *  the main process generates a unique adjective_noun. */
+  workspaceName?: string
   baseBranch?: string
   setupDecision?: SetupDecision
   sparseCheckout?: CreateSparseCheckoutRequest

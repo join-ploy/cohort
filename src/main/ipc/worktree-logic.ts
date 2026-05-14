@@ -1,6 +1,10 @@
 import { basename, join, resolve, relative, isAbsolute, posix, win32 } from 'path'
 import type { GitWorktreeInfo, Worktree, WorktreeMeta } from '../../shared/types'
-import { splitWorktreeId } from '../../shared/worktree-id'
+import { getRepoIdFromWorktreeId, splitWorktreeId } from '../../shared/worktree-id'
+import {
+  generateUniqueWorkspaceName,
+  validateWorkspaceName
+} from '../../shared/workspace-name-generator'
 import { getWslHome, parseWslPath } from '../wsl'
 
 /**
@@ -161,6 +165,46 @@ export function shouldSetDisplayName(
   sanitizedName: string
 ): boolean {
   return !(branchName === requestedName && sanitizedName === requestedName)
+}
+
+/**
+ * Collect every workspaceName already used by a sibling worktree of `repoId`.
+ * Source of truth is persisted WorktreeMeta — backfill on load guarantees
+ * legacy records have one by the time this runs.
+ */
+export function collectTakenWorkspaceNamesForRepo(
+  repoId: string,
+  allWorktreeMeta: Record<string, WorktreeMeta>
+): Set<string> {
+  const taken = new Set<string>()
+  for (const [worktreeId, meta] of Object.entries(allWorktreeMeta)) {
+    if (getRepoIdFromWorktreeId(worktreeId) !== repoId) {
+      continue
+    }
+    if (typeof meta.workspaceName === 'string' && meta.workspaceName.length > 0) {
+      taken.add(meta.workspaceName)
+    }
+  }
+  return taken
+}
+
+/**
+ * Resolve the final workspaceName for a new worktree. If the caller supplied
+ * one, validate it against format and uniqueness; throw on failure so the
+ * IPC surfaces a clear error. Otherwise generate a unique adjective_noun.
+ */
+export function resolveWorkspaceNameForCreate(
+  requested: string | undefined,
+  taken: ReadonlySet<string>
+): string {
+  if (typeof requested === 'string' && requested.length > 0) {
+    const error = validateWorkspaceName(requested, taken)
+    if (error) {
+      throw new Error(error)
+    }
+    return requested
+  }
+  return generateUniqueWorkspaceName(taken)
 }
 
 /**
