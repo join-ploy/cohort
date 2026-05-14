@@ -23,16 +23,16 @@ vi.mock('child_process', () => ({
   spawn: vi.fn()
 }))
 
-describe('createSetupRunnerScript', () => {
-  const makeRepo = () =>
-    ({
-      id: 'test-id',
-      path: '/test/repo',
-      displayName: 'Test Repo',
-      badgeColor: '#000',
-      addedAt: Date.now()
-    }) as unknown as Repo
+const makeRepo = () =>
+  ({
+    id: 'test-id',
+    path: '/test/repo',
+    displayName: 'Test Repo',
+    badgeColor: '#000',
+    addedAt: Date.now()
+  }) as unknown as Repo
 
+describe('createSetupRunnerScript', () => {
   it('writes a fail-fast Windows runner that returns after batch commands', async () => {
     const fs = await import('fs')
     const originalPlatform = process.platform
@@ -173,16 +173,97 @@ describe('createSetupRunnerScript', () => {
   })
 })
 
-describe('createIssueCommandRunnerScript', () => {
-  const makeRepo = () =>
-    ({
-      id: 'test-id',
-      path: '/test/repo',
-      displayName: 'Test Repo',
-      badgeColor: '#000',
-      addedAt: Date.now()
-    }) as unknown as Repo
+describe('createRunRunnerScript', () => {
+  it('writes a fail-fast Windows runner that returns after batch commands', async () => {
+    const fs = await import('fs')
+    const originalPlatform = process.platform
 
+    execFileSyncMock.mockReturnValue('C:\\repo\\.git\\worktrees\\feature\\orca\\run-runner.cmd')
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'win32'
+    })
+
+    try {
+      const { createRunRunnerScript } = await import('./hooks')
+      const result = createRunRunnerScript(makeRepo(), 'C:\\repo\\feature', 'pnpm dev')
+
+      expect(result).toEqual({
+        runnerScriptPath: 'C:\\repo\\.git\\worktrees\\feature\\orca\\run-runner.cmd',
+        envVars: expect.objectContaining({
+          ORCA_ROOT_PATH: '/test/repo',
+          ORCA_WORKTREE_PATH: 'C:\\repo\\feature'
+        })
+      })
+      expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+        'C:\\repo\\.git\\worktrees\\feature\\orca\\run-runner.cmd',
+        [
+          '@echo off',
+          'setlocal EnableExtensions',
+          'call pnpm dev',
+          'if errorlevel 1 exit /b %errorlevel%',
+          ''
+        ].join('\r\n'),
+        'utf-8'
+      )
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        configurable: true,
+        value: originalPlatform
+      })
+    }
+  })
+
+  it('translates WSL run-runner paths and env vars to Linux form on Windows', async () => {
+    const fs = await import('fs')
+    const originalPlatform = process.platform
+
+    execFileSyncMock.mockReturnValue('/home/jin/.git/worktrees/feature/orca/run-runner.sh')
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'win32'
+    })
+
+    try {
+      const { createRunRunnerScript } = await import('./hooks')
+      const result = createRunRunnerScript(
+        {
+          ...makeRepo(),
+          path: 'C:\\Users\\jinwo\\git\\orca'
+        },
+        '\\\\wsl.localhost\\Ubuntu\\home\\jin\\feature',
+        'pnpm dev'
+      )
+
+      expect(result).toEqual({
+        runnerScriptPath:
+          '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.git\\worktrees\\feature\\orca\\run-runner.sh',
+        envVars: expect.objectContaining({
+          ORCA_ROOT_PATH: '/mnt/c/Users/jinwo/git/orca',
+          ORCA_WORKTREE_PATH: '/home/jin/feature',
+          CONDUCTOR_ROOT_PATH: '/mnt/c/Users/jinwo/git/orca',
+          GHOSTX_ROOT_PATH: '/mnt/c/Users/jinwo/git/orca'
+        })
+      })
+      expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+        '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.git\\worktrees\\feature\\orca\\run-runner.sh',
+        '#!/usr/bin/env bash\nset -e\npnpm dev\n',
+        'utf-8'
+      )
+      expect(vi.mocked(fs.chmodSync)).toHaveBeenCalledWith(
+        '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.git\\worktrees\\feature\\orca\\run-runner.sh',
+        0o755
+      )
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        configurable: true,
+        value: originalPlatform
+      })
+    }
+  })
+})
+
+describe('createIssueCommandRunnerScript', () => {
   it('writes a POSIX runner under the worktree git dir for long issue commands', async () => {
     const fs = await import('fs')
 
