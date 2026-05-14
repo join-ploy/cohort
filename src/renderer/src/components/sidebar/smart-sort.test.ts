@@ -43,6 +43,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     isUnread: overrides.isUnread ?? false,
     isPinned: overrides.isPinned ?? false,
     displayName: overrides.displayName ?? overrides.id ?? 'wt-1',
+    workspaceName: overrides.workspaceName ?? `${overrides.id ?? 'wt-1'}_name`,
     sortOrder: overrides.sortOrder ?? 0,
     lastActivityAt: overrides.lastActivityAt ?? 0,
     ...(overrides.createdAt !== undefined ? { createdAt: overrides.createdAt } : {})

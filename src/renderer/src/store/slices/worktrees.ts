@@ -39,6 +39,7 @@ function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): b
       worktree.isMainWorktree === candidate.isMainWorktree &&
       worktree.isSparse === candidate.isSparse &&
       worktree.displayName === candidate.displayName &&
+      worktree.workspaceName === candidate.workspaceName &&
       worktree.comment === candidate.comment &&
       worktree.linkedIssue === candidate.linkedIssue &&
       worktree.linkedPR === candidate.linkedPR &&
@@ -232,7 +233,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     linkedIssue,
     linkedPR,
     pushTarget,
-    createdWithAgent
+    createdWithAgent,
+    workspaceName
   ) => {
     const retryableConflictPatterns = [
       /already exists locally/i,
@@ -257,7 +259,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(linkedIssue !== undefined ? { linkedIssue } : {}),
             ...(linkedPR !== undefined ? { linkedPR } : {}),
             ...(pushTarget ? { pushTarget } : {}),
-            ...(createdWithAgent ? { createdWithAgent } : {})
+            ...(createdWithAgent ? { createdWithAgent } : {}),
+            ...(workspaceName ? { workspaceName } : {})
           })
           // Why: a file watcher (worktrees.onChanged) can fire between the
           // backend creating the worktree and this callback running, causing

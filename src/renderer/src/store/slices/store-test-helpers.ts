@@ -87,6 +87,7 @@ export function makeWorktree(
     isBare: false,
     isMainWorktree: false,
     displayName: 'feature',
+    workspaceName: 'wise_panther',
     comment: '',
     linkedIssue: null,
     linkedPR: null,

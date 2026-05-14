@@ -147,6 +147,7 @@ function makeWorktree(overrides: Partial<Worktree> & { id: string; repoId: strin
     isBare: false,
     isMainWorktree: false,
     displayName: 'feature',
+    workspaceName: 'wise_panther',
     comment: '',
     linkedIssue: null,
     linkedPR: null,

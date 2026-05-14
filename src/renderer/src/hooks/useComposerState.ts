@@ -44,6 +44,10 @@ import {
   type LinkedWorkItemSummary
 } from '@/lib/new-workspace'
 import { getSuggestedCreatureName } from '@/components/sidebar/worktree-name-suggestions'
+import {
+  generateUniqueWorkspaceName,
+  validateWorkspaceName
+} from '../../../shared/workspace-name-generator'
 import type { SmartWorkspaceNameSelection } from '@/components/new-workspace/SmartWorkspaceNameField'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { normalizeSparseDirectoryLines, sparseDirectoriesMatch } from '@/lib/sparse-paths'
@@ -153,6 +157,13 @@ export type ComposerCardProps = {
   /** ID of the selected sparse preset. Null means sparse checkout is off. */
   sparseSelectedPresetId: string | null
   onSparseSelectPreset: (preset: SparsePreset | null) => void
+  /** Immutable per-workspace identifier (the value injected into setup/run/
+   *  archive script env as CONDUCTOR_WORKSPACE_NAME). Pre-filled with a
+   *  generated suggestion at mount; the user can edit or reroll. */
+  workspaceName: string
+  onWorkspaceNameChange: (value: string) => void
+  workspaceNameError: string | null
+  onRerollWorkspaceName: () => void
 }
 
 export type UseComposerStateResult = {
@@ -340,6 +351,30 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const [sparseEnabled, setSparseEnabled] = useState(false)
   const [sparseDirectories, setSparseDirectories] = useState('')
   const [sparseSelectedPresetId, setSparseSelectedPresetId] = useState<string | null>(null)
+
+  // Why: pre-fill the immutable workspaceName field with a sibling-aware
+  // suggestion at mount so the user can tab past it without thinking. The
+  // taken-set is repo-scoped because workspaceName uniqueness is per-repo.
+  const takenWorkspaceNamesForSelectedRepo = useMemo(() => {
+    const taken = new Set<string>()
+    const siblings = worktreesByRepo[repoId] ?? []
+    for (const sibling of siblings) {
+      if (sibling.workspaceName) {
+        taken.add(sibling.workspaceName)
+      }
+    }
+    return taken
+  }, [repoId, worktreesByRepo])
+  const [immutableWorkspaceName, setImmutableWorkspaceName] = useState<string>(() =>
+    generateUniqueWorkspaceName(takenWorkspaceNamesForSelectedRepo)
+  )
+  const handleRerollWorkspaceName = useCallback(() => {
+    setImmutableWorkspaceName(generateUniqueWorkspaceName(takenWorkspaceNamesForSelectedRepo))
+  }, [takenWorkspaceNamesForSelectedRepo])
+  const workspaceNameError = useMemo(
+    () => validateWorkspaceName(immutableWorkspaceName, takenWorkspaceNamesForSelectedRepo),
+    [immutableWorkspaceName, takenWorkspaceNamesForSelectedRepo]
+  )
 
   const [linkPopoverOpen, setLinkPopoverOpen] = useState(false)
   const [linkQuery, setLinkQuery] = useState('')
@@ -1320,7 +1355,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         parsedLinkedIssueNumber ?? undefined,
         effectiveLinkedPR ?? undefined,
         pushTarget,
-        tuiAgent
+        tuiAgent,
+        immutableWorkspaceName
       )
       const worktree = result.worktree
 
@@ -1423,7 +1459,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     shouldWaitForIssueAutomationCheck,
     shouldWaitForSetupCheck,
     startupPrompt,
-    workspaceSeedName
+    workspaceSeedName,
+    immutableWorkspaceName
   ])
 
   const submitQuick = useCallback(
@@ -1471,7 +1508,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           parsedLinkedIssueNumber ?? undefined,
           effectiveLinkedPR ?? undefined,
           pushTarget,
-          agent ?? undefined
+          agent ?? undefined,
+          immutableWorkspaceName
         )
         const worktree = result.worktree
 
@@ -1622,7 +1660,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       sparseError,
       effectivePresetId,
       telemetrySource,
-      shouldWaitForSetupCheck
+      shouldWaitForSetupCheck,
+      immutableWorkspaceName
     ]
   )
 
@@ -1633,7 +1672,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     shouldWaitForSetupCheck ||
     shouldWaitForIssueAutomationCheck ||
     (requiresExplicitSetupChoice && !setupDecision) ||
-    sparseError !== null
+    sparseError !== null ||
+    workspaceNameError !== null
 
   const cardProps: ComposerCardProps = {
     eligibleRepos,
@@ -1696,7 +1736,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     canUseSparseCheckout: !selectedRepo?.connectionId,
     sparsePresets,
     sparseSelectedPresetId,
-    onSparseSelectPreset: handleSparseSelectPreset
+    onSparseSelectPreset: handleSparseSelectPreset,
+    workspaceName: immutableWorkspaceName,
+    onWorkspaceNameChange: setImmutableWorkspaceName,
+    workspaceNameError,
+    onRerollWorkspaceName: handleRerollWorkspaceName
   }
 
   return {

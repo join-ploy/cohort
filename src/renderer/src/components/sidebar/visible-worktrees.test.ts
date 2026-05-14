@@ -31,6 +31,7 @@ function makeWorktree(id: string, repoId = 'repo1'): Worktree {
     isBare: false,
     isMainWorktree: false,
     displayName: id,
+    workspaceName: `${id}_name`,
     comment: '',
     linkedIssue: null,
     linkedPR: null,

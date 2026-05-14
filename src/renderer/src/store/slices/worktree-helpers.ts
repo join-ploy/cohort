@@ -76,7 +76,9 @@ export type WorktreeSlice = {
     linkedIssue?: number,
     linkedPR?: number,
     pushTarget?: GitPushTarget,
-    createdWithAgent?: TuiAgent
+    createdWithAgent?: TuiAgent,
+    /** Caller-supplied immutable workspace identifier. Validated server-side. */
+    workspaceName?: string
   ) => Promise<CreateWorktreeResult>
   removeWorktree: (
     worktreeId: string,

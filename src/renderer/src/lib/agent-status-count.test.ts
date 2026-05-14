@@ -29,6 +29,7 @@ function worktrees(...ids: string[]): Record<string, Worktree[]> {
           isBare: false,
           isMainWorktree: false,
           displayName: id,
+          workspaceName: `${id}_name`,
           comment: '',
           linkedIssue: null,
           linkedPR: null,

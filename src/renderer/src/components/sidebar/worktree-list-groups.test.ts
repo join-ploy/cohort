@@ -28,6 +28,7 @@ const worktree: Worktree = {
   isUnread: false,
   isPinned: false,
   displayName: 'feature/super-critical',
+  workspaceName: 'wise_panther',
   sortOrder: 0,
   lastActivityAt: 0
 }

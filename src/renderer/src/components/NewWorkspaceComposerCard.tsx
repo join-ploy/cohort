@@ -8,6 +8,7 @@ import {
   CornerDownLeft,
   FolderPlus,
   LoaderCircle,
+  RefreshCw,
   Settings2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -63,6 +64,10 @@ type NewWorkspaceComposerCardProps = {
   sparsePresets: SparsePreset[]
   sparseSelectedPresetId: string | null
   onSparseSelectPreset: (preset: SparsePreset | null) => void
+  workspaceName: string
+  onWorkspaceNameChange: (value: string) => void
+  workspaceNameError: string | null
+  onRerollWorkspaceName: () => void
 }
 
 function SetupCommandPreview({
@@ -207,7 +212,11 @@ export default function NewWorkspaceComposerCard({
   canUseSparseCheckout,
   sparsePresets,
   sparseSelectedPresetId,
-  onSparseSelectPreset
+  onSparseSelectPreset,
+  workspaceName,
+  onWorkspaceNameChange,
+  workspaceNameError,
+  onRerollWorkspaceName
 }: NewWorkspaceComposerCardProps): React.JSX.Element {
   const { isFileDragOver, dragHandlers } = useComposerFileDragOver()
   const openModal = useAppStore((s) => s.openModal)
@@ -324,6 +333,58 @@ export default function NewWorkspaceComposerCard({
               agentTrigger?.focus()
             }}
           />
+        </div>
+
+        {/* Why: workspaceName is the immutable, DB-safe identifier that scripts
+             reference via $CONDUCTOR_WORKSPACE_NAME. Pre-filled with a fresh
+             adjective_noun and live-validated; the reroll button picks a new
+             unique suggestion against the repo's existing siblings. */}
+        <div className="min-w-0 space-y-1">
+          <label
+            className="text-xs font-medium text-muted-foreground"
+            htmlFor="workspace-name-input"
+          >
+            Workspace name
+          </label>
+          <div className="flex min-w-0 items-center gap-2">
+            <input
+              id="workspace-name-input"
+              type="text"
+              value={workspaceName}
+              onChange={(event) => onWorkspaceNameChange(event.target.value)}
+              aria-invalid={workspaceNameError !== null}
+              aria-describedby={workspaceNameError ? 'workspace-name-error' : undefined}
+              spellCheck={false}
+              autoComplete="off"
+              className={cn(
+                'w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 font-mono text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                workspaceNameError &&
+                  'border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30'
+              )}
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={onRerollWorkspaceName}
+                  aria-label="Generate new workspace name"
+                  className="size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                Generate a new suggestion
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          {workspaceNameError && (
+            <p id="workspace-name-error" className="text-xs text-destructive">
+              {workspaceNameError}
+            </p>
+          )}
         </div>
 
         <div className="space-y-1">

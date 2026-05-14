@@ -16,6 +16,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     isBare: false,
     isMainWorktree: false,
     displayName: 'Palette Worktree',
+    workspaceName: 'wise_panther',
     comment: '',
     linkedIssue: null,
     linkedPR: null,

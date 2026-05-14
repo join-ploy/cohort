@@ -1601,6 +1601,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           id: worktreeId,
           repoId,
           displayName,
+          // Why: this is a placeholder synthesized for an SSH worktree that
+          // hydrated faster than the worktrees:list response could populate
+          // it. The real persisted record (with its real workspaceName) lands
+          // shortly after; surface an empty string until then so the renderer
+          // doesn't try to derive a fake identifier from path.
+          workspaceName: '',
           comment: '',
           linkedIssue: null,
           linkedPR: null,

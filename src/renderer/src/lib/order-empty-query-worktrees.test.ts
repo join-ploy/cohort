@@ -10,6 +10,7 @@ function wt(overrides: Partial<Worktree> & { id: string; displayName: string }):
     branch: `refs/heads/${overrides.id}`,
     isBare: false,
     isMainWorktree: false,
+    workspaceName: `${overrides.id}_name`,
     comment: '',
     linkedIssue: null,
     linkedPR: null,
