@@ -466,7 +466,11 @@ export function registerWorktreeHandlers(
       // Run archive hook before removal
       const hooks = getEffectiveHooks(repo)
       if (hooks?.scripts.archive && !args.skipArchive) {
-        const result = await runHook('archive', worktreePath, repo)
+        // Why: pull workspaceName from the meta we're about to delete so the
+        // archive script sees $CONDUCTOR_WORKSPACE_NAME — same value setup/run
+        // used. removeWorktreeMeta runs after this returns, so the read is safe.
+        const archiveWorkspaceName = store.getWorktreeMeta(args.worktreeId)?.workspaceName
+        const result = await runHook('archive', worktreePath, repo, undefined, archiveWorkspaceName)
         if (!result.success) {
           console.error(`[hooks] archive hook failed for ${worktreePath}:`, result.output)
         }

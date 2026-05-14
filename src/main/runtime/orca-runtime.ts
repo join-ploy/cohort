@@ -3888,7 +3888,7 @@ export class OrcaRuntimeService {
           )
         }
       } else {
-        void runHook('setup', worktreePath, repo, worktreePath).then((result) => {
+        void runHook('setup', worktreePath, repo, worktreePath, workspaceName).then((result) => {
           if (!result.success) {
             console.error(`[hooks] setup hook failed for ${worktreePath}:`, result.output)
           }

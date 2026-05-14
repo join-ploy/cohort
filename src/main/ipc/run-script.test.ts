@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: keeps the registry, handleRunStart, and
+handleRunStop suites together so a regression in any one path is caught
+against the full IPC surface instead of being split across files. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -84,9 +87,10 @@ function makeRepo(overrides: Partial<Repo> = {}): Repo {
   } as Repo
 }
 
-function makeStore(repo: Repo | null) {
+function makeStore(repo: Repo | null, workspaceName: string = 'wise_panther') {
   return {
-    getRepo: vi.fn(() => repo ?? undefined)
+    getRepo: vi.fn(() => repo ?? undefined),
+    getWorktreeMeta: vi.fn(() => ({ workspaceName }))
   }
 }
 
@@ -184,19 +188,43 @@ describe('handleRunStart', () => {
 
   it('spawns when nothing is running and registers the new entry', async () => {
     const store = makeStore(repo)
+    // Why: createRunRunnerScript is mocked at the test boundary, so its
+    // returned envVars are what the spawn sees. Mirror the conductor block
+    // the real wrapper produces so the spawn assertion below proves the
+    // handler forwarded those values.
+    createRunRunnerScriptMock.mockReturnValue({
+      runnerScriptPath: '/tmp/.git/orca/run-runner.sh',
+      envVars: {
+        ORCA_WORKTREE_PATH: worktreePath,
+        CONDUCTOR_ROOT_PATH: repo.path,
+        CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+      }
+    })
 
     const result = await handleRunStart({ repoId: repo.id, worktreeId }, { store: store as never })
 
     expect(result).toEqual({ ok: true, ptyId: 'pty-NEW' })
     expect(provider.shutdown).not.toHaveBeenCalled()
     expect(provider.spawn).toHaveBeenCalledTimes(1)
+    // Confirm the IPC handler called createRunRunnerScript with the
+    // workspaceName drawn from getWorktreeMeta.
+    expect(createRunRunnerScriptMock).toHaveBeenCalledWith(
+      repo,
+      worktreePath,
+      'pnpm dev',
+      'wise_panther'
+    )
     const spawnArgs = provider.spawn.mock.calls[0][0] as {
       cwd?: string
       env?: Record<string, string>
       command?: string
     }
     expect(spawnArgs.cwd).toBe(worktreePath)
-    expect(spawnArgs.env).toMatchObject({ ORCA_WORKTREE_PATH: worktreePath })
+    expect(spawnArgs.env).toMatchObject({
+      ORCA_WORKTREE_PATH: worktreePath,
+      CONDUCTOR_ROOT_PATH: repo.path,
+      CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+    })
     expect(typeof spawnArgs.command).toBe('string')
     // The command must reference the wrapped runner script, not the raw user command.
     expect(spawnArgs.command).toContain('run-runner.sh')

@@ -100,19 +100,40 @@ describe('handleSetupStart', () => {
   })
 
   it('spawns and registers per-worktree, broadcasting setup:started', async () => {
+    // Why: createSetupRunnerScript is mocked, so its returned envVars are
+    // what the spawn sees. Mirror the conductor block the real wrapper
+    // produces to prove the handler forwarded those values.
+    createSetupRunnerScriptMock.mockReturnValue({
+      runnerScriptPath: '/tmp/.git/orca/setup-runner.sh',
+      envVars: {
+        ORCA_WORKTREE_PATH: worktreePath,
+        CONDUCTOR_ROOT_PATH: repo.path,
+        CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+      }
+    })
     const result = await handleSetupStart(
       { worktreeId },
       { store: makeMultiRepoStore([repo]) as never }
     )
     expect(result).toEqual({ ok: true, ptyId: 'pty-NEW' })
     expect(provider.shutdown).not.toHaveBeenCalled()
+    expect(createSetupRunnerScriptMock).toHaveBeenCalledWith(
+      repo,
+      worktreePath,
+      'pnpm install',
+      'wise_panther'
+    )
     const spawnArgs = provider.spawn.mock.calls[0][0] as {
       cwd?: string
       env?: Record<string, string>
       command?: string
     }
     expect(spawnArgs.cwd).toBe(worktreePath)
-    expect(spawnArgs.env).toMatchObject({ ORCA_WORKTREE_PATH: worktreePath })
+    expect(spawnArgs.env).toMatchObject({
+      ORCA_WORKTREE_PATH: worktreePath,
+      CONDUCTOR_ROOT_PATH: repo.path,
+      CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+    })
     expect(spawnArgs.command).toContain('setup-runner.sh')
     expect(registry.get(worktreeId)).toMatchObject({ ptyId: 'pty-NEW' })
     expect(win.webContents.send).toHaveBeenCalledWith('setup:started', {

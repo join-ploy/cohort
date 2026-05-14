@@ -1421,15 +1421,21 @@ describe('registerWorktreeHandlers', () => {
       }
     })
     runHookMock.mockResolvedValue({ success: true, output: '' })
+    store.getWorktreeMeta.mockReturnValue({ workspaceName: 'wise_panther' })
 
     await handlers['worktrees:remove'](null, {
       worktreeId: 'repo-1::/workspace/feature-wt'
     })
 
+    // Why: archive runs through the same hook helper as setup, so verify
+    // workspaceName is forwarded as the 5th arg — that's how the
+    // CONDUCTOR_WORKSPACE_NAME env var flows into the archive shell.
     expect(runHookMock).toHaveBeenCalledWith(
       'archive',
       '/workspace/feature-wt',
-      expect.objectContaining({ id: 'repo-1' })
+      expect.objectContaining({ id: 'repo-1' }),
+      undefined,
+      'wise_panther'
     )
     expect(removeWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',

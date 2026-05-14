@@ -1,3 +1,7 @@
+/* eslint-disable max-lines -- Why: this suite covers every runner-script
+helper (setup, run, issue-command) plus the new CONDUCTOR env-var assertions
+in one place so a regression in the shared wrapper is caught against the
+full surface instead of being scattered. */
 import type { Repo } from '../shared/types'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -31,6 +35,47 @@ const makeRepo = () =>
     badgeColor: '#000',
     addedAt: Date.now()
   }) as unknown as Repo
+
+describe('CONDUCTOR env vars on the runner wrapper', () => {
+  it('forwards CONDUCTOR_WORKSPACE_NAME and CONDUCTOR_ROOT_PATH alongside ORCA_WORKTREE_PATH for setup', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/setup-runner.sh')
+    const { createSetupRunnerScript } = await import('./hooks')
+    const result = createSetupRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm install',
+      'wise_panther'
+    )
+    expect(result.envVars).toMatchObject({
+      ORCA_WORKTREE_PATH: '/test/repo-feature',
+      CONDUCTOR_ROOT_PATH: '/test/repo',
+      CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+    })
+  })
+
+  it('forwards CONDUCTOR_WORKSPACE_NAME for the run wrapper too', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/run-runner.sh')
+    const { createRunRunnerScript } = await import('./hooks')
+    const result = createRunRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm dev',
+      'wise_panther'
+    )
+    expect(result.envVars).toMatchObject({
+      CONDUCTOR_ROOT_PATH: '/test/repo',
+      CONDUCTOR_WORKSPACE_NAME: 'wise_panther'
+    })
+  })
+
+  it('omits CONDUCTOR_WORKSPACE_NAME when no workspaceName is supplied', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/setup-runner.sh')
+    const { createSetupRunnerScript } = await import('./hooks')
+    const result = createSetupRunnerScript(makeRepo(), '/test/repo-feature', 'pnpm install')
+    expect(result.envVars).not.toHaveProperty('CONDUCTOR_WORKSPACE_NAME')
+    expect(result.envVars).toHaveProperty('CONDUCTOR_ROOT_PATH')
+  })
+})
 
 describe('createSetupRunnerScript', () => {
   it('writes a fail-fast Windows runner that returns after batch commands', async () => {

@@ -393,12 +393,21 @@ export function getSetupCommandSource(
   return null
 }
 
-function getSetupEnvVars(repo: Repo, worktreePath: string): Record<string, string> {
+function getSetupEnvVars(
+  repo: Repo,
+  worktreePath: string,
+  workspaceName?: string
+): Record<string, string> {
   return {
     ORCA_ROOT_PATH: repo.path,
     ORCA_WORKTREE_PATH: worktreePath,
-    // Compat with conductor.json users
+    // Why: Conductor users key shell scripts and Postgres DB names off
+    // CONDUCTOR_WORKSPACE_NAME and CONDUCTOR_ROOT_PATH. Forward both so
+    // existing setup/run/archive scripts work unchanged. The workspace name
+    // is only available when callers pass it (IPC handlers do; legacy
+    // worktrees synthesized before backfill omit it).
     CONDUCTOR_ROOT_PATH: repo.path,
+    ...(workspaceName ? { CONDUCTOR_WORKSPACE_NAME: workspaceName } : {}),
     GHOSTX_ROOT_PATH: repo.path
   }
 }
@@ -435,41 +444,51 @@ function buildWindowsRunnerScript(script: string): string {
 export function createSetupRunnerScript(
   repo: Repo,
   worktreePath: string,
-  script: string
+  script: string,
+  workspaceName?: string
 ): WorktreeSetupLaunch {
-  return createWorktreeRunnerScript(repo, worktreePath, script, 'setup-runner')
+  return createWorktreeRunnerScript(repo, worktreePath, script, 'setup-runner', workspaceName)
 }
 
 export function createIssueCommandRunnerScript(
   repo: Repo,
   worktreePath: string,
-  command: string
+  command: string,
+  workspaceName?: string
 ): WorktreeSetupLaunch {
   // Why: long issue-automation commands are user-visible shell input when
   // written directly to the PTY, so terminal line editors can wrap or truncate
   // them before execution. Writing the real command into a runner script keeps
   // the shell startup path short and mirrors the already-stable setup runner
   // flow instead of inventing a second launch mechanism.
-  return createWorktreeRunnerScript(repo, worktreePath, command, 'issue-command-runner')
+  return createWorktreeRunnerScript(
+    repo,
+    worktreePath,
+    command,
+    'issue-command-runner',
+    workspaceName
+  )
 }
 
 export function createRunRunnerScript(
   repo: Repo,
   worktreePath: string,
-  script: string
+  script: string,
+  workspaceName?: string
 ): WorktreeSetupLaunch {
   // Why: scripts.run is user-authored shell input; wrapping ensures non-zero
   // exits propagate and ORCA_WORKTREE_PATH is set before exec.
-  return createWorktreeRunnerScript(repo, worktreePath, script, 'run-runner')
+  return createWorktreeRunnerScript(repo, worktreePath, script, 'run-runner', workspaceName)
 }
 
 function createWorktreeRunnerScript(
   repo: Repo,
   worktreePath: string,
   script: string,
-  runnerBaseName: 'setup-runner' | 'issue-command-runner' | 'run-runner'
+  runnerBaseName: 'setup-runner' | 'issue-command-runner' | 'run-runner',
+  workspaceName?: string
 ): WorktreeSetupLaunch {
-  const envVars = getSetupEnvVars(repo, worktreePath)
+  const envVars = getSetupEnvVars(repo, worktreePath, workspaceName)
   // Why: WSL worktrees run on a Linux filesystem even though process.platform
   // is 'win32'. Use bash scripts for WSL, .cmd for native Windows.
   const wslWorktree = isWslPath(worktreePath)
@@ -523,7 +542,8 @@ export function runHook(
   hookName: 'setup' | 'archive',
   cwd: string,
   repo: Repo,
-  hooksPath?: string
+  hooksPath?: string,
+  workspaceName?: string
 ): Promise<{ success: boolean; output: string }> {
   const hooks = getEffectiveHooks(repo, hooksPath)
   const script = hooks?.scripts[hookName]
@@ -545,7 +565,7 @@ export function runHook(
     // Why: translate ORCA_ROOT_PATH / ORCA_WORKTREE_PATH to Linux paths so
     // hook scripts that reference $ORCA_WORKTREE_PATH get usable paths
     // inside WSL, not Windows UNC paths.
-    const envVars = getSetupEnvVars(repo, cwd)
+    const envVars = getSetupEnvVars(repo, cwd, workspaceName)
     const wslEnv: Record<string, string> = {}
     for (const [key, value] of Object.entries(envVars)) {
       wslEnv[key] = toLinuxPath(value)
@@ -588,7 +608,7 @@ export function runHook(
         shell: getHookShell(),
         env: {
           ...process.env,
-          ...getSetupEnvVars(repo, cwd)
+          ...getSetupEnvVars(repo, cwd, workspaceName)
         }
       },
       (error, stdout, stderr) => {

@@ -174,8 +174,10 @@ async function runStartLocked(
   // Why: wrap the user-authored shell text the same way setup does, so non-zero
   // exits propagate and ORCA_WORKTREE_PATH is set before exec. The wrapped
   // script is launched via `command`, which the local PTY provider streams into
-  // the freshly-spawned shell after it signals shell-ready.
-  const wrapped = createRunRunnerScript(repo, worktreePath, script)
+  // the freshly-spawned shell after it signals shell-ready. workspaceName
+  // becomes $CONDUCTOR_WORKSPACE_NAME inside the wrapper.
+  const workspaceName = deps.store.getWorktreeMeta(args.worktreeId)?.workspaceName
+  const wrapped = createRunRunnerScript(repo, worktreePath, script, workspaceName)
   const generation = nextGen()
   const command = buildSetupRunnerCommand(
     wrapped.runnerScriptPath,

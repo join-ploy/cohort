@@ -172,8 +172,10 @@ async function setupStartLocked(
 
   // Why: createSetupRunnerScript wraps the user-authored shell text so non-zero
   // exits propagate and ORCA_WORKTREE_PATH is set before exec — same shape as
-  // the run-script path uses for createRunRunnerScript.
-  const wrapped = createSetupRunnerScript(repo, worktreePath, script)
+  // the run-script path uses for createRunRunnerScript. workspaceName becomes
+  // $CONDUCTOR_WORKSPACE_NAME inside the wrapper.
+  const workspaceName = deps.store.getWorktreeMeta(args.worktreeId)?.workspaceName
+  const wrapped = createSetupRunnerScript(repo, worktreePath, script, workspaceName)
   const generation = nextGen()
   const command = buildSetupRunnerCommand(
     wrapped.runnerScriptPath,

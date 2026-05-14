@@ -54,14 +54,20 @@ export function makeRepo(overrides: Partial<Repo> = {}): Repo {
 
 export function makeSingleRepoStore(repo: Repo | null) {
   return {
-    getRepo: vi.fn(() => repo ?? undefined)
+    getRepo: vi.fn(() => repo ?? undefined),
+    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' }))
   }
 }
 
 export function makeMultiRepoStore(repos: Repo[]) {
   const map = new Map(repos.map((r) => [r.id, r] as const))
   return {
-    getRepo: vi.fn((id: string) => map.get(id))
+    getRepo: vi.fn((id: string) => map.get(id)),
+    // Why: setup-script handler reads workspaceName via getWorktreeMeta to
+    // forward CONDUCTOR_WORKSPACE_NAME into the wrapper. Provide a stable
+    // value across all worktrees so existing tests don't have to seed
+    // per-worktree meta.
+    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' }))
   }
 }
 
