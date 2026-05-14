@@ -78,6 +78,45 @@ describe('registerAppMenu', () => {
     expect(reloadItem?.accelerator).toBeUndefined()
   })
 
+  it('exposes Run Script under View with the CmdOrCtrl+R accelerator', () => {
+    registerAppMenu(buildMenuOptions())
+
+    const viewSubmenu = getSubmenu(getTemplate(), 'View')
+    const runScriptItem = viewSubmenu.find((item) => item.label === 'Run Script')
+
+    expect(runScriptItem).toBeDefined()
+    // Why: this is the menu binding that overrides Electron's default
+    // "Reload" Cmd/Ctrl+R chord. Cross-platform via CmdOrCtrl so the menu
+    // bar shows the right modifier on macOS vs Windows/Linux.
+    expect(runScriptItem?.accelerator).toBe('CmdOrCtrl+R')
+  })
+
+  it('routes the Run Script click through onRunScriptShortcut', () => {
+    const onRunScriptShortcut = vi.fn()
+    registerAppMenu({ ...buildMenuOptions(), onRunScriptShortcut })
+
+    const runScriptItem = getSubmenu(getTemplate(), 'View').find(
+      (item) => item.label === 'Run Script'
+    )
+    runScriptItem?.click?.({} as never, {} as never, {} as never)
+
+    expect(onRunScriptShortcut).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends shortcut:run-script to the focused webContents by default', () => {
+    const sendMock = vi.fn()
+    getFocusedWindowMock.mockReturnValue({ webContents: { send: sendMock } })
+
+    registerAppMenu(buildMenuOptions())
+
+    const runScriptItem = getSubmenu(getTemplate(), 'View').find(
+      (item) => item.label === 'Run Script'
+    )
+    runScriptItem?.click?.({} as never, {} as never, {} as never)
+
+    expect(sendMock).toHaveBeenCalledWith('shortcut:run-script')
+  })
+
   it('reloads the focused window from the view menu', () => {
     const reloadMock = vi.fn()
     const reloadIgnoringCacheMock = vi.fn()

@@ -1914,6 +1914,15 @@ const api = {
       ipcRenderer.on('export:requestPdf', listener)
       return () => ipcRenderer.removeListener('export:requestPdf', listener)
     },
+    // Why: the View > Run Script menu item (CmdOrCtrl+R accelerator) is the
+    // only place this fires. Renderer subscribes from useIpcEvents and routes
+    // through the same triggerRunShortcut helper as the App-level keydown
+    // handler so menu and keyboard paths cannot diverge.
+    onShortcutRunScript: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('shortcut:run-script', listener)
+      return () => ipcRenderer.removeListener('shortcut:run-script', listener)
+    },
     onActivateWorktree: (
       callback: (data: {
         repoId: string

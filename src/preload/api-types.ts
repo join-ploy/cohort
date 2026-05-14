@@ -1117,6 +1117,7 @@ export type PreloadApi = {
     onSwitchTerminalTab: (callback: (direction: 1 | -1) => void) => () => void
     onToggleStatusBar: (callback: () => void) => () => void
     onExportPdfRequested: (callback: () => void) => () => void
+    onShortcutRunScript: (callback: () => void) => () => void
     onActivateWorktree: (
       callback: (data: {
         repoId: string

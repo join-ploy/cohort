@@ -34,6 +34,7 @@ import { destroyPersistentWebview } from '@/components/browser-pane/webview-regi
 import { attachMobileMarkdownBridge } from '@/runtime/mobile-markdown-bridge'
 import { detectLanguage } from '@/lib/language-detect'
 import { track } from '@/lib/telemetry'
+import { getDefaultTriggerRunShortcutDeps, triggerRunShortcut } from '@/lib/trigger-run-shortcut'
 
 export { resolveZoomTarget } from './resolve-zoom-target'
 
@@ -1135,6 +1136,15 @@ export function useIpcEvents(): void {
           worktreeId: event.worktreeId,
           ptyId: event.ptyId
         })
+      })
+    )
+
+    // Why: the View > Run Script menu item (CmdOrCtrl+R accelerator) and the
+    // App keydown handler share triggerRunShortcut so menu, keyboard, and
+    // browser-focus paths all converge through one chain.
+    unsubs.push(
+      window.api.ui.onShortcutRunScript(() => {
+        void triggerRunShortcut(getDefaultTriggerRunShortcutDeps(useAppStore))
       })
     )
     unsubs.push(

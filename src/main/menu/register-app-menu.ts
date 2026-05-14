@@ -18,6 +18,10 @@ type RegisterAppMenuOptions = {
   onToggleRightSidebar: () => void
   onToggleAppearance: (key: AppearanceMenuKey) => void
   getAppearanceState: () => AppearanceMenuState
+  /** Send the `shortcut:run-script` IPC to the focused renderer. Defaults to
+   *  posting via BrowserWindow.getFocusedWindow when omitted; tests override
+   *  this to assert the click handler without touching real Electron globals. */
+  onRunScriptShortcut?: () => void
 }
 
 function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
@@ -30,7 +34,14 @@ function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
     onToggleLeftSidebar,
     onToggleRightSidebar,
     onToggleAppearance,
-    getAppearanceState
+    getAppearanceState,
+    // Why: default forwards to the focused renderer via webContents.send.
+    // Mirrors the Export PDF item's pattern — the renderer owns whether the
+    // shortcut produces an action (active worktree present, etc.), so main
+    // just fans the click out and lets useIpcEvents decide.
+    onRunScriptShortcut = () => {
+      BrowserWindow.getFocusedWindow()?.webContents.send('shortcut:run-script')
+    }
   } = options
 
   const isMac = process.platform === 'darwin'
@@ -189,9 +200,23 @@ function buildAndApplyMenu(options: RegisterAppMenuOptions): void {
     ]
   }
 
+  // Why: Run Script is a real accelerator (unlike the Open Worktree Palette
+  // hint below) because the renderer's keydown listener can be bypassed when
+  // a browser webContents owns focus. Routing through CmdOrCtrl+R as a menu
+  // accelerator gives us a guaranteed entry point that fires regardless of
+  // which surface holds focus, with the renderer (via useIpcEvents) deciding
+  // whether there's an active worktree to act on.
+  const runScriptItem: Electron.MenuItemConstructorOptions = {
+    label: 'Run Script',
+    accelerator: 'CmdOrCtrl+R',
+    click: () => onRunScriptShortcut()
+  }
+
   const viewMenu: Electron.MenuItemConstructorOptions = {
     label: 'View',
     submenu: [
+      runScriptItem,
+      { type: 'separator' },
       {
         label: 'Reload',
         click: () => reloadFocusedWindow(false)

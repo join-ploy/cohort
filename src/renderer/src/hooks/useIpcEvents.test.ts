@@ -186,6 +186,7 @@ describe('useIpcEvents updater integration', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -407,6 +408,7 @@ describe('useIpcEvents updater integration', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -649,6 +651,7 @@ describe('useIpcEvents updater integration', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -941,6 +944,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -1157,6 +1161,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -1368,6 +1373,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -1588,6 +1594,7 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -1790,6 +1797,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onSwitchTabAcrossAllTypes: () => () => {},
           onSwitchTerminalTab: () => () => {},
           onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
           onFullscreenChanged: () => () => {},
           onTerminalZoom: () => () => {},
           getZoomLevel: () => 0,
@@ -2265,6 +2273,42 @@ describe('useIpcEvents agent status snapshot integration', () => {
     })
 
     expect(setAgentStatus).not.toHaveBeenCalled()
+  })
+
+  it('routes the shortcut:run-script IPC event through triggerRunShortcut', async () => {
+    // Why: Phase 8.2 wires the View > Run Script menu item into the renderer
+    // via window.api.ui.onShortcutRunScript. Smoke-check that the IPC
+    // listener registered during useIpcEvents() actually invokes the shared
+    // triggerRunShortcut chain, so menu and keyboard paths cannot diverge.
+    const triggerRunShortcutSpy = vi.fn().mockResolvedValue(undefined)
+    const onShortcutListenerRef: { current: (() => void) | null } = { current: null }
+
+    stubReactSyncEffect()
+    vi.doMock('@/lib/trigger-run-shortcut', () => ({
+      triggerRunShortcut: triggerRunShortcutSpy,
+      getDefaultTriggerRunShortcutDeps: vi.fn(() => ({}))
+    }))
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => buildStoreState({}) }
+    }))
+    stubAuxiliaryModules()
+    const baseApi = buildWindowApi({ onSet: () => () => {} }) as {
+      api: { ui: Record<string, unknown> }
+    }
+    baseApi.api.ui.onShortcutRunScript = (cb: () => void) => {
+      onShortcutListenerRef.current = cb
+      return () => {}
+    }
+    vi.stubGlobal('window', baseApi)
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    expect(onShortcutListenerRef.current).toBeTypeOf('function')
+    onShortcutListenerRef.current?.()
+
+    expect(triggerRunShortcutSpy).toHaveBeenCalledTimes(1)
   })
 
   it('accepts events without a stamped connectionId for preload compatibility', async () => {
