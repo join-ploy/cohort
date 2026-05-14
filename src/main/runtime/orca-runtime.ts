@@ -4374,7 +4374,10 @@ export class OrcaRuntimeService {
     const hooks = getEffectiveHooks(repo)
     let warning: string | undefined
     if (hooks?.scripts.archive && runHooks) {
-      const result = await runHook('archive', worktree.path, repo)
+      // Why: forward workspaceName so the archive hook sees
+      // $CONDUCTOR_WORKSPACE_NAME — same convention setup/run use.
+      const archiveWorkspaceName = this.store.getWorktreeMeta(worktree.id)?.workspaceName
+      const result = await runHook('archive', worktree.path, repo, undefined, archiveWorkspaceName)
       if (!result.success) {
         console.error(`[hooks] archive hook failed for ${worktree.path}:`, result.output)
       }
