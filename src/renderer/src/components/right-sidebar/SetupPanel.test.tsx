@@ -85,7 +85,9 @@ describe('SetupPanelView — empty state', () => {
     )
     expect(html).toMatch(/no setup script configured/i)
     expect(html).toMatch(/orca\.yaml/i)
+    expect(html).toMatch(/conductor\.json/i)
     expect(html).toMatch(/scripts\.setup/i)
+    expect(html).toMatch(/open config/i)
   })
 
   it('does not render Re-run / Stop buttons in the empty state', async () => {

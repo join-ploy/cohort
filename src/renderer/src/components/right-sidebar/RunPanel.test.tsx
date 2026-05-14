@@ -99,6 +99,8 @@ describe('RunPanelView — empty state', () => {
     )
     expect(html).toMatch(/no run script configured/i)
     expect(html).toMatch(/orca\.yaml/i)
+    expect(html).toMatch(/conductor\.json/i)
+    expect(html).toMatch(/open config/i)
   })
 
   it('does not render Re-run / Stop buttons in the empty state', async () => {

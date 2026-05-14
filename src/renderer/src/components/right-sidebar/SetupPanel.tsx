@@ -98,16 +98,19 @@ function SetupTerminalArea({ ptyId }: { ptyId: string | null }): React.JSX.Eleme
 }
 
 function SetupEmptyState({ onOpenOrcaYaml }: { onOpenOrcaYaml: () => void }): React.JSX.Element {
+  // Why: Orca consumes scripts.setup from either orca.yaml or conductor.json,
+  // so the copy mentions both options instead of nudging users toward yaml.
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="text-sm text-muted-foreground">No setup script configured for this repo.</p>
       <p className="text-xs text-muted-foreground/80">
         Add a <code className="rounded bg-muted px-1 py-0.5 text-[11px]">scripts.setup</code> entry
-        to <code className="rounded bg-muted px-1 py-0.5 text-[11px]">orca.yaml</code> to run it
-        automatically on worktree create.
+        to <code className="rounded bg-muted px-1 py-0.5 text-[11px]">orca.yaml</code> or{' '}
+        <code className="rounded bg-muted px-1 py-0.5 text-[11px]">conductor.json</code> in this
+        repo.
       </p>
       <Button variant="outline" size="sm" onClick={onOpenOrcaYaml}>
-        Open orca.yaml
+        Open config
       </Button>
     </div>
   )
