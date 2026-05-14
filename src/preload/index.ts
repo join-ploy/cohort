@@ -38,8 +38,14 @@ import type {
   RunStartedEvent,
   RunStartResult,
   RunStopArgs,
-  RunStopResult
-} from '../shared/run-script-types'
+  RunStopResult,
+  SetupExitedEvent,
+  SetupStartArgs,
+  SetupStartedEvent,
+  SetupStartResult,
+  SetupStopArgs,
+  SetupStopResult
+} from '../shared/script-types'
 import type {
   RuntimeMobileMarkdownRequest,
   RuntimeMobileMarkdownResponse
@@ -2510,6 +2516,31 @@ const api = {
         callback(payload)
       ipcRenderer.on('run:exited', listener)
       return () => ipcRenderer.removeListener('run:exited', listener)
+    }
+  },
+
+  setupScript: {
+    /** Spawn (or replace) the per-worktree setup-script PTY. Resolves to a
+     *  structured result so callers can react to spawn-failed or
+     *  no-setup-script without catching invoke rejections. */
+    start: (args: SetupStartArgs): Promise<SetupStartResult> =>
+      ipcRenderer.invoke('setup:start', args),
+
+    /** Stop the in-flight setup PTY for a worktree (no-op when nothing is running). */
+    stop: (args: SetupStopArgs): Promise<SetupStopResult> => ipcRenderer.invoke('setup:stop', args),
+
+    onStarted: (callback: (event: SetupStartedEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: SetupStartedEvent) =>
+        callback(payload)
+      ipcRenderer.on('setup:started', listener)
+      return () => ipcRenderer.removeListener('setup:started', listener)
+    },
+
+    onExited: (callback: (event: SetupExitedEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: SetupExitedEvent) =>
+        callback(payload)
+      ipcRenderer.on('setup:exited', listener)
+      return () => ipcRenderer.removeListener('setup:exited', listener)
     }
   }
 }

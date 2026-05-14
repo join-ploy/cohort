@@ -131,8 +131,14 @@ import type {
   RunStartedEvent,
   RunStartResult,
   RunStopArgs,
-  RunStopResult
-} from '../shared/run-script-types'
+  RunStopResult,
+  SetupExitedEvent,
+  SetupStartArgs,
+  SetupStartedEvent,
+  SetupStartResult,
+  SetupStopArgs,
+  SetupStopResult
+} from '../shared/script-types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../shared/runtime-types'
 import type {
   RuntimeMobileMarkdownRequest,
@@ -1347,6 +1353,12 @@ export type PreloadApi = {
     stop: (args: RunStopArgs) => Promise<RunStopResult>
     onStarted: (callback: (event: RunStartedEvent) => void) => () => void
     onExited: (callback: (event: RunExitedEvent) => void) => () => void
+  }
+  setupScript: {
+    start: (args: SetupStartArgs) => Promise<SetupStartResult>
+    stop: (args: SetupStopArgs) => Promise<SetupStopResult>
+    onStarted: (callback: (event: SetupStartedEvent) => void) => () => void
+    onExited: (callback: (event: SetupExitedEvent) => void) => () => void
   }
 }
 
