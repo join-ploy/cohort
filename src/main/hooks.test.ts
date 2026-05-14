@@ -431,6 +431,17 @@ describe('getEffectiveHooks', () => {
 
     expect(result).toBeNull()
   })
+
+  it('surfaces scripts.run from orca.yaml', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue('scripts:\n  run: |\n    pnpm dev\n')
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const result = getEffectiveHooks(makeRepo())
+
+    expect(result?.scripts.run).toBe('pnpm dev')
+  })
 })
 
 describe('runHook', () => {

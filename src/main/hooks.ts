@@ -272,10 +272,12 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
   const yamlHooks = loadHooks(worktreePath ?? repo.path)
   const legacySetup = repo.hookSettings?.scripts.setup?.trim()
   const legacyArchive = repo.hookSettings?.scripts.archive?.trim()
+  const legacyRun = repo.hookSettings?.scripts.run?.trim()
   const setup = yamlHooks?.scripts.setup?.trim() || legacySetup
   const archive = yamlHooks?.scripts.archive?.trim() || legacyArchive
+  const run = yamlHooks?.scripts.run?.trim() || legacyRun
 
-  if (!setup && !archive) {
+  if (!setup && !archive && !run) {
     return null
   }
 
@@ -286,7 +288,8 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
   return {
     scripts: {
       ...(setup ? { setup } : {}),
-      ...(archive ? { archive } : {})
+      ...(archive ? { archive } : {}),
+      ...(run ? { run } : {})
     }
   }
 }
