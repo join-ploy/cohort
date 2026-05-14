@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
 import { useActiveWorktree, useRepoById } from '@/store/selectors'
 import type { ScriptState } from '@/store/slices/scripts'
+import SidebarPtyTerminal from './SidebarPtyTerminal'
 import type { OrcaHooks } from '../../../../shared/types'
 import type {
   RunStartArgs,
@@ -77,12 +78,13 @@ function RunHeader({
   )
 }
 
-function RunTerminalPlaceholder({ ptyId }: { ptyId: string | null }): React.JSX.Element {
-  // Why: Phase 6 ships the panel scaffolding; embedding the full TerminalPane
-  // here requires plumbing the right-sidebar through the tab/PaneManager
-  // contract that TerminalPane expects. Phase 7+ (or a later refactor) will
-  // mount the xterm renderer bound to ptyId. For now the area shows a hint
-  // so the user knows the run is alive even before output rendering lands.
+function RunTerminalArea({ ptyId }: { ptyId: string | null }): React.JSX.Element {
+  // Why: when a PTY is live, mount SidebarPtyTerminal — a minimal xterm
+  // renderer that streams pty:data and forwards keystrokes (incl. Ctrl+C)
+  // back via window.api.pty.write. The `key={ptyId}` forces a fresh
+  // Terminal + subscription pair on each re-run so leftover scrollback
+  // from the previous run does not leak into the new session.
+  // No-PTY case keeps the keyboard hint so users know how to start a run.
   if (!ptyId) {
     const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
     const shortcut = isMac ? '⌘R' : 'Ctrl+R'
@@ -92,11 +94,7 @@ function RunTerminalPlaceholder({ ptyId }: { ptyId: string | null }): React.JSX.
       </div>
     )
   }
-  return (
-    <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-      Output streaming to pty {ptyId}
-    </div>
-  )
+  return <SidebarPtyTerminal key={ptyId} ptyId={ptyId} />
 }
 
 function RunEmptyState({ onOpenOrcaYaml }: { onOpenOrcaYaml: () => void }): React.JSX.Element {
@@ -127,7 +125,7 @@ export function RunPanelView({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <RunHeader runState={runState} onReRun={onReRun} onStop={onStop} />
-      <RunTerminalPlaceholder ptyId={runState?.ptyId ?? null} />
+      <RunTerminalArea ptyId={runState?.ptyId ?? null} />
     </div>
   )
 }
