@@ -663,7 +663,7 @@ export function useTerminalPaneLifecycle({
         const currentSettings = settingsRef.current
         const terminalFontWeights = resolveTerminalFontWeights(currentSettings?.terminalFontWeight)
         return {
-          fontSize: currentSettings?.terminalFontSize ?? 14,
+          fontSize: currentSettings?.terminalFontSize ?? 12,
           fontFamily: buildFontFamily(currentSettings?.terminalFontFamily ?? ''),
           fontWeight: terminalFontWeights.fontWeight,
           fontWeightBold: terminalFontWeights.fontWeightBold,

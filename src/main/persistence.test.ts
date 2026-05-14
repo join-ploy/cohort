@@ -156,7 +156,7 @@ describe('Store', () => {
     expect(settings.appFontFamily).toBe('Geist')
     expect(settings.editorAutoSave).toBe(false)
     expect(settings.editorAutoSaveDelayMs).toBe(1000)
-    expect(settings.terminalFontSize).toBe(14)
+    expect(settings.terminalFontSize).toBe(12)
     expect(settings.terminalFontWeight).toBe(500)
     expect(settings.rightSidebarOpenByDefault).toBe(true)
     expect(settings.showTasksButton).toBe(true)

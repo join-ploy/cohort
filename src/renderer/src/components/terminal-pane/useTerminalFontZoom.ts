@@ -34,7 +34,7 @@ export function useTerminalFontZoom({
         return
       }
 
-      const globalSize = settingsRef.current?.terminalFontSize ?? 14
+      const globalSize = settingsRef.current?.terminalFontSize ?? 12
       const currentSize = paneFontSizesRef.current.get(pane.id) ?? globalSize
 
       let nextSize: number
