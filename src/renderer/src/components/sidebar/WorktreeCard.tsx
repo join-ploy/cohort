@@ -150,6 +150,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
     repo?.connectionId ? (s.sshTargetLabels.get(repo.connectionId) ?? '') : ''
   )
 
+  // Why: focused selector keeps re-renders local to this card when the
+  // worktree's run-script status flips. Setup status is intentionally not
+  // surfaced here (see activity-bar.tsx — setup is a one-shot bootstrap).
+  const isRunActive = useAppStore(
+    (s) => s.scriptsByWorktree?.[worktree.id]?.run.status === 'running'
+  )
+
   // ── GRANULAR selectors: only subscribe to THIS worktree's data ──
   const tabs = useAppStore((s) => s.tabsByWorktree[worktree.id] ?? EMPTY_TABS)
   const browserTabs = useAppStore((s) => s.browserTabsByWorktree[worktree.id] ?? EMPTY_BROWSER_TABS)
@@ -588,9 +595,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
             )}
           </div>
 
-          {/* CI Checks & PR state on the right */}
-          {cardProps.includes('ci') && pr && pr.checksStatus !== 'neutral' && (
-            <div className="flex items-center gap-2 shrink-0">
+          {/* Right-side cluster: CI/PR state and the live run-script dot. */}
+          <div className="flex items-center gap-2 shrink-0">
+            {cardProps.includes('ci') && pr && pr.checksStatus !== 'neutral' && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex items-center opacity-80 hover:opacity-100 transition-opacity">
@@ -609,8 +616,17 @@ const WorktreeCard = React.memo(function WorktreeCard({
                   <span>CI checks {checksLabel(pr.checksStatus).toLowerCase()}</span>
                 </TooltipContent>
               </Tooltip>
-            </div>
-          )}
+            )}
+            {/* Why: small amber pulse marks worktrees whose run script is alive
+                 so the user can spot active services in the sidebar at a glance.
+                 Vanishes on exit (no persisted exit-color here). */}
+            {isRunActive && (
+              <span
+                className="bg-amber-500 animate-pulse rounded-full size-[6px]"
+                aria-label="Run script is running"
+              />
+            )}
+          </div>
         </div>
 
         {/* Subtitle row: Repo badge + Branch */}

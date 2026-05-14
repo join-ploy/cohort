@@ -70,7 +70,8 @@ const STATUS_DOT_COLOR: Record<CheckStatus, string> = {
 
 // Why: Run/Setup share the same dot palette as Checks but reach it through a
 // different state machine (ScriptStatus). 'idle' returns null so no dot
-// renders for never-run / no-script-configured worktrees.
+// renders for never-run / no-script-configured worktrees. Run keeps the
+// emerald/rose dot after exit so the user can see the last result at a glance.
 export function scriptStatusToCheckStatus(status: ScriptStatus): CheckStatus | null {
   switch (status) {
     case 'idle':
@@ -82,6 +83,13 @@ export function scriptStatusToCheckStatus(status: ScriptStatus): CheckStatus | n
     case 'exited-failure':
       return 'failure'
   }
+}
+
+// Why: setup is a one-shot bootstrap script — the user runs it, it finishes,
+// done. Persisting a green/red dot afterward is stale UI noise, so only the
+// live 'running' state surfaces a dot (amber, pulsing via statusIndicatorPulse).
+export function setupStatusToCheckStatus(status: ScriptStatus): CheckStatus | null {
+  return status === 'running' ? 'pending' : null
 }
 
 // ─── Activity Bar Button (shared for top + side) ──────
