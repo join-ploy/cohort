@@ -55,8 +55,17 @@ vi.mock('../hooks', () => ({
 // Why: the worktree-create flow now spawns the setup PTY via runSetup from
 // the per-worktree setup-script registry. Mock it so tests that exercise
 // shouldRunSetup branches don't need to wire a real PTY provider.
+// Phase 9 also adds killSetupForWorktree, called from removeManagedWorktree.
 vi.mock('../ipc/setup-script', () => ({
-  runSetup: vi.fn().mockResolvedValue({ ok: true, ptyId: 'mock-setup-pty' })
+  runSetup: vi.fn().mockResolvedValue({ ok: true, ptyId: 'mock-setup-pty' }),
+  killSetupForWorktree: vi.fn().mockResolvedValue(undefined)
+}))
+
+// Why: Phase 9 — removeManagedWorktree also clears the per-repo run-script
+// registry. The runtime tests don't exercise the registry directly, so a
+// no-op mock keeps the existing teardown tests focused on PTY-graph behavior.
+vi.mock('../ipc/run-script', () => ({
+  killRunForWorktree: vi.fn().mockResolvedValue(undefined)
 }))
 
 vi.mock('../ipc/worktree-logic', async (importOriginal) => {
@@ -2379,6 +2388,47 @@ describe('OrcaRuntimeService', () => {
       })
       // The pre-daemon provider must not have been consulted for the kill.
       expect(preDaemonProvider.shutdown).not.toHaveBeenCalled()
+    })
+
+    it('Phase 9: clears the per-repo run + per-worktree setup registries before git removal', async () => {
+      // Why: removeManagedWorktree is the CLI/RPC counterpart of the
+      // worktrees:remove IPC. Both must purge the script registries so the
+      // renderer's scripts slice clears its running state and no PTY leaks
+      // outlive the deleted worktree.
+      const { killRunForWorktree } = await import('../ipc/run-script')
+      const { killSetupForWorktree } = await import('../ipc/setup-script')
+      vi.mocked(killRunForWorktree).mockClear()
+      vi.mocked(killSetupForWorktree).mockClear()
+
+      const localProvider = createProviderStub(async () => [])
+      const callOrder: string[] = []
+      vi.mocked(killRunForWorktree).mockImplementation(async () => {
+        callOrder.push('killRun')
+      })
+      vi.mocked(killSetupForWorktree).mockImplementation(async () => {
+        callOrder.push('killSetup')
+      })
+      vi.mocked(removeWorktree).mockImplementation(async () => {
+        callOrder.push('git')
+      })
+
+      const runtime = new OrcaRuntimeService(store, undefined, {
+        getLocalProvider: () => localProvider as never
+      })
+
+      await runtime.removeManagedWorktree(TEST_WORKTREE_ID)
+
+      expect(killRunForWorktree).toHaveBeenCalledWith(
+        { repoId: TEST_REPO_ID, worktreeId: TEST_WORKTREE_ID },
+        expect.objectContaining({ store: expect.anything() })
+      )
+      expect(killSetupForWorktree).toHaveBeenCalledWith(
+        { worktreeId: TEST_WORKTREE_ID },
+        expect.objectContaining({ store: expect.anything() })
+      )
+      const gitIdx = callOrder.indexOf('git')
+      expect(callOrder.indexOf('killRun')).toBeLessThan(gitIdx)
+      expect(callOrder.indexOf('killSetup')).toBeLessThan(gitIdx)
     })
   })
 })

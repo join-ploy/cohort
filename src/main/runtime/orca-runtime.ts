@@ -134,7 +134,8 @@ import {
   runHook,
   shouldRunSetupForCreate
 } from '../hooks'
-import { runSetup } from '../ipc/setup-script'
+import { killSetupForWorktree, runSetup } from '../ipc/setup-script'
+import { killRunForWorktree } from '../ipc/run-script'
 import { REPO_COLORS } from '../../shared/constants'
 import { listRepoWorktrees } from '../repo-worktrees'
 import type { Store } from '../persistence'
@@ -4301,6 +4302,30 @@ export class OrcaRuntimeService {
     }
     if (isFolderRepo(repo)) {
       throw new Error('Folder mode does not support deleting worktrees.')
+    }
+
+    // Why: clear the per-repo run + per-worktree setup script registries
+    // BEFORE filesystem removal so the PTY's cwd still exists at shutdown
+    // time and the renderer's scripts slice receives the *:exited
+    // broadcasts (Phase 9). These registries live in main and apply to
+    // both local and SSH repos, so they run regardless of connectionId —
+    // unlike the local-only generic-PTY sweep below. Best-effort: a failure
+    // here must not prevent the git removal that follows.
+    if (this.store) {
+      // Why: cast to Store mirrors the runSetup callsite — both helpers only
+      // read getRepo, which RuntimeStore declares with the same signature.
+      const scriptStore = this.store as unknown as Store
+      await killRunForWorktree(
+        { repoId: repo.id, worktreeId: worktree.id },
+        { store: scriptStore }
+      ).catch((err) => {
+        console.warn(`[run-script] cleanup failed for ${worktree.id}:`, err)
+      })
+      await killSetupForWorktree({ worktreeId: worktree.id }, { store: scriptStore }).catch(
+        (err) => {
+          console.warn(`[setup-script] cleanup failed for ${worktree.id}:`, err)
+        }
+      )
     }
 
     // Why: kill every PTY belonging to this worktree BEFORE the git-level

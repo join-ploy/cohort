@@ -44,6 +44,8 @@ import { invalidateAuthorizedRootsCache, registerWorktreeRootsForRepo } from './
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { killAllProcessesForWorktree } from '../runtime/worktree-teardown'
 import { getLocalPtyProvider } from './pty'
+import { killRunForWorktree } from './run-script'
+import { killSetupForWorktree } from './setup-script'
 import { removeWorktreeSymlinks } from './worktree-symlinks'
 import { track } from '../telemetry/client'
 import { getCohortAtEmit } from '../telemetry/cohort-classifier'
@@ -409,6 +411,19 @@ export function registerWorktreeHandlers(
       if (isFolderRepo(repo)) {
         throw new Error('Folder mode does not support deleting worktrees.')
       }
+
+      // Why: clear the per-repo run + per-worktree setup script registries
+      // BEFORE filesystem removal so the PTY's cwd still exists at shutdown
+      // time and the renderer's scripts slice receives the *:exited
+      // broadcasts (Phase 9). These registries live in main and apply to
+      // both local and SSH repos, so they run regardless of connectionId —
+      // unlike the local-only generic-PTY sweep below.
+      await killRunForWorktree({ repoId, worktreeId: args.worktreeId }, { store }).catch((err) => {
+        console.warn(`[run-script] cleanup failed for ${args.worktreeId}:`, err)
+      })
+      await killSetupForWorktree({ worktreeId: args.worktreeId }, { store }).catch((err) => {
+        console.warn(`[setup-script] cleanup failed for ${args.worktreeId}:`, err)
+      })
 
       // Why: kill every PTY belonging to this worktree BEFORE git-level
       // removal. The renderer pre-kills via shutdownWorktreeTerminals, but

@@ -122,19 +122,33 @@ vi.mock('../terminal-history', () => ({
   deleteWorktreeHistoryDir: deleteWorktreeHistoryDirMock
 }))
 
-const { killAllProcessesForWorktreeMock, getLocalPtyProviderMock, runSetupMock } = vi.hoisted(
-  () => ({
-    killAllProcessesForWorktreeMock: vi.fn(),
-    getLocalPtyProviderMock: vi.fn(),
-    runSetupMock: vi.fn()
-  })
-)
+const {
+  killAllProcessesForWorktreeMock,
+  getLocalPtyProviderMock,
+  runSetupMock,
+  killRunForWorktreeMock,
+  killSetupForWorktreeMock
+} = vi.hoisted(() => ({
+  killAllProcessesForWorktreeMock: vi.fn(),
+  getLocalPtyProviderMock: vi.fn(),
+  runSetupMock: vi.fn(),
+  killRunForWorktreeMock: vi.fn(),
+  killSetupForWorktreeMock: vi.fn()
+}))
 
 // Why: Phase 7 routes the auto-spawn setup PTY through the per-worktree
 // setup-script registry. The IPC tests assert the handler delegates to
 // runSetup; mock it so they don't need to wire a real PTY provider.
+// Phase 9 adds killSetupForWorktree, called from the worktree-delete path.
 vi.mock('./setup-script', () => ({
-  runSetup: runSetupMock
+  runSetup: runSetupMock,
+  killSetupForWorktree: killSetupForWorktreeMock
+}))
+
+// Why: Phase 9 adds killRunForWorktree, called from the worktree-delete path
+// to clean up the per-repo run PTY when the owning worktree is deleted.
+vi.mock('./run-script', () => ({
+  killRunForWorktree: killRunForWorktreeMock
 }))
 
 vi.mock('../runtime/worktree-teardown', () => ({
@@ -215,7 +229,9 @@ describe('registerWorktreeHandlers', () => {
       store.removeWorktreeMeta,
       killAllProcessesForWorktreeMock,
       getLocalPtyProviderMock,
-      runSetupMock
+      runSetupMock,
+      killRunForWorktreeMock,
+      killSetupForWorktreeMock
     ]) {
       m.mockReset()
     }
@@ -226,6 +242,8 @@ describe('registerWorktreeHandlers', () => {
     })
     getLocalPtyProviderMock.mockReturnValue({} as never)
     runSetupMock.mockResolvedValue({ ok: true, ptyId: 'mock-setup-pty' })
+    killRunForWorktreeMock.mockResolvedValue(undefined)
+    killSetupForWorktreeMock.mockResolvedValue(undefined)
 
     for (const key of Object.keys(handlers)) {
       delete handlers[key]
@@ -1353,6 +1371,80 @@ describe('registerWorktreeHandlers', () => {
     ).catch(() => {})
 
     expect(killAllProcessesForWorktreeMock).not.toHaveBeenCalled()
+  })
+
+  it('IPC-initiated delete kills run + setup script PTYs before git-level removal (Phase 9)', async () => {
+    // Why: the per-repo run registry and per-worktree setup registry are
+    // separate from the regular-terminal sweep done by killAllProcessesForWorktree.
+    // Cleanup must run before the git-level removal so the PTY's cwd still
+    // exists at shutdown time and so the renderer's slice clears its running
+    // state via the *:exited broadcast.
+    listWorktreesMock.mockResolvedValue([])
+    getEffectiveHooksMock.mockReturnValue(null)
+    const callOrder: string[] = []
+    killRunForWorktreeMock.mockImplementation(async () => {
+      callOrder.push('killRun')
+    })
+    killSetupForWorktreeMock.mockImplementation(async () => {
+      callOrder.push('killSetup')
+    })
+    removeWorktreeMock.mockImplementation(async () => {
+      callOrder.push('git')
+    })
+
+    await handlers['worktrees:remove'](null, {
+      worktreeId: 'repo-1::/workspace/feature-wt'
+    })
+
+    expect(killRunForWorktreeMock).toHaveBeenCalledWith(
+      { repoId: 'repo-1', worktreeId: 'repo-1::/workspace/feature-wt' },
+      expect.objectContaining({ store: expect.anything() })
+    )
+    expect(killSetupForWorktreeMock).toHaveBeenCalledWith(
+      { worktreeId: 'repo-1::/workspace/feature-wt' },
+      expect.objectContaining({ store: expect.anything() })
+    )
+    // Both kills must precede git removal.
+    const gitIdx = callOrder.indexOf('git')
+    expect(callOrder.indexOf('killRun')).toBeGreaterThanOrEqual(0)
+    expect(callOrder.indexOf('killSetup')).toBeGreaterThanOrEqual(0)
+    expect(callOrder.indexOf('killRun')).toBeLessThan(gitIdx)
+    expect(callOrder.indexOf('killSetup')).toBeLessThan(gitIdx)
+  })
+
+  it('still runs script-registry cleanup for SSH-backed repos (registries live in main)', async () => {
+    // Why: the run/setup registries are main-process bookkeeping with
+    // main-process broadcasts, regardless of whether the underlying PTY runs
+    // local or remote. Skipping them for SSH would leak the registry entry
+    // and leave the renderer's dot stuck on the deleted worktree.
+    const sshRepo = {
+      id: 'repo-ssh',
+      path: '/remote/repo',
+      displayName: 'ssh',
+      badgeColor: '#000',
+      addedAt: 0,
+      connectionId: 'conn-1',
+      worktreeBaseRef: null
+    }
+    store.getRepos.mockReturnValue([sshRepo])
+    store.getRepo.mockReturnValue(sshRepo)
+
+    // The SSH branch will throw downstream (no provider mocked); the assertion
+    // here is purely that the registry kills DID run regardless.
+    await (
+      handlers['worktrees:remove'](null, {
+        worktreeId: 'repo-ssh::/remote/feature-wt'
+      }) as Promise<unknown>
+    ).catch(() => {})
+
+    expect(killRunForWorktreeMock).toHaveBeenCalledWith(
+      { repoId: 'repo-ssh', worktreeId: 'repo-ssh::/remote/feature-wt' },
+      expect.anything()
+    )
+    expect(killSetupForWorktreeMock).toHaveBeenCalledWith(
+      { worktreeId: 'repo-ssh::/remote/feature-wt' },
+      expect.anything()
+    )
   })
 
   it('rejects ask-policy creates before mutating git state when setup decision is missing', async () => {
