@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: this suite covers every helper exported
+from worktree-logic so a single regression is caught without splitting tests
+across files for unrelated functions. */
 import { join, resolve } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -208,6 +211,7 @@ describe('mergeWorktree', () => {
   it('merges with full metadata', () => {
     const meta = {
       displayName: 'My Feature',
+      workspaceName: 'wise_panther',
       comment: 'WIP',
       linkedIssue: 42,
       linkedPR: 10,
@@ -228,6 +232,7 @@ describe('mergeWorktree', () => {
       isBare: false,
       isMainWorktree: false,
       displayName: 'My Feature',
+      workspaceName: 'wise_panther',
       comment: 'WIP',
       linkedIssue: 42,
       linkedPR: 10,

@@ -46,6 +46,7 @@ import { parseWorkspaceSession } from '../shared/workspace-session-schema'
 import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId } from '../shared/worktree-id'
+import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -469,6 +470,13 @@ export class Store {
         pruneLocalTerminalScrollbackBuffers(result.workspaceSession, result.repos)
       )
     }
+
+    // Why: backfill workspaceName for any persisted worktree that pre-dates
+    // the field. Done in a single pass per repo so siblings see each other's
+    // freshly-assigned names and don't collide. Mutates `worktreeMeta` in
+    // place; the next scheduleSave call (or any setWorktreeMeta) flushes
+    // the new names to disk.
+    backfillWorkspaceNames(result.worktreeMeta)
 
     return this.migrateTelemetry(result, fileExistedOnLoad)
   }
@@ -1548,5 +1556,38 @@ function getDefaultWorktreeMeta(): WorktreeMeta {
     isPinned: false,
     sortOrder: Date.now(),
     lastActivityAt: 0
+  }
+}
+
+// Why: workspaceName joined the persisted shape after Orca already had users
+// with worktrees on disk. Assign one per legacy record at load time, scoped
+// per repo so siblings stay unique. Single pass so freshly-assigned names
+// are visible to the rest of the same repo's siblings.
+function backfillWorkspaceNames(worktreeMeta: Record<string, WorktreeMeta>): void {
+  const namesByRepo = new Map<string, Set<string>>()
+  for (const [worktreeId, meta] of Object.entries(worktreeMeta)) {
+    if (typeof meta.workspaceName === 'string' && meta.workspaceName.length > 0) {
+      const repoId = getRepoIdFromWorktreeId(worktreeId)
+      let taken = namesByRepo.get(repoId)
+      if (!taken) {
+        taken = new Set()
+        namesByRepo.set(repoId, taken)
+      }
+      taken.add(meta.workspaceName)
+    }
+  }
+  for (const [worktreeId, meta] of Object.entries(worktreeMeta)) {
+    if (typeof meta.workspaceName === 'string' && meta.workspaceName.length > 0) {
+      continue
+    }
+    const repoId = getRepoIdFromWorktreeId(worktreeId)
+    let taken = namesByRepo.get(repoId)
+    if (!taken) {
+      taken = new Set()
+      namesByRepo.set(repoId, taken)
+    }
+    const generated = generateUniqueWorkspaceName(taken)
+    meta.workspaceName = generated
+    taken.add(generated)
   }
 }

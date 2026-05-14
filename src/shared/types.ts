@@ -108,6 +108,10 @@ export type Worktree = {
   id: string // `${repoId}::${path}`
   repoId: string
   displayName: string
+  /** Short, immutable, DB-safe identifier (e.g. "wise_panther"). Generated at
+   *  create time, backfilled at load for older records. Injected into setup,
+   *  run, and archive script env as `CONDUCTOR_WORKSPACE_NAME`. */
+  workspaceName: string
   comment: string
   linkedIssue: number | null
   linkedPR: number | null
@@ -147,6 +151,10 @@ export type GitPushTarget = {
 // ─── Worktree metadata (persisted user-authored fields only) ─────────
 export type WorktreeMeta = {
   displayName: string
+  /** See {@link Worktree.workspaceName}. Persisted to orca-data.json. Optional
+   *  on the persisted shape because records written before this field existed
+   *  are backfilled at load time, not at write. */
+  workspaceName?: string
   comment: string
   linkedIssue: number | null
   linkedPR: number | null

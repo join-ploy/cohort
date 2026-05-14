@@ -498,6 +498,110 @@ describe('Store', () => {
     expect(updated.comment).toBe('updated')
   })
 
+  // ── 8b. workspaceName backfill on load ─────────────────────────────
+
+  it('round-trips workspaceName for persisted worktree meta', async () => {
+    const store = await createStore()
+    store.setWorktreeMeta('r1::/wt1', {
+      displayName: 'wt1',
+      workspaceName: 'wise_panther'
+    })
+    store.flush()
+
+    const reloaded = await createStore()
+    expect(reloaded.getWorktreeMeta('r1::/wt1')!.workspaceName).toBe('wise_panther')
+  })
+
+  it('backfills workspaceName on load when missing', async () => {
+    writeDataFile({
+      worktreeMeta: {
+        'r1::/wt1': {
+          displayName: 'one',
+          comment: '',
+          linkedIssue: null,
+          linkedPR: null,
+          linkedLinearIssue: null,
+          isArchived: false,
+          isUnread: false,
+          isPinned: false,
+          sortOrder: 0,
+          lastActivityAt: 0
+        }
+      }
+    })
+
+    const store = await createStore()
+    const meta = store.getWorktreeMeta('r1::/wt1')
+    expect(meta).toBeDefined()
+    expect(meta!.workspaceName).toMatch(/^[a-z][a-z0-9_]{0,15}$/)
+  })
+
+  it('assigns distinct workspaceNames to sibling worktrees missing them', async () => {
+    const baseMeta = {
+      displayName: '',
+      comment: '',
+      linkedIssue: null,
+      linkedPR: null,
+      linkedLinearIssue: null,
+      isArchived: false,
+      isUnread: false,
+      isPinned: false,
+      sortOrder: 0,
+      lastActivityAt: 0
+    }
+    writeDataFile({
+      worktreeMeta: {
+        'r1::/wt1': baseMeta,
+        'r1::/wt2': baseMeta
+      }
+    })
+
+    const store = await createStore()
+    const a = store.getWorktreeMeta('r1::/wt1')!.workspaceName
+    const b = store.getWorktreeMeta('r1::/wt2')!.workspaceName
+    expect(a).toBeTruthy()
+    expect(b).toBeTruthy()
+    expect(a).not.toBe(b)
+  })
+
+  it('does not overwrite an existing workspaceName during backfill', async () => {
+    writeDataFile({
+      worktreeMeta: {
+        'r1::/wt1': {
+          displayName: '',
+          workspaceName: 'wise_panther',
+          comment: '',
+          linkedIssue: null,
+          linkedPR: null,
+          linkedLinearIssue: null,
+          isArchived: false,
+          isUnread: false,
+          isPinned: false,
+          sortOrder: 0,
+          lastActivityAt: 0
+        },
+        'r1::/wt2': {
+          displayName: '',
+          comment: '',
+          linkedIssue: null,
+          linkedPR: null,
+          linkedLinearIssue: null,
+          isArchived: false,
+          isUnread: false,
+          isPinned: false,
+          sortOrder: 0,
+          lastActivityAt: 0
+        }
+      }
+    })
+
+    const store = await createStore()
+    expect(store.getWorktreeMeta('r1::/wt1')!.workspaceName).toBe('wise_panther')
+    const sibling = store.getWorktreeMeta('r1::/wt2')!.workspaceName
+    expect(sibling).toMatch(/^[a-z][a-z0-9_]{0,15}$/)
+    expect(sibling).not.toBe('wise_panther')
+  })
+
   // ── 9. Settings: get/update ────────────────────────────────────────
 
   it('updateSettings merges partial updates', async () => {

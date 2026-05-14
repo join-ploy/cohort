@@ -183,6 +183,13 @@ export function mergeWorktree(
     ...(git.isSparse === true ? { isSparse: true } : {}),
     isMainWorktree: git.isMainWorktree,
     displayName: meta?.displayName || branchShort || defaultDisplayName || basename(git.path),
+    // Why: persistence backfills workspaceName at load for legacy records,
+    // so meta.workspaceName is expected to be present at runtime. Defensive
+    // empty string keeps the type total when meta is undefined (worktrees
+    // discovered on disk before any meta is stamped — backfill-on-load runs
+    // before any consumer sees these records, so this fallback only fires
+    // for first-time discovery callsites that pass `undefined` here).
+    workspaceName: meta?.workspaceName ?? '',
     comment: meta?.comment || '',
     linkedIssue: meta?.linkedIssue ?? null,
     linkedPR: meta?.linkedPR ?? null,
