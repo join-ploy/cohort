@@ -392,9 +392,8 @@ export function createRunRunnerScript(
   worktreePath: string,
   script: string
 ): WorktreeSetupLaunch {
-  // Why: the per-repo `scripts.run` hook needs the same env scaffolding,
-  // fail-fast wrapping, and WSL path translation as setup; reusing the shared
-  // runner keeps the two hook flows in lockstep instead of forking behavior.
+  // Why: scripts.run is user-authored shell input; wrapping ensures non-zero
+  // exits propagate and ORCA_WORKTREE_PATH is set before exec.
   return createWorktreeRunnerScript(repo, worktreePath, script, 'run-runner')
 }
 

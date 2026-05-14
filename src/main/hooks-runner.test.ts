@@ -174,7 +174,7 @@ describe('createSetupRunnerScript', () => {
 })
 
 describe('createRunRunnerScript', () => {
-  it('writes a fail-fast Windows runner that returns after batch commands', async () => {
+  it('writes a fail-fast Windows .cmd wrapper for the run script', async () => {
     const fs = await import('fs')
     const originalPlatform = process.platform
 
@@ -195,6 +195,12 @@ describe('createRunRunnerScript', () => {
           ORCA_WORKTREE_PATH: 'C:\\repo\\feature'
         })
       })
+      // Proves runnerBaseName='run-runner' was threaded through (not 'setup-runner').
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['rev-parse', '--git-path', 'orca/run-runner.cmd']),
+        expect.anything()
+      )
       expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
         'C:\\repo\\.git\\worktrees\\feature\\orca\\run-runner.cmd',
         [
@@ -245,6 +251,14 @@ describe('createRunRunnerScript', () => {
           GHOSTX_ROOT_PATH: '/mnt/c/Users/jinwo/git/orca'
         })
       })
+      // Proves runnerBaseName='run-runner' was threaded through (not 'setup-runner').
+      // WSL routes git through `wsl.exe -- bash -c "...rev-parse --git-path 'orca/run-runner.sh'..."`,
+      // so the runner base name lives inside the bash -c shell string rather than as a discrete arg.
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        'wsl.exe',
+        expect.arrayContaining([expect.stringContaining('orca/run-runner.sh')]),
+        expect.anything()
+      )
       expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
         '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.git\\worktrees\\feature\\orca\\run-runner.sh',
         '#!/usr/bin/env bash\nset -e\npnpm dev\n',
