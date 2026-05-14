@@ -155,7 +155,10 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     expect(runBtn).not.toContain('animate-pulse')
   })
 
-  it('Setup dot transitions amber-pulse → emerald → rose with the script status', async () => {
+  it('Setup dot shows amber-pulse while running and vanishes after exit', async () => {
+    // Why: setup is a one-shot bootstrap script — keeping a green/red dot
+    // around after it finishes feels like stale UI noise. Only the live
+    // 'running' state surfaces a dot in the activity bar.
     const { default: RightSidebar } = await import('./index')
 
     mockState = baseState()
@@ -180,7 +183,9 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     })
     html = renderToStaticMarkup(<RightSidebar />)
     setupBtn = buttonHtmlFor(html, /Setup/)
-    expect(setupBtn).toContain('bg-emerald-500')
+    expect(setupBtn).not.toContain('bg-emerald-500')
+    expect(setupBtn).not.toContain('bg-amber-500')
+    expect(setupBtn).not.toContain('bg-rose-500')
 
     mockState = baseState({
       scriptsByWorktree: {
@@ -189,6 +194,8 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     })
     html = renderToStaticMarkup(<RightSidebar />)
     setupBtn = buttonHtmlFor(html, /Setup/)
-    expect(setupBtn).toContain('bg-rose-500')
+    expect(setupBtn).not.toContain('bg-rose-500')
+    expect(setupBtn).not.toContain('bg-emerald-500')
+    expect(setupBtn).not.toContain('bg-amber-500')
   })
 })
