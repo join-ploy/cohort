@@ -124,7 +124,14 @@ export type OpenFile = {
   mode: 'edit' | 'diff' | 'conflict-review' | 'markdown-preview'
 }
 
-export type RightSidebarTab = 'explorer' | 'search' | 'source-control' | 'checks' | 'ports'
+export type RightSidebarTab =
+  | 'explorer'
+  | 'search'
+  | 'source-control'
+  | 'checks'
+  | 'ports'
+  | 'run'
+  | 'setup'
 export type ActivityBarPosition = 'top' | 'side'
 
 export type MarkdownViewMode = 'source' | 'rich' | 'preview'
