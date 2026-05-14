@@ -130,7 +130,7 @@ import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import {
   getEffectiveHooks,
   getEffectiveSetupRunPolicy,
-  hasHooksFile,
+  hasHookConfig,
   runHook,
   shouldRunSetupForCreate
 } from '../hooks'
@@ -3678,10 +3678,12 @@ export class OrcaRuntimeService {
 
   async getRepoHooks(repoSelector: string) {
     const repo = await this.resolveRepoSelector(repoSelector)
-    const hasFile = hasHooksFile(repo.path)
+    const hasFile = hasHookConfig(repo.path)
     const hooks = getEffectiveHooks(repo)
     const setupRunPolicy = getEffectiveSetupRunPolicy(repo)
     return {
+      // Why: keep the historical MCP key name `hasHooksFile` so external
+      // tools that read this response don't break — the rename is internal.
       hasHooksFile: hasFile,
       hooks,
       setupRunPolicy,

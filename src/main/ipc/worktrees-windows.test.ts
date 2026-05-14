@@ -15,7 +15,7 @@ const {
   createSetupRunnerScriptMock,
   shouldRunSetupForCreateMock,
   runHookMock,
-  hasHooksFileMock,
+  hasHookConfigMock,
   loadHooksMock,
   computeWorktreePathMock,
   ensurePathWithinWorkspaceMock
@@ -34,7 +34,7 @@ const {
   createSetupRunnerScriptMock: vi.fn(),
   shouldRunSetupForCreateMock: vi.fn(),
   runHookMock: vi.fn(),
-  hasHooksFileMock: vi.fn(),
+  hasHookConfigMock: vi.fn(),
   loadHooksMock: vi.fn(),
   computeWorktreePathMock: vi.fn(),
   ensurePathWithinWorkspaceMock: vi.fn()
@@ -77,7 +77,7 @@ vi.mock('../hooks', () => ({
   getEffectiveHooks: getEffectiveHooksMock,
   loadHooks: loadHooksMock,
   runHook: runHookMock,
-  hasHooksFile: hasHooksFileMock,
+  hasHookConfig: hasHookConfigMock,
   shouldRunSetupForCreate: shouldRunSetupForCreateMock
 }))
 
@@ -126,7 +126,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     createSetupRunnerScriptMock.mockReset()
     shouldRunSetupForCreateMock.mockReset()
     runHookMock.mockReset()
-    hasHooksFileMock.mockReset()
+    hasHookConfigMock.mockReset()
     loadHooksMock.mockReset()
     computeWorktreePathMock.mockReset()
     ensurePathWithinWorkspaceMock.mockReset()

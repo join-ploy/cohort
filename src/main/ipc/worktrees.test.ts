@@ -20,7 +20,7 @@ const {
   createSetupRunnerScriptMock,
   shouldRunSetupForCreateMock,
   runHookMock,
-  hasHooksFileMock,
+  hasHookConfigMock,
   loadHooksMock,
   computeWorktreePathMock,
   ensurePathWithinWorkspaceMock,
@@ -46,7 +46,7 @@ const {
   createSetupRunnerScriptMock: vi.fn(),
   shouldRunSetupForCreateMock: vi.fn(),
   runHookMock: vi.fn(),
-  hasHooksFileMock: vi.fn(),
+  hasHookConfigMock: vi.fn(),
   loadHooksMock: vi.fn(),
   computeWorktreePathMock: vi.fn(),
   ensurePathWithinWorkspaceMock: vi.fn(),
@@ -101,7 +101,7 @@ vi.mock('../hooks', () => ({
   getEffectiveHooks: getEffectiveHooksMock,
   loadHooks: loadHooksMock,
   runHook: runHookMock,
-  hasHooksFile: hasHooksFileMock,
+  hasHookConfig: hasHookConfigMock,
   shouldRunSetupForCreate: shouldRunSetupForCreateMock
 }))
 
@@ -212,7 +212,7 @@ describe('registerWorktreeHandlers', () => {
       createSetupRunnerScriptMock,
       shouldRunSetupForCreateMock,
       runHookMock,
-      hasHooksFileMock,
+      hasHookConfigMock,
       loadHooksMock,
       computeWorktreePathMock,
       ensurePathWithinWorkspaceMock,

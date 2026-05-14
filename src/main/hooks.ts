@@ -151,27 +151,52 @@ export function parseConductorJson(content: string): OrcaHooks | null {
 }
 
 /**
- * Load hooks from orca.yaml in the given repo root.
+ * Load hooks from a repo root. Prefers orca.yaml; falls back to conductor.json
+ * when only the latter exists. orca.yaml wins when both are present so users
+ * who explicitly opt in to Orca's format aren't silently overridden.
  */
 export function loadHooks(repoPath: string): OrcaHooks | null {
   const yamlPath = join(repoPath, 'orca.yaml')
-  if (!existsSync(yamlPath)) {
-    return null
+  if (existsSync(yamlPath)) {
+    try {
+      return parseOrcaYaml(readFileSync(yamlPath, 'utf-8'))
+    } catch {
+      return null
+    }
   }
 
-  try {
-    const content = readFileSync(yamlPath, 'utf-8')
-    return parseOrcaYaml(content)
-  } catch {
-    return null
+  const jsonPath = join(repoPath, 'conductor.json')
+  if (existsSync(jsonPath)) {
+    try {
+      return parseConductorJson(readFileSync(jsonPath, 'utf-8'))
+    } catch {
+      return null
+    }
   }
+
+  return null
 }
 
 /**
- * Check whether an orca.yaml exists for a repo.
+ * Check whether any hook config file (orca.yaml or conductor.json) exists.
  */
-export function hasHooksFile(repoPath: string): boolean {
-  return existsSync(join(repoPath, 'orca.yaml'))
+export function hasHookConfig(repoPath: string): boolean {
+  return existsSync(join(repoPath, 'orca.yaml')) || existsSync(join(repoPath, 'conductor.json'))
+}
+
+/**
+ * Return which hook config file is active for the repo. orca.yaml wins when
+ * both exist; returns null when neither does. Used by the empty-state UI to
+ * decide which filename to surface.
+ */
+export function getActiveHookConfigKind(repoPath: string): 'orca-yaml' | 'conductor-json' | null {
+  if (existsSync(join(repoPath, 'orca.yaml'))) {
+    return 'orca-yaml'
+  }
+  if (existsSync(join(repoPath, 'conductor.json'))) {
+    return 'conductor-json'
+  }
+  return null
 }
 
 // Why: when a newer Orca release adds a top-level key to `orca.yaml` (like

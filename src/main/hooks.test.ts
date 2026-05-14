@@ -200,6 +200,121 @@ describe('parseConductorJson', () => {
   })
 })
 
+describe('loadHooks precedence', () => {
+  it('returns yaml hooks when only orca.yaml exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
+    vi.mocked(fs.readFileSync).mockImplementation((path) => {
+      if (path === '/test/repo/orca.yaml') {
+        return 'scripts:\n  run: pnpm dev\n'
+      }
+      return ''
+    })
+
+    const { loadHooks } = await import('./hooks')
+    expect(loadHooks('/test/repo')?.scripts.run).toBe('pnpm dev')
+  })
+
+  it('returns conductor hooks when only conductor.json exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/conductor.json')
+    vi.mocked(fs.readFileSync).mockImplementation((path) => {
+      if (path === '/test/repo/conductor.json') {
+        return JSON.stringify({ scripts: { run: 'npm run dev' } })
+      }
+      return ''
+    })
+
+    const { loadHooks } = await import('./hooks')
+    expect(loadHooks('/test/repo')?.scripts.run).toBe('npm run dev')
+  })
+
+  it('returns yaml hooks when both files exist (orca.yaml wins)', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockImplementation((path) => {
+      if (path === '/test/repo/orca.yaml') {
+        return 'scripts:\n  run: from-yaml\n'
+      }
+      if (path === '/test/repo/conductor.json') {
+        return JSON.stringify({ scripts: { run: 'from-conductor' } })
+      }
+      return ''
+    })
+
+    const { loadHooks } = await import('./hooks')
+    expect(loadHooks('/test/repo')?.scripts.run).toBe('from-yaml')
+  })
+
+  it('returns null when neither file exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { loadHooks } = await import('./hooks')
+    expect(loadHooks('/test/repo')).toBeNull()
+  })
+})
+
+describe('hasHookConfig', () => {
+  it('returns true when only orca.yaml exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/orca.yaml')
+
+    const { hasHookConfig } = await import('./hooks')
+    expect(hasHookConfig('/test/repo')).toBe(true)
+  })
+
+  it('returns true when only conductor.json exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/conductor.json')
+
+    const { hasHookConfig } = await import('./hooks')
+    expect(hasHookConfig('/test/repo')).toBe(true)
+  })
+
+  it('returns true when both files exist', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+
+    const { hasHookConfig } = await import('./hooks')
+    expect(hasHookConfig('/test/repo')).toBe(true)
+  })
+
+  it('returns false when neither file exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { hasHookConfig } = await import('./hooks')
+    expect(hasHookConfig('/test/repo')).toBe(false)
+  })
+})
+
+describe('getActiveHookConfigKind', () => {
+  it("returns 'orca-yaml' when both files exist", async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+
+    const { getActiveHookConfigKind } = await import('./hooks')
+    expect(getActiveHookConfigKind('/test/repo')).toBe('orca-yaml')
+  })
+
+  it("returns 'conductor-json' when only conductor.json exists", async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockImplementation((path) => path === '/test/repo/conductor.json')
+
+    const { getActiveHookConfigKind } = await import('./hooks')
+    expect(getActiveHookConfigKind('/test/repo')).toBe('conductor-json')
+  })
+
+  it('returns null when neither file exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { getActiveHookConfigKind } = await import('./hooks')
+    expect(getActiveHookConfigKind('/test/repo')).toBeNull()
+  })
+})
+
 describe('hasUnrecognizedOrcaYamlKeys', () => {
   it('returns true when the file contains only keys this version does not handle', async () => {
     const fs = await import('fs')

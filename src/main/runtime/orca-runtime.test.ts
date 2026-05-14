@@ -49,7 +49,7 @@ vi.mock('../hooks', () => ({
     .fn()
     .mockImplementation((_repo: never, decision: string) => decision === 'run'),
   getEffectiveSetupRunPolicy: vi.fn().mockReturnValue('auto'),
-  hasHooksFile: vi.fn().mockReturnValue(false)
+  hasHookConfig: vi.fn().mockReturnValue(false)
 }))
 
 // Why: the worktree-create flow now spawns the setup PTY via runSetup from

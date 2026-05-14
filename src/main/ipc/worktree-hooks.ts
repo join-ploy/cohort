@@ -9,7 +9,7 @@ import type { Store } from '../persistence'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import {
-  hasHooksFile,
+  hasHookConfig,
   hasUnrecognizedOrcaYamlKeys,
   loadHooks,
   readIssueCommand,
@@ -48,7 +48,7 @@ export function registerHooksHandlers(store: Store): void {
       }
     }
 
-    const has = hasHooksFile(repo.path)
+    const has = hasHookConfig(repo.path)
     const hooks = has ? loadHooks(repo.path) : null
     // Why: when a newer Orca version adds a top-level key to `orca.yaml`, older
     // versions that don't recognise it return null and show "could not be parsed".
