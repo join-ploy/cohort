@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { app, clipboard, ipcMain, nativeImage, session } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { Store } from '../persistence'
-import type { CreateWorktreeResult, WorktreeStartupLaunch } from '../../shared/types'
+import type { WorktreeStartupLaunch } from '../../shared/types'
 import { ORCA_BROWSER_PARTITION } from '../../shared/constants'
 import { registerRepoHandlers } from '../ipc/repos'
 import { registerWorktreeHandlers } from '../ipc/worktrees'
@@ -231,16 +231,10 @@ function registerRuntimeWindowLifecycle(
     worktreeBaseStatus: (event) => send('worktree:baseStatus', event),
     worktreeRemoteBranchConflict: (event) => send('worktree:remoteBranchConflict', event),
     reposChanged: () => send('repos:changed'),
-    activateWorktree: (
-      repoId,
-      worktreeId,
-      setup?: CreateWorktreeResult['setup'],
-      startup?: WorktreeStartupLaunch
-    ) => {
+    activateWorktree: (repoId, worktreeId, startup?: WorktreeStartupLaunch) => {
       send('ui:activateWorktree', {
         repoId,
         worktreeId,
-        ...(setup ? { setup } : {}),
         ...(startup ? { startup } : {})
       })
     },

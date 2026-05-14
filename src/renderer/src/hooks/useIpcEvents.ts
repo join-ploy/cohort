@@ -215,7 +215,7 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
-      window.api.ui.onActivateWorktree(({ repoId, worktreeId, setup, startup }) => {
+      window.api.ui.onActivateWorktree(({ repoId, worktreeId, startup }) => {
         void (async () => {
           // Why: fetch worktrees first so the activation helper can resolve
           // the CLI-created worktree via findWorktreeById — it arrived from
@@ -225,8 +225,10 @@ export function useIpcEvents(): void {
           // worktrees share the canonical activation path with UI-created
           // ones. This records the visit in the back/forward history stack
           // (recordWorktreeVisit), without which the nav buttons would
-          // ignore the CLI-driven workspace switch.
-          activateAndRevealWorktree(worktreeId, { setup, startup })
+          // ignore the CLI-driven workspace switch. Setup PTYs are no longer
+          // threaded through this payload — main owns the setup PTY and
+          // emits setup:started/exited which the scripts slice consumes.
+          activateAndRevealWorktree(worktreeId, { startup })
         })().catch((error) => {
           console.error('Failed to activate CLI-created worktree:', error)
         })

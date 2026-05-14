@@ -52,6 +52,13 @@ vi.mock('../hooks', () => ({
   hasHooksFile: vi.fn().mockReturnValue(false)
 }))
 
+// Why: the worktree-create flow now spawns the setup PTY via runSetup from
+// the per-worktree setup-script registry. Mock it so tests that exercise
+// shouldRunSetup branches don't need to wire a real PTY provider.
+vi.mock('../ipc/setup-script', () => ({
+  runSetup: vi.fn().mockResolvedValue({ ok: true, ptyId: 'mock-setup-pty' })
+}))
+
 vi.mock('../ipc/worktree-logic', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
@@ -1477,7 +1484,9 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.searchRepoRefs('id:repo-1', 'main', -5)).rejects.toThrow('invalid_limit')
   })
 
-  it('returns a setup launch payload for CLI-created worktrees when hooks are explicitly enabled', async () => {
+  it('routes the setup PTY through runSetup for CLI-created worktrees when hooks are explicitly enabled', async () => {
+    const { runSetup } = await import('../ipc/setup-script')
+    vi.mocked(runSetup).mockClear()
     const runtime = new OrcaRuntimeService(store)
     const activateWorktree = vi.fn()
     runtime.setNotifier({
@@ -1502,13 +1511,6 @@ describe('OrcaRuntimeService', () => {
         setup: 'pnpm worktree:setup'
       }
     })
-    vi.mocked(createSetupRunnerScript).mockReturnValue({
-      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-      envVars: {
-        ORCA_ROOT_PATH: '/tmp/repo',
-        ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-test'
-      }
-    })
     vi.mocked(listWorktrees).mockResolvedValueOnce([
       {
         path: '/tmp/workspaces/runtime-hook-test',
@@ -1525,11 +1527,9 @@ describe('OrcaRuntimeService', () => {
       runHooks: true
     })
 
-    expect(createSetupRunnerScript).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'repo-1', path: '/tmp/repo' }),
-      '/tmp/workspaces/runtime-hook-test',
-      'pnpm worktree:setup'
-    )
+    expect(runSetup).toHaveBeenCalledWith(expect.objectContaining({ store: expect.anything() }), {
+      worktreeId: result.worktree.id
+    })
     expect(runHook).not.toHaveBeenCalled()
     expect(addWorktree).toHaveBeenCalledWith(
       '/tmp/repo',
@@ -1543,19 +1543,19 @@ describe('OrcaRuntimeService', () => {
         repoId: 'repo-1',
         path: '/tmp/workspaces/runtime-hook-test',
         branch: 'runtime-hook-test'
-      }),
-      setup: {
-        runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-        envVars: {
-          ORCA_ROOT_PATH: '/tmp/repo',
-          ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-test'
-        }
-      }
+      })
     })
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), result.setup)
+    // Why: setup is no longer threaded through activateWorktree — main owns
+    // the setup PTY and broadcasts setup:started which the renderer's
+    // SetupPanel consumes.
+    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String))
   })
 
-  it('passes setup payloads through when explicitly activating CLI-created worktrees', async () => {
+  it('activates without threading setup through when explicitly activating CLI-created worktrees', async () => {
+    // Why: Phase 7 — the setup PTY is no longer carried in the activation
+    // payload. It's spawned in main and surfaced via setup:started events.
+    const { runSetup } = await import('../ipc/setup-script')
+    vi.mocked(runSetup).mockClear()
     const runtime = new OrcaRuntimeService(store)
     const activateWorktree = vi.fn()
     runtime.setNotifier({
@@ -1580,13 +1580,6 @@ describe('OrcaRuntimeService', () => {
         setup: 'pnpm worktree:setup'
       }
     })
-    vi.mocked(createSetupRunnerScript).mockReturnValue({
-      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-      envVars: {
-        ORCA_ROOT_PATH: '/tmp/repo',
-        ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-activate'
-      }
-    })
     vi.mocked(listWorktrees).mockResolvedValueOnce([
       {
         path: '/tmp/workspaces/runtime-hook-activate',
@@ -1604,17 +1597,23 @@ describe('OrcaRuntimeService', () => {
       activate: true
     })
 
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), result.setup)
+    expect(runSetup).toHaveBeenCalledWith(expect.anything(), {
+      worktreeId: result.worktree.id
+    })
+    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String))
   })
 
-  it('follows normal setup policy for CLI-created worktrees without activating them', async () => {
+  it('routes setup through runSetup and only spawns the primary terminal for non-activated CLI creates', async () => {
+    // Why: Phase 7 — the setup PTY is owned by main's setup-script registry
+    // (via runSetup) and surfaced in the right-sidebar Setup tab. The
+    // worktree's regular terminal tab is no longer a setup-output sink, so
+    // only the primary terminal spawns through this path now.
+    const { runSetup } = await import('../ipc/setup-script')
+    vi.mocked(runSetup).mockClear()
     const runtime = new OrcaRuntimeService(store)
     const activateWorktree = vi.fn()
     const revealTerminalSession = vi.fn().mockResolvedValue({ tabId: 'tab-created-worktree' })
-    const spawn = vi
-      .fn()
-      .mockResolvedValueOnce({ id: 'pty-primary' })
-      .mockResolvedValueOnce({ id: 'pty-setup' })
+    const spawn = vi.fn().mockResolvedValueOnce({ id: 'pty-primary' })
     runtime.setPtyController({
       spawn,
       write: () => true,
@@ -1645,13 +1644,6 @@ describe('OrcaRuntimeService', () => {
       }
     })
     vi.mocked(shouldRunSetupForCreate).mockReturnValue(true)
-    vi.mocked(createSetupRunnerScript).mockReturnValue({
-      runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-      envVars: {
-        ORCA_ROOT_PATH: '/tmp/repo',
-        ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-skip'
-      }
-    })
     vi.mocked(listWorktrees).mockResolvedValue([
       {
         path: '/tmp/workspaces/runtime-hook-skip',
@@ -1667,62 +1659,26 @@ describe('OrcaRuntimeService', () => {
       name: 'runtime-hook-skip'
     })
 
-    expect(createSetupRunnerScript).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'repo-1', path: '/tmp/repo' }),
-      '/tmp/workspaces/runtime-hook-skip',
-      'pnpm worktree:setup'
-    )
+    expect(runSetup).toHaveBeenCalledWith(expect.anything(), {
+      worktreeId: result.worktree.id
+    })
     expect(runHook).not.toHaveBeenCalled()
     expect(result).toEqual({
       worktree: expect.objectContaining({
         repoId: 'repo-1',
         path: '/tmp/workspaces/runtime-hook-skip',
         branch: 'runtime-hook-skip'
-      }),
-      setup: {
-        runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
-        envVars: {
-          ORCA_ROOT_PATH: '/tmp/repo',
-          ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-skip'
-        }
-      }
+      })
     })
     expect(activateWorktree).not.toHaveBeenCalled()
-    expect(spawn).toHaveBeenNthCalledWith(
-      1,
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-hook-skip',
         command: undefined,
         worktreeId: result.worktree.id
       })
     )
-    expect(spawn).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        cwd: '/tmp/workspaces/runtime-hook-skip',
-        command: 'bash /tmp/repo/.git/orca/setup-runner.sh',
-        // Why: createTerminal stamps ORCA_PANE_KEY/TAB_ID/WORKTREE_ID into the
-        // PTY env on top of the caller-supplied env so hook-based agent status
-        // can attribute hook events to a pane. See docs/cli-terminal-hook-pane-key.md.
-        env: expect.objectContaining({
-          ORCA_ROOT_PATH: '/tmp/repo',
-          ORCA_WORKTREE_PATH: '/tmp/workspaces/runtime-hook-skip',
-          ORCA_TAB_ID: expect.stringMatching(/^[0-9a-f-]+$/),
-          ORCA_PANE_KEY: expect.stringMatching(/^[0-9a-f-]+:1$/),
-          ORCA_WORKTREE_ID: result.worktree.id
-        }),
-        worktreeId: result.worktree.id
-      })
-    )
-    const setupSpawnEnv =
-      (spawn.mock.calls[1]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
-    expect(setupSpawnEnv.ORCA_PANE_KEY).toBe(`${setupSpawnEnv.ORCA_TAB_ID}:1`)
-    expect(revealTerminalSession).toHaveBeenLastCalledWith(result.worktree.id, {
-      ptyId: 'pty-setup',
-      title: 'Setup',
-      activate: false,
-      tabId: setupSpawnEnv.ORCA_TAB_ID
-    })
   })
 
   it('creates the first terminal for CLI-created worktrees without activating them', async () => {
@@ -1887,7 +1843,7 @@ describe('OrcaRuntimeService', () => {
       activate: true
     })
 
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), undefined)
+    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String))
   })
 
   it('stamps createdAt alongside lastActivityAt so CLI-created worktrees get the Recent-sort grace window', async () => {

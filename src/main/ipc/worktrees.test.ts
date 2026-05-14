@@ -122,9 +122,19 @@ vi.mock('../terminal-history', () => ({
   deleteWorktreeHistoryDir: deleteWorktreeHistoryDirMock
 }))
 
-const { killAllProcessesForWorktreeMock, getLocalPtyProviderMock } = vi.hoisted(() => ({
-  killAllProcessesForWorktreeMock: vi.fn(),
-  getLocalPtyProviderMock: vi.fn()
+const { killAllProcessesForWorktreeMock, getLocalPtyProviderMock, runSetupMock } = vi.hoisted(
+  () => ({
+    killAllProcessesForWorktreeMock: vi.fn(),
+    getLocalPtyProviderMock: vi.fn(),
+    runSetupMock: vi.fn()
+  })
+)
+
+// Why: Phase 7 routes the auto-spawn setup PTY through the per-worktree
+// setup-script registry. The IPC tests assert the handler delegates to
+// runSetup; mock it so they don't need to wire a real PTY provider.
+vi.mock('./setup-script', () => ({
+  runSetup: runSetupMock
 }))
 
 vi.mock('../runtime/worktree-teardown', () => ({
@@ -204,7 +214,8 @@ describe('registerWorktreeHandlers', () => {
       store.setWorktreeMeta,
       store.removeWorktreeMeta,
       killAllProcessesForWorktreeMock,
-      getLocalPtyProviderMock
+      getLocalPtyProviderMock,
+      runSetupMock
     ]) {
       m.mockReset()
     }
@@ -214,6 +225,7 @@ describe('registerWorktreeHandlers', () => {
       registryStopped: 0
     })
     getLocalPtyProviderMock.mockReturnValue({} as never)
+    runSetupMock.mockResolvedValue({ ok: true, ptyId: 'mock-setup-pty' })
 
     for (const key of Object.keys(handlers)) {
       delete handlers[key]
@@ -942,7 +954,11 @@ describe('registerWorktreeHandlers', () => {
     }
   ]
 
-  it('returns a setup launch payload when setup should run', async () => {
+  it('routes the setup PTY through runSetup when setup should run', async () => {
+    // Why: Phase 7 — the setup PTY is owned by main's per-worktree
+    // setup-script registry (runSetup) and surfaced via setup:started in
+    // the right-sidebar Setup tab. The create flow no longer returns a
+    // setup payload; it just invokes runSetup with the new worktree id.
     listWorktreesMock.mockResolvedValue(createdWorktreeList)
     getEffectiveHooksMock.mockReturnValue({
       scripts: {
@@ -957,24 +973,16 @@ describe('registerWorktreeHandlers', () => {
       setupDecision: 'run'
     })
 
-    expect(createSetupRunnerScriptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'repo-1' }),
-      '/workspace/improve-dashboard',
-      'pnpm worktree:setup'
-    )
+    expect(runSetupMock).toHaveBeenCalledWith(expect.objectContaining({ store }), {
+      worktreeId: 'repo-1::/workspace/improve-dashboard'
+    })
+    expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
     expect(result).toEqual({
       worktree: expect.objectContaining({
         repoId: 'repo-1',
         path: '/workspace/improve-dashboard',
         branch: 'improve-dashboard'
-      }),
-      setup: {
-        runnerScriptPath: '/workspace/repo/.git/orca/setup-runner.sh',
-        envVars: {
-          ORCA_ROOT_PATH: '/workspace/repo',
-          ORCA_WORKTREE_PATH: '/workspace/improve-dashboard'
-        }
-      }
+      })
     })
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
@@ -989,7 +997,10 @@ describe('registerWorktreeHandlers', () => {
     // Why: regression for a silent skip introduced by the #1280 content-equality
     // gate. Benign divergence (whitespace, comments, or any setup edit that
     // landed on the base branch but not yet in the primary checkout) must not
-    // disable setup — repo-level trust already gates execution.
+    // disable setup — repo-level trust already gates execution. Phase 7
+    // moved the runner-script generation inside runSetup, so this test now
+    // asserts that runSetup is invoked at all (the runner-script content
+    // path is covered by setup-script.test.ts).
     listWorktreesMock.mockResolvedValue(createdWorktreeList)
     getEffectiveHooksMock.mockImplementation((_repo, worktreePath?: string) => ({
       scripts: {
@@ -1004,15 +1015,14 @@ describe('registerWorktreeHandlers', () => {
       setupDecision: 'run'
     })
 
-    expect(createSetupRunnerScriptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'repo-1' }),
-      '/workspace/improve-dashboard',
-      'pnpm worktree:setup # worktree'
-    )
+    expect(runSetupMock).toHaveBeenCalledWith(expect.objectContaining({ store }), {
+      worktreeId: 'repo-1::/workspace/improve-dashboard'
+    })
+    expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
-        setup: expect.objectContaining({
-          runnerScriptPath: '/workspace/repo/.git/orca/setup-runner.sh'
+        worktree: expect.objectContaining({
+          path: '/workspace/improve-dashboard'
         })
       })
     )
@@ -1185,7 +1195,11 @@ describe('registerWorktreeHandlers', () => {
     }
   )
 
-  it('still returns the created worktree when setup runner generation fails', async () => {
+  it('still returns the created worktree when setup PTY spawn fails', async () => {
+    // Why: the git worktree is real on disk by the time runSetup is invoked.
+    // A spawn-failed result from the setup-script registry must not be
+    // promoted to a create failure — surface it in logs and return the
+    // worktree so the user sees their workspace appear.
     listWorktreesMock.mockResolvedValue(createdWorktreeList)
     getEffectiveHooksMock.mockReturnValue({
       scripts: {
@@ -1193,9 +1207,8 @@ describe('registerWorktreeHandlers', () => {
       }
     })
     shouldRunSetupForCreateMock.mockReturnValue(true)
-    createSetupRunnerScriptMock.mockImplementation(() => {
-      throw new Error('disk full')
-    })
+    runSetupMock.mockResolvedValueOnce({ ok: false, reason: 'spawn-failed' as const })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const result = await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
@@ -1203,6 +1216,7 @@ describe('registerWorktreeHandlers', () => {
       setupDecision: 'run'
     })
 
+    errSpy.mockRestore()
     expect(result).toEqual({
       worktree: expect.objectContaining({
         repoId: 'repo-1',
@@ -1361,5 +1375,6 @@ describe('registerWorktreeHandlers', () => {
     expect(addWorktreeMock).not.toHaveBeenCalled()
     expect(store.setWorktreeMeta).not.toHaveBeenCalled()
     expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
+    expect(runSetupMock).not.toHaveBeenCalled()
   })
 })

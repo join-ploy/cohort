@@ -1357,7 +1357,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         request_kind: 'new'
       }
       activateAndRevealWorktree(worktree.id, {
-        setup: result.setup,
         issueCommand,
         ...(startupPlan
           ? {
@@ -1558,9 +1557,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
                   telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
                 request_kind: 'new'
               }
-        activateAndRevealWorktree(worktree.id, {
-          setup: result.setup,
-          ...(startupPlan
+        activateAndRevealWorktree(
+          worktree.id,
+          startupPlan
             ? {
                 startup: {
                   command: startupPlan.launchCommand,
@@ -1568,8 +1567,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
                   ...(quickTelemetry ? { telemetry: quickTelemetry } : {})
                 }
               }
-            : {})
-        })
+            : undefined
+        )
         if (startupPlan) {
           void ensureAgentStartupInTerminal({
             worktreeId: worktree.id,

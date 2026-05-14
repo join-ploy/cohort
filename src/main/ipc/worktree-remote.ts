@@ -27,7 +27,8 @@ import { parseGitHubOwnerRepo } from '../github/gh-utils'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { RemoteFetchResult, RemoteTrackingBase } from '../runtime/orca-runtime'
 import { isWslPath, parseWslPath, getWslHome } from '../wsl'
-import { createSetupRunnerScript, getEffectiveHooks, shouldRunSetupForCreate } from '../hooks'
+import { getEffectiveHooks, shouldRunSetupForCreate } from '../hooks'
+import { runSetup } from './setup-script'
 import { getSshGitProvider } from '../providers/ssh-git-dispatch'
 import { getActiveMultiplexer } from './ssh'
 import type { SshGitProvider } from '../providers/ssh-git-provider'
@@ -646,7 +647,6 @@ export async function createLocalWorktree(
   // but not yet been pulled into the primary checkout) was silently
   // disabling setup with no UI signal. See #1280 for the original gate and
   // the regression this replaced.
-  let setup: CreateWorktreeResult['setup']
   const setupScript = getEffectiveHooks(repo, worktreePath)?.scripts.setup
   let shouldLaunchSetup = false
   if (setupScript) {
@@ -661,19 +661,14 @@ export async function createLocalWorktree(
     }
   }
   if (setupScript && shouldLaunchSetup) {
-    try {
-      // Why: setup now runs in a visible terminal owned by the renderer so users
-      // can inspect failures, answer prompts, and rerun it. The main process only
-      // resolves policy and writes the runner script; it must not execute setup
-      // itself anymore or we would reintroduce the hidden background-hook behavior.
-      //
-      // Why: the git worktree already exists at this point. If runner generation
-      // fails, surfacing the error as a hard create failure would lie to the UI
-      // about the underlying git state and strand a real worktree on disk.
-      // Degrade to "created without setup launch" instead.
-      setup = createSetupRunnerScript(repo, worktreePath, setupScript)
-    } catch (error) {
-      console.error(`[hooks] Failed to prepare setup runner for ${worktreePath}:`, error)
+    // Why: Phase 7 routes the setup PTY into the right-sidebar Setup tab,
+    // owned by main's per-worktree setup-script registry. runSetup spawns
+    // the PTY and broadcasts setup:started; the renderer's SetupPanel mounts
+    // it. Failures return a structured result rather than throwing so the
+    // git create stays successful even if the setup PTY can't spawn.
+    const setupResult = await runSetup({ store }, { worktreeId })
+    if (!setupResult.ok && setupResult.reason !== 'no-setup-script') {
+      console.error(`[setup-script] auto-spawn failed for ${worktreePath}: ${setupResult.reason}`)
     }
   }
 
@@ -723,7 +718,6 @@ export async function createLocalWorktree(
   notifyWorktreesChanged(mainWindow, repo.id)
   return {
     worktree,
-    ...(setup ? { setup } : {}),
     ...(initialBaseStatus ? { initialBaseStatus } : {})
   }
 }

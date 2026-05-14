@@ -312,7 +312,6 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     }
 
     const activation = activateAndRevealWorktree(worktreeId, {
-      setup: result.setup,
       ...buildStartupOpts(effectiveAgent, startupPlan, launchSource)
     })
     if (!activation) {

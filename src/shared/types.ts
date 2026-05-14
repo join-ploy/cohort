@@ -904,7 +904,6 @@ export type CreateWorktreeArgs = {
 
 export type CreateWorktreeResult = {
   worktree: Worktree
-  setup?: WorktreeSetupLaunch
   warning?: string
   initialBaseStatus?: WorktreeBaseStatusEvent
 }

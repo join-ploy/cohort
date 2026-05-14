@@ -25,7 +25,6 @@ import type {
 } from '../../shared/types'
 import { getRepoIdFromWorktreeId, splitWorktreeId } from '../../shared/worktree-id'
 import { isFolderRepo } from '../../shared/repo-kind'
-import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
 import { FIRST_PANE_ID } from '../../shared/pane-key'
 import {
   DESKTOP_PROTOCOL_VERSION,
@@ -129,13 +128,13 @@ import { listWorktrees, addWorktree, removeWorktree } from '../git/worktree'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import {
-  createSetupRunnerScript,
   getEffectiveHooks,
   getEffectiveSetupRunPolicy,
   hasHooksFile,
   runHook,
   shouldRunSetupForCreate
 } from '../hooks'
+import { runSetup } from '../ipc/setup-script'
 import { REPO_COLORS } from '../../shared/constants'
 import { listRepoWorktrees } from '../repo-worktrees'
 import type { Store } from '../persistence'
@@ -307,12 +306,7 @@ type RuntimeNotifier = {
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
   worktreeRemoteBranchConflict?(event: WorktreeRemoteBranchConflictEvent): void
   reposChanged(): void
-  activateWorktree(
-    repoId: string,
-    worktreeId: string,
-    setup?: CreateWorktreeResult['setup'],
-    startup?: WorktreeStartupLaunch
-  ): void
+  activateWorktree(repoId: string, worktreeId: string, startup?: WorktreeStartupLaunch): void
   createTerminal(worktreeId: string, opts: { command?: string; title?: string }): void
   revealTerminalSession?(
     worktreeId: string,
@@ -3851,7 +3845,6 @@ export class OrcaRuntimeService {
     })
     const worktree = mergeWorktree(repo.id, created, meta)
 
-    let setup: CreateWorktreeResult['setup']
     let warning: string | undefined
     // Why: CLI-created worktrees do not have a renderer preview to mismatch
     // against. Trust is granted by the direct CLI invocation (`--run-hooks`),
@@ -3865,17 +3858,21 @@ export class OrcaRuntimeService {
     const shouldRunSetup = hooks?.scripts.setup && shouldRunSetupForCreate(repo, effectiveDecision)
     if (shouldRunSetup && hooks?.scripts.setup) {
       if (this.authoritativeWindowId !== null) {
-        try {
-          // Why: CLI-created worktrees must use the same runner-script path as the
-          // renderer create flow so repo-committed `orca.yaml` setup hooks run in
-          // the visible first terminal instead of a hidden background shell with
-          // different failure and prompt behavior.
-          setup = createSetupRunnerScript(repo, worktreePath, hooks.scripts.setup)
-        } catch (error) {
-          // Why: the git worktree is already real at this point. If runner
-          // generation fails, keep creation successful and surface the problem in
-          // logs rather than pretending the worktree was never created.
-          console.error(`[hooks] Failed to prepare setup runner for ${worktreePath}:`, error)
+        // Why: setup PTY now lives in the right-sidebar Setup tab, owned by
+        // main's per-worktree setup-script registry. runSetup spawns the PTY
+        // and broadcasts setup:started; the renderer's SetupPanel mounts it.
+        // Failures return a structured result rather than throwing so the
+        // create remains successful even if the setup PTY can't spawn. Cast
+        // is safe because runSetup only reads `getRepo`, which RuntimeStore
+        // declares with the same Store['getRepo'] signature above.
+        const setupResult = await runSetup(
+          { store: this.store as unknown as Store },
+          { worktreeId: worktree.id }
+        )
+        if (!setupResult.ok && setupResult.reason !== 'no-setup-script') {
+          console.error(
+            `[setup-script] auto-spawn failed for ${worktreePath}: ${setupResult.reason}`
+          )
         }
       } else {
         void runHook('setup', worktreePath, repo, worktreePath).then((result) => {
@@ -3902,25 +3899,20 @@ export class OrcaRuntimeService {
     if (shouldActivate) {
       // Why: plain CLI creates should not steal the user's current workspace.
       // Startup launches still use renderer activation because they are an
-      // explicit request to start visible work in the new worktree.
+      // explicit request to start visible work in the new worktree. The setup
+      // PTY (when present) was already routed to the right-sidebar Setup tab
+      // above, so we no longer thread a setup payload through this call.
       if (args.startup) {
-        this.notifier?.activateWorktree(repo.id, worktree.id, setup, args.startup)
+        this.notifier?.activateWorktree(repo.id, worktree.id, args.startup)
       } else {
-        this.notifier?.activateWorktree(repo.id, worktree.id, setup)
+        this.notifier?.activateWorktree(repo.id, worktree.id)
       }
     } else if (this.ptyController?.spawn) {
       try {
+        // Why: CLI-created worktrees still get a regular terminal for the user
+        // to land in. Setup output no longer crowds this tab — it streams into
+        // the right-sidebar Setup tab via setup:started/setup:exited events.
         await this.createTerminal(`path:${worktree.path}`)
-        if (setup) {
-          await this.createTerminal(`path:${worktree.path}`, {
-            title: 'Setup',
-            command: buildSetupRunnerCommand(
-              setup.runnerScriptPath,
-              process.platform === 'win32' ? 'windows' : 'posix'
-            ),
-            env: setup.envVars
-          })
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
@@ -3931,7 +3923,6 @@ export class OrcaRuntimeService {
     }
     return {
       worktree,
-      ...(setup ? { setup } : {}),
       ...(warning ? { warning } : {})
     }
   }
