@@ -12,7 +12,7 @@ import type {
   RunStartResult,
   RunStopArgs,
   RunStopResult
-} from '../../../../shared/run-script-types'
+} from '../../../../shared/script-types'
 
 // Why: header lives next to the terminal output area inside the same
 // flex column so the terminal area can grow to fill remaining space.

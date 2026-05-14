@@ -13,6 +13,7 @@ import { registerWorktreeHandlers } from '../ipc/worktrees'
 import { registerPtyHandlers } from '../ipc/pty'
 import { registerDaemonManagementHandlers } from '../ipc/pty-management'
 import { registerRunScriptIpc } from '../ipc/run-script'
+import { registerSetupScriptIpc } from '../ipc/setup-script'
 import { registerSshHandlers } from '../ipc/ssh'
 import { browserManager } from '../browser/browser-manager'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from '../browser/browser-media-access'
@@ -64,6 +65,10 @@ export function attachMainWindowServices(
   // run-script imports getLocalPtyProvider/getSshPtyProvider at call time so
   // ordering only affects the first invocation, not module load.
   registerRunScriptIpc({ store })
+  // Why: per-worktree setup-script registry + setup:start/setup:stop IPC.
+  // Same provider-resolution rules as run-script — registered alongside it so
+  // the wiring stays together for both lifecycle surfaces.
+  registerSetupScriptIpc({ store })
   // Why: do not enumerate repo paths from background GC. `git worktree list`
   // can re-touch protected folders on macOS and trigger folder-access prompts.
   scheduleHistoryGc(async () => {

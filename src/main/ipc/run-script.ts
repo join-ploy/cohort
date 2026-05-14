@@ -16,7 +16,7 @@ import type {
   RunStartedEvent,
   RunStartResult,
   RunStopResult
-} from '../../shared/run-script-types'
+} from '../../shared/script-types'
 import { parseWorktreeId } from './worktree-logic'
 
 import { getLocalPtyProvider, getSshPtyProvider } from './pty'
@@ -24,7 +24,7 @@ import { getLocalPtyProvider, getSshPtyProvider } from './pty'
 // Why: re-export the IPC contract types so existing main-side importers
 // (and the test file) keep their import paths stable while the canonical
 // declarations now live in src/shared for renderer + preload reuse.
-export type { RunStartResult, RunStopResult } from '../../shared/run-script-types'
+export type { RunStartResult, RunStopResult } from '../../shared/script-types'
 
 type RunPtyEntry = {
   ptyId: string
