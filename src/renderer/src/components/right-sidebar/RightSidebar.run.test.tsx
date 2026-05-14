@@ -112,7 +112,10 @@ describe('RightSidebar activity bar — Run/Setup gating', () => {
 })
 
 describe('RightSidebar activity bar — Run/Setup status dots', () => {
-  it('Run dot transitions amber-pulse → emerald → rose with the script status', async () => {
+  it('Run dot shows amber-pulse while running and vanishes after exit', async () => {
+    // Why: the activity-bar dot is a "live now" pulse — once the script exits
+    // (success or failure) the dot vanishes. Final exit status is surfaced
+    // inside the Run panel itself, not on the activity-bar icon.
     const { default: RightSidebar } = await import('./index')
 
     // idle: no dot
@@ -132,7 +135,7 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     expect(runBtn).toContain('bg-amber-500')
     expect(runBtn).toContain('animate-pulse')
 
-    // exited-success: emerald, no pulse
+    // exited-success: no dot
     mockState = baseState({
       scriptsByWorktree: {
         'wt-1': scriptsEntry({ run: { status: 'exited-success', exitCode: 0 } })
@@ -140,10 +143,11 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     })
     html = renderToStaticMarkup(<RightSidebar />)
     runBtn = buttonHtmlFor(html, /Run \(/)
-    expect(runBtn).toContain('bg-emerald-500')
-    expect(runBtn).not.toContain('animate-pulse')
+    expect(runBtn).not.toContain('bg-amber-500')
+    expect(runBtn).not.toContain('bg-emerald-500')
+    expect(runBtn).not.toContain('bg-rose-500')
 
-    // exited-failure: rose, no pulse
+    // exited-failure: no dot
     mockState = baseState({
       scriptsByWorktree: {
         'wt-1': scriptsEntry({ run: { status: 'exited-failure', exitCode: 1 } })
@@ -151,8 +155,9 @@ describe('RightSidebar activity bar — Run/Setup status dots', () => {
     })
     html = renderToStaticMarkup(<RightSidebar />)
     runBtn = buttonHtmlFor(html, /Run \(/)
-    expect(runBtn).toContain('bg-rose-500')
-    expect(runBtn).not.toContain('animate-pulse')
+    expect(runBtn).not.toContain('bg-amber-500')
+    expect(runBtn).not.toContain('bg-emerald-500')
+    expect(runBtn).not.toContain('bg-rose-500')
   })
 
   it('Setup dot shows amber-pulse while running and vanishes after exit', async () => {

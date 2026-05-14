@@ -20,8 +20,7 @@ import {
   ACTIVITY_ITEMS,
   ActivityBarButton,
   ActivityBarPositionMenu,
-  scriptStatusToCheckStatus,
-  setupStatusToCheckStatus
+  scriptStatusToCheckStatus
 } from './activity-bar'
 import type { ScriptStatus } from '@/store/slices/scripts'
 
@@ -219,11 +218,8 @@ function RightSidebarInner(): React.JSX.Element {
     let indicator: CheckStatus | null = null
     if (item.id === 'checks') {
       indicator = checksStatus
-    } else if (item.id === 'run' && scriptStatus) {
+    } else if ((item.id === 'run' || item.id === 'setup') && scriptStatus) {
       indicator = scriptStatusToCheckStatus(scriptStatus)
-    } else if (item.id === 'setup' && scriptStatus) {
-      // Why: setup uses a vanish-on-exit mapping (run keeps the emerald/rose).
-      indicator = setupStatusToCheckStatus(scriptStatus)
     }
     return (
       <ActivityBarButton
