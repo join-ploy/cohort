@@ -16,13 +16,12 @@ import type {
   TerminalLayoutSnapshot
 } from '../../../../shared/types'
 import type { EventProps } from '../../../../shared/telemetry-events'
-import { resolveTerminalFontWeights } from '../../../../shared/terminal-fonts'
 import {
-  buildFontFamily,
   collectLeafIdsInReplayCreationOrder,
   replayTerminalLayout,
   restoreScrollbackBuffers
 } from './layout-serialization'
+import { buildTerminalOptionsFromSettings } from '@/lib/pane-manager/build-terminal-options'
 import { applyExpandedLayoutTo, restoreExpandedLayoutFrom } from './expand-collapse'
 import {
   applyTerminalAppearance,
@@ -659,27 +658,21 @@ export function useTerminalPaneLifecycle({
           persistLayoutSnapshot()
         }
       },
-      terminalOptions: () => {
+      terminalOptions: (paneId) => {
         const currentSettings = settingsRef.current
-        const terminalFontWeights = resolveTerminalFontWeights(currentSettings?.terminalFontWeight)
-        return {
-          fontSize: currentSettings?.terminalFontSize ?? 12,
-          fontFamily: buildFontFamily(currentSettings?.terminalFontFamily ?? ''),
-          fontWeight: terminalFontWeights.fontWeight,
-          fontWeightBold: terminalFontWeights.fontWeightBold,
-          scrollback: Math.min(
-            50_000,
-            Math.max(
-              1000,
-              Math.round((currentSettings?.terminalScrollbackBytes ?? 10_000_000) / 200)
-            )
-          ),
-          cursorStyle: currentSettings?.terminalCursorStyle ?? 'bar',
-          cursorBlink: currentSettings?.terminalCursorBlink ?? true,
-          macOptionIsMeta: effectiveMacOptionAsAltRef.current === 'true',
-          lineHeight: currentSettings?.terminalLineHeight ?? 1,
-          wordSeparator: currentSettings?.terminalWordSeparator
+        // Why: settings can be null during the brief window before the
+        // store hydrates. Returning {} lets PaneManager fall back to
+        // `buildDefaultTerminalOptions()`, and the subsequent
+        // `applyAppearance(manager)` call (in onPaneCreated) re-applies
+        // the resolved settings the moment they arrive.
+        if (!currentSettings) {
+          return {}
         }
+        return buildTerminalOptionsFromSettings(currentSettings, {
+          effectiveMacOptionAsAlt: effectiveMacOptionAsAltRef.current,
+          systemPrefersDark: systemPrefersDarkRef.current,
+          paneSize: paneFontSizesRef.current.get(paneId)
+        })
       },
       onLinkClick: (event, url) => {
         if (!event) {

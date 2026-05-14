@@ -1,19 +1,24 @@
-import type { IDisposable, IParser, ITheme } from '@xterm/xterm'
+import type { IDisposable, IParser } from '@xterm/xterm'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { GlobalSettings } from '../../../../shared/types'
-import { resolveTerminalFontWeights } from '../../../../shared/terminal-fonts'
 import { resolveTerminalLigaturesEnabled } from '../../../../shared/terminal-ligatures'
-import {
-  getBuiltinTheme,
-  resolvePaneStyleOptions,
-  resolveEffectiveTerminalAppearance
-} from '@/lib/terminal-theme'
-import { buildFontFamily } from './layout-serialization'
+import { resolvePaneStyleOptions, resolveEffectiveTerminalAppearance } from '@/lib/terminal-theme'
 import { captureScrollState, restoreScrollState, safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { getFitOverrideForPty } from '@/lib/pane-manager/mobile-fit-overrides'
+import {
+  applyTerminalOptionsToTerminal,
+  hexToRgba as hexToRgbaImpl,
+  resolveTerminalThemeFromSettings
+} from '@/lib/pane-manager/build-terminal-options'
 import type { PtyTransport } from './pty-transport'
 import type { EffectiveMacOptionAsAlt } from '@/lib/keyboard-layout/detect-option-as-alt'
-import { HEX_COLOR_RE } from '../../../../shared/color-validation'
+
+// Why re-exported: `hexToRgba` historically lived in this file. The
+// implementation has moved to `build-terminal-options` (the new shared
+// settings → ITerminalOptions module) so the per-terminal apply path can
+// reuse it without an import cycle. External imports (notably
+// terminal-appearance.test.ts) keep working without churn.
+export const hexToRgba = hexToRgbaImpl
 
 // Contour/Kitty "color-scheme update" protocol (DEC mode 2031 + CSI 997):
 // the terminal pushes `CSI ?997;1n` for dark and `CSI ?997;2n` for light to
@@ -130,24 +135,6 @@ export function maybePushMode2031Flip(
   return true
 }
 
-export function hexToRgba(hex: string, alpha: number): string {
-  let clean = hex.replace('#', '')
-  if (clean.length === 3) {
-    clean = clean
-      .split('')
-      .map((c) => c + c)
-      .join('')
-  }
-  const r = parseInt(clean.slice(0, 2), 16)
-  const g = parseInt(clean.slice(2, 4), 16)
-  const b = parseInt(clean.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
-function isHexColor(value: string): boolean {
-  return HEX_COLOR_RE.test(value)
-}
-
 export function applyTerminalAppearance(
   manager: PaneManager,
   settings: GlobalSettings,
@@ -160,60 +147,25 @@ export function applyTerminalAppearance(
 ): void {
   const appearance = resolveEffectiveTerminalAppearance(settings, systemPrefersDark)
   const paneStyles = resolvePaneStyleOptions(settings)
-  let theme: ITheme | null = appearance.theme ?? getBuiltinTheme(appearance.themeName)
+  // Why: resolve once at the manager level so every pane sees the same
+  // background and the manager's pane-style colors stay in sync with the
+  // terminal's xterm-side theme. The per-terminal helper re-derives the
+  // same values internally — keeping it pure-by-settings — but we still
+  // need the resolved background string here for setPaneStyleOptions().
+  const { theme } = resolveTerminalThemeFromSettings(settings, systemPrefersDark)
+  const paneBackground = theme?.background ?? '#000000'
 
-  // Why: merge user-imported Ghostty color overrides on top of the resolved
-  // base theme so individual colors can be tweaked without losing the rest.
-  if (theme && settings.terminalColorOverrides) {
-    theme = { ...theme, ...settings.terminalColorOverrides }
-  }
-
-  let paneBackground = theme?.background ?? '#000000'
-
-  // Why: Ghostty's background-opacity controls the terminal's base alpha.
-  // We convert the hex background to rgba and enable xterm transparency.
-  if (settings.terminalBackgroundOpacity !== undefined && theme?.background) {
-    paneBackground = hexToRgba(theme.background, settings.terminalBackgroundOpacity)
-    theme = { ...theme, background: paneBackground }
-  }
-
-  // Why: Ghostty's cursor-opacity applies alpha to the cursor color. We only
-  // convert when the resolved cursor is a hex value; named CSS colors are
-  // left untouched because hexToRgba expects a hex input.
-  if (settings.terminalCursorOpacity !== undefined && theme?.cursor && isHexColor(theme.cursor)) {
-    theme = { ...theme, cursor: hexToRgba(theme.cursor, settings.terminalCursorOpacity) }
-  }
-
-  const terminalFontWeights = resolveTerminalFontWeights(settings.terminalFontWeight)
   const ligaturesEnabled = resolveTerminalLigaturesEnabled(
     settings.terminalLigatures,
     settings.terminalFontFamily
   )
 
   for (const pane of manager.getPanes()) {
-    if (theme) {
-      pane.terminal.options.theme = theme
-    }
-    // Why: xterm's allowTransparency has measurable rendering cost, so clear
-    // it explicitly when opacity is at (or above) 1 to avoid a stale `true`
-    // bleeding in from a prior opacity setting that has since been reset.
-    pane.terminal.options.allowTransparency =
-      settings.terminalBackgroundOpacity !== undefined && settings.terminalBackgroundOpacity < 1
-    pane.terminal.options.cursorStyle = settings.terminalCursorStyle
-    pane.terminal.options.cursorBlink = settings.terminalCursorBlink
-    const paneSize = paneFontSizes.get(pane.id)
-    pane.terminal.options.fontSize = paneSize ?? settings.terminalFontSize
-    pane.terminal.options.fontFamily = buildFontFamily(settings.terminalFontFamily)
-    pane.terminal.options.fontWeight = terminalFontWeights.fontWeight
-    pane.terminal.options.fontWeightBold = terminalFontWeights.fontWeightBold
-    // Why: xterm's macOptionIsMeta only flips on the 'true' mode. 'left' and
-    // 'right' are handled in the keydown policy (terminal-shortcut-policy),
-    // which needs Option to stay composable at the xterm level for the
-    // non-Meta side. Treating only 'true' as Meta here matches the pre-
-    // detection behavior; the detection layer simply decides *what* value
-    // `effectiveMacOptionAsAlt` carries.
-    pane.terminal.options.macOptionIsMeta = effectiveMacOptionAsAlt === 'true'
-    pane.terminal.options.lineHeight = settings.terminalLineHeight
+    applyTerminalOptionsToTerminal(pane.terminal, settings, {
+      effectiveMacOptionAsAlt,
+      systemPrefersDark,
+      paneSize: paneFontSizes.get(pane.id)
+    })
     // Why call unconditionally: the per-pane helper is a no-op when the
     // current addon state already matches, so passing the resolved value on
     // every appearance apply keeps newly-created panes in sync without a
