@@ -32,8 +32,14 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
   const lines = content.split(/\r?\n/)
 
   let currentSection: 'scripts' | 'issueCommand' | null = null
-  let currentKey: 'setup' | 'archive' | null = null
+  let currentKey: 'setup' | 'archive' | 'run' | null = null
   let issueCommandValue = ''
+
+  // Why: an inline scalar written as `run: ''` or `run: ""` should behave the same as
+  // omitting the key — without this, the literal quote characters survive and the empty
+  // guard below would treat the script as set.
+  const stripEmptyQuotedScalar = (value: string): string =>
+    value === "''" || value === '""' ? '' : value
 
   for (const line of lines) {
     const topLevelKeyMatch = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(\|)?\s*(.*)$/)
@@ -69,14 +75,15 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
 
     if (currentSection === 'scripts') {
       // Indented key like "  setup: |" or "  archive: |" or "  setup: echo hello"
-      const keyMatch = line.match(/^  (setup|archive):\s*(\|)?\s*(.*)$/)
+      const keyMatch = line.match(/^  (setup|archive|run):\s*(\|)?\s*(.*)$/)
       if (keyMatch) {
         // Save previous key
         if (currentKey) {
           hooks.scripts[currentKey] = issueCommandValue.trimEnd()
         }
-        currentKey = keyMatch[1] as 'setup' | 'archive'
-        issueCommandValue = keyMatch[3] ? `${keyMatch[3]}\n` : ''
+        currentKey = keyMatch[1] as 'setup' | 'archive' | 'run'
+        const inlineValue = stripEmptyQuotedScalar(keyMatch[3] ?? '')
+        issueCommandValue = inlineValue ? `${inlineValue}\n` : ''
         continue
       }
 
@@ -101,7 +108,7 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
     hooks.issueCommand = issueCommandValue.trimEnd() || undefined
   }
 
-  if (!hooks.scripts.setup && !hooks.scripts.archive && !hooks.issueCommand) {
+  if (!hooks.scripts.setup && !hooks.scripts.archive && !hooks.scripts.run && !hooks.issueCommand) {
     return null
   }
   return hooks
