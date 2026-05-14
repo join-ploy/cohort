@@ -264,6 +264,40 @@ export async function handleRunStop(
   return { ok: true }
 }
 
+// Why: invoked from the worktree-deletion path. The run registry is keyed by
+// repoId and might be owned by a sibling worktree of the same repo; only kill
+// when this worktree owns the entry. Best-effort shutdown — a backend that
+// has already lost the session must not block the registry purge or the
+// renderer state flip. Must run before git-level removal so the PTY's cwd
+// still exists at shutdown time.
+export async function killRunForWorktree(
+  args: { repoId: string; worktreeId: string },
+  deps: RunIpcDeps
+): Promise<void> {
+  const entry = get(args.repoId)
+  if (!entry || entry.worktreeId !== args.worktreeId) {
+    return
+  }
+
+  const repo = deps.store.getRepo(args.repoId)
+  const provider = getProviderForConnection(repo?.connectionId)
+  if (provider) {
+    try {
+      await provider.shutdown(entry.ptyId, { immediate: true })
+    } catch (err) {
+      console.warn(
+        `[run-script] shutdown of ${entry.ptyId} during worktree-delete failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+  clearIfMatches(args.repoId, entry.ptyId, entry.generation)
+  broadcast('run:exited', {
+    repoId: args.repoId,
+    worktreeId: args.worktreeId,
+    code: SIGINT_EXIT_CODE
+  })
+}
+
 export function registerRunScriptIpc(deps: RunIpcDeps): void {
   ipcMain.removeHandler('run:start')
   ipcMain.removeHandler('run:stop')

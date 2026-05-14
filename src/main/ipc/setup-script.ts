@@ -255,6 +255,48 @@ export async function handleSetupStop(
   return { ok: true }
 }
 
+// Why: invoked from the worktree-deletion path. Setup registry is keyed by
+// worktreeId — the lookup is direct, no sibling-ownership check needed.
+// Best-effort shutdown so a stale backend doesn't block the registry purge
+// or the renderer's state flip. Must run before git-level removal so the
+// PTY's cwd still exists at shutdown time.
+export async function killSetupForWorktree(
+  args: { worktreeId: string },
+  deps: SetupIpcDeps
+): Promise<void> {
+  const entry = get(args.worktreeId)
+  if (!entry) {
+    return
+  }
+
+  let repoId: string
+  try {
+    repoId = parseWorktreeId(args.worktreeId).repoId
+  } catch {
+    // Defensive: registry entries arise from successfully parsed ids, but the
+    // delete path may pass through malformed ids in rare error paths.
+    repoId = args.worktreeId.split('::')[0] ?? ''
+  }
+
+  const repo = deps.store.getRepo(repoId)
+  const provider = getProviderForConnection(repo?.connectionId)
+  if (provider) {
+    try {
+      await provider.shutdown(entry.ptyId, { immediate: true })
+    } catch (err) {
+      console.warn(
+        `[setup-script] shutdown of ${entry.ptyId} during worktree-delete failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+  clearIfMatches(args.worktreeId, entry.ptyId, entry.generation)
+  broadcast('setup:exited', {
+    repoId,
+    worktreeId: args.worktreeId,
+    code: SIGINT_EXIT_CODE
+  })
+}
+
 export function registerSetupScriptIpc(deps: SetupIpcDeps): void {
   ipcMain.removeHandler('setup:start')
   ipcMain.removeHandler('setup:stop')
