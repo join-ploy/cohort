@@ -78,6 +78,7 @@ describe('SetupPanelView — empty state', () => {
       <SetupPanelView
         setupScript={undefined}
         setupState={null}
+        isPrimaryWorktree={false}
         onReRun={() => {}}
         onStop={() => {}}
         onOpenOrcaYaml={() => {}}
@@ -96,6 +97,7 @@ describe('SetupPanelView — empty state', () => {
       <SetupPanelView
         setupScript={undefined}
         setupState={null}
+        isPrimaryWorktree={false}
         onReRun={() => {}}
         onStop={() => {}}
         onOpenOrcaYaml={() => {}}
@@ -111,6 +113,7 @@ describe('SetupPanelView — empty state', () => {
       <SetupPanelView
         setupScript="pnpm install"
         setupState={IDLE}
+        isPrimaryWorktree={false}
         onReRun={() => {}}
         onStop={() => {}}
         onOpenOrcaYaml={() => {}}
@@ -128,6 +131,7 @@ describe('SetupPanelView — empty state', () => {
       <SetupPanelView
         setupScript="pnpm install"
         setupState={IDLE}
+        isPrimaryWorktree={false}
         onReRun={() => {}}
         onStop={() => {}}
         onOpenOrcaYaml={() => {}}
@@ -146,6 +150,7 @@ describe('SetupPanelView — Re-run / Stop buttons', () => {
     const element = SetupPanelView({
       setupScript: 'pnpm install',
       setupState: IDLE,
+      isPrimaryWorktree: false,
       onReRun,
       onStop,
       onOpenOrcaYaml: () => {}
@@ -163,6 +168,7 @@ describe('SetupPanelView — Re-run / Stop buttons', () => {
     const element = SetupPanelView({
       setupScript: 'pnpm install',
       setupState: { ...IDLE, status: 'running', ptyId: 'p-1', startedAt: 1 },
+      isPrimaryWorktree: false,
       onReRun,
       onStop,
       onOpenOrcaYaml: () => {}
@@ -179,6 +185,7 @@ describe('SetupPanelView — Re-run / Stop buttons', () => {
       <SetupPanelView
         setupScript="pnpm install"
         setupState={{ ...IDLE, status: 'exited-failure', ptyId: 'p-1', exitCode: 1 }}
+        isPrimaryWorktree={false}
         onReRun={() => {}}
         onStop={() => {}}
         onOpenOrcaYaml={() => {}}
@@ -186,6 +193,63 @@ describe('SetupPanelView — Re-run / Stop buttons', () => {
     )
     expect(html).toMatch(/exited 1/i)
     expect(html).toMatch(/aria-label="Re-run/)
+  })
+})
+
+describe('SetupPanelView — primary worktree disabled state', () => {
+  it('renders the primary-state copy (no Re-run/Stop) when active worktree is primary and a script is configured', async () => {
+    // Why: setup is only valid for `git worktree add`-created worktrees.
+    // On the primary checkout, the panel must visibly explain why the
+    // re-run controls are absent rather than silently doing nothing.
+    const { SetupPanelView } = await import('./SetupPanel')
+    const html = renderToStaticMarkup(
+      <SetupPanelView
+        setupScript="pnpm install"
+        setupState={IDLE}
+        isPrimaryWorktree={true}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(html).toMatch(/setup runs only when creating worktrees/i)
+    expect(html).toMatch(/switch to a worktree/i)
+    expect(html).not.toMatch(/aria-label="Re-run/)
+    expect(html).not.toMatch(/aria-label="Stop/)
+  })
+
+  it('still renders the empty state when no setup script is configured even on primary', async () => {
+    // Why: empty-state wins over primary-state — the user's first action
+    // should be configuring scripts.setup, not switching worktrees.
+    const { SetupPanelView } = await import('./SetupPanel')
+    const html = renderToStaticMarkup(
+      <SetupPanelView
+        setupScript={undefined}
+        setupState={null}
+        isPrimaryWorktree={true}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(html).toMatch(/no setup script configured/i)
+    expect(html).not.toMatch(/setup runs only when creating worktrees/i)
+  })
+
+  it('renders the normal panel header (Re-run button) when a script is configured and worktree is not primary', async () => {
+    const { SetupPanelView } = await import('./SetupPanel')
+    const html = renderToStaticMarkup(
+      <SetupPanelView
+        setupScript="pnpm install"
+        setupState={IDLE}
+        isPrimaryWorktree={false}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(html).toMatch(/aria-label="Re-run/)
+    expect(html).not.toMatch(/setup runs only when creating worktrees/i)
   })
 })
 

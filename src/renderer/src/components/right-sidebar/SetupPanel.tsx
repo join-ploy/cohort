@@ -28,6 +28,10 @@ export type SetupPanelViewProps = {
   setupScript: string | undefined
   /** Per-worktree setup state mirrored from the scripts slice. */
   setupState: ScriptState | null
+  /** True when the active worktree is the primary working tree. Setup is
+   *  reserved for `git worktree add`-created worktrees, so this branch
+   *  renders an explanatory disabled state instead of the Re-run controls. */
+  isPrimaryWorktree: boolean
   onReRun: () => void
   onStop: () => void
   /** Open the repo's orca.yaml in the editor (no-op until Phase 8 wires it). */
@@ -97,6 +101,22 @@ function SetupTerminalArea({ ptyId }: { ptyId: string | null }): React.JSX.Eleme
   return <SidebarPtyTerminal key={ptyId} ptyId={ptyId} />
 }
 
+function SetupPrimaryState(): React.JSX.Element {
+  // Why: setup runs only for `git worktree add`-created worktrees. The
+  // primary checkout has no Re-run/Stop controls — surface that visibly so
+  // the missing buttons aren't mistaken for a bug.
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-sm font-semibold text-foreground">
+        Setup runs only when creating worktrees
+      </p>
+      <p className="text-xs text-muted-foreground/80">
+        Setup is disabled for the primary repo. Switch to a worktree to view or re-run setup.
+      </p>
+    </div>
+  )
+}
+
 function SetupEmptyState({ onOpenOrcaYaml }: { onOpenOrcaYaml: () => void }): React.JSX.Element {
   // Why: Orca consumes scripts.setup from either orca.yaml or conductor.json,
   // so the copy mentions both options instead of nudging users toward yaml.
@@ -119,12 +139,18 @@ function SetupEmptyState({ onOpenOrcaYaml }: { onOpenOrcaYaml: () => void }): Re
 export function SetupPanelView({
   setupScript,
   setupState,
+  isPrimaryWorktree,
   onReRun,
   onStop,
   onOpenOrcaYaml
 }: SetupPanelViewProps): React.JSX.Element {
+  // Why: empty-state wins over primary-state — the user's first action
+  // should be configuring scripts.setup, not switching worktrees.
   if (!setupScript) {
     return <SetupEmptyState onOpenOrcaYaml={onOpenOrcaYaml} />
+  }
+  if (isPrimaryWorktree) {
+    return <SetupPrimaryState />
   }
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -237,6 +263,7 @@ export default function SetupPanel(): React.JSX.Element {
     <SetupPanelView
       setupScript={setupScript}
       setupState={setupState}
+      isPrimaryWorktree={activeWorktree?.isMainWorktree ?? false}
       onReRun={onReRun}
       onStop={onStop}
       onOpenOrcaYaml={onOpenOrcaYaml}
