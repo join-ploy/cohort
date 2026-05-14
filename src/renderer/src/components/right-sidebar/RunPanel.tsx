@@ -1,10 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Play, Square } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
 import { useActiveWorktree, useRepoById } from '@/store/selectors'
 import type { ScriptState } from '@/store/slices/scripts'
 import type { OrcaHooks } from '../../../../shared/types'
+import type {
+  RunStartArgs,
+  RunStartResult,
+  RunStopArgs,
+  RunStopResult
+} from '../../../../shared/run-script-types'
 
 // Why: header lives next to the terminal output area inside the same
 // flex column so the terminal area can grow to fill remaining space.
@@ -125,6 +132,43 @@ export function RunPanelView({
   )
 }
 
+// Why: extracted from the React handlers so we can unit-test the result
+// branching (ok / spawn-failed / no-run-script / not-running) without
+// rendering the component or stubbing window.api globally. The injected
+// `start`/`stop`/`toastError` shape mirrors what the panel passes at runtime
+// and is the only seam we need for branch coverage. `not-running` from a
+// stop call is intentionally swallowed — clicking Stop on an already-exited
+// PTY is a benign race, not a user-facing error.
+async function callRunStart(
+  args: RunStartArgs,
+  deps: {
+    start: (args: RunStartArgs) => Promise<RunStartResult>
+    toastError: (message: string) => void
+  }
+): Promise<RunStartResult> {
+  const result = await deps.start(args)
+  if (!result.ok) {
+    deps.toastError(`Failed to start run script: ${result.reason}`)
+  }
+  return result
+}
+
+async function callRunStop(
+  args: RunStopArgs,
+  deps: {
+    stop: (args: RunStopArgs) => Promise<RunStopResult>
+    toastError: (message: string) => void
+  }
+): Promise<RunStopResult> {
+  const result = await deps.stop(args)
+  if (!result.ok && result.reason !== 'not-running') {
+    deps.toastError(`Failed to stop run script: ${result.reason}`)
+  }
+  return result
+}
+
+export const _testing = { callRunStart, callRunStop }
+
 export default function RunPanel(): React.JSX.Element {
   const activeWorktree = useActiveWorktree()
   const repo = useRepoById(activeWorktree?.repoId ?? null)
@@ -162,15 +206,38 @@ export default function RunPanel(): React.JSX.Element {
     }
   }, [repo?.id])
 
-  // TODO(phase-8): wire onOpenOrcaYaml + onReRun/onStop in Task 6.2 and
-  // the Cmd+R shortcut hook.
+  const repoId = repo?.id ?? null
+  const worktreeId = activeWorktree?.id ?? null
+
+  const onReRun = useCallback(() => {
+    if (!repoId || !worktreeId) {
+      return
+    }
+    void callRunStart(
+      { repoId, worktreeId },
+      { start: window.api.runScript.start, toastError: toast.error }
+    )
+  }, [repoId, worktreeId])
+
+  const onStop = useCallback(() => {
+    if (!repoId) {
+      return
+    }
+    void callRunStop({ repoId }, { stop: window.api.runScript.stop, toastError: toast.error })
+  }, [repoId])
+
+  // TODO(phase-8): wire onOpenOrcaYaml — needs a renderer file-open helper
+  // (or a new IPC) to surface orca.yaml in the editor. Left as a no-op so
+  // the empty-state CTA is visible but inert until that infra exists.
+  const onOpenOrcaYaml = useCallback(() => {}, [])
+
   return (
     <RunPanelView
       runScript={runScript}
       runState={runState}
-      onReRun={() => {}}
-      onStop={() => {}}
-      onOpenOrcaYaml={() => {}}
+      onReRun={onReRun}
+      onStop={onStop}
+      onOpenOrcaYaml={onOpenOrcaYaml}
     />
   )
 }
