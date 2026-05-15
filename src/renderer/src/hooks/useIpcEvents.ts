@@ -35,6 +35,11 @@ import { attachMobileMarkdownBridge } from '@/runtime/mobile-markdown-bridge'
 import { detectLanguage } from '@/lib/language-detect'
 import { track } from '@/lib/telemetry'
 import { getDefaultTriggerRunShortcutDeps, triggerRunShortcut } from '@/lib/trigger-run-shortcut'
+import { disposeCachedTerminal } from '@/components/right-sidebar/sidebar-pty-terminal-cache'
+import {
+  disposePriorScriptCachedTerminal,
+  disposeWorktreeCachedSidebarTerminals
+} from './dispose-stale-sidebar-pty-cache'
 
 export { resolveZoomTarget } from './resolve-zoom-target'
 
@@ -76,6 +81,15 @@ export function useIpcEvents(): void {
             `[worktree-purge] diff-based purge removing state for ${removed.length} worktree(s):`,
             removed
           )
+          // Why: dispose any sidebar Run/Setup cached terminals BEFORE
+          // purgeWorktreeTerminalState clears the scriptsByWorktree
+          // entry — once that entry is gone we lose the ptyIds that
+          // identify the cached terminals to dispose.
+          disposeWorktreeCachedSidebarTerminals({
+            worktreeIds: removed,
+            scriptsByWorktree: afterState.scriptsByWorktree,
+            dispose: disposeCachedTerminal
+          })
           afterState.purgeWorktreeTerminalState(removed)
         }
       })
@@ -1132,6 +1146,16 @@ export function useIpcEvents(): void {
     // Re-run, so the SetupPanel reacts identically in both cases.
     unsubs.push(
       window.api.runScript.onStarted((event) => {
+        // Why: a re-run produces a new ptyId — the prior cached sidebar
+        // terminal is now orphaned (RunPanel re-keys on ptyId), so dispose
+        // it before the slice swaps in the new ptyId.
+        disposePriorScriptCachedTerminal({
+          kind: 'run',
+          worktreeId: event.worktreeId,
+          newPtyId: event.ptyId,
+          scriptsByWorktree: useAppStore.getState().scriptsByWorktree,
+          dispose: disposeCachedTerminal
+        })
         useAppStore.getState().handleRunStarted({
           worktreeId: event.worktreeId,
           ptyId: event.ptyId
@@ -1157,6 +1181,15 @@ export function useIpcEvents(): void {
     )
     unsubs.push(
       window.api.setupScript.onStarted((event) => {
+        // Why: setup re-runs follow the same swap-out pattern as run —
+        // dispose the orphaned cached terminal before the slice updates.
+        disposePriorScriptCachedTerminal({
+          kind: 'setup',
+          worktreeId: event.worktreeId,
+          newPtyId: event.ptyId,
+          scriptsByWorktree: useAppStore.getState().scriptsByWorktree,
+          dispose: disposeCachedTerminal
+        })
         useAppStore.getState().handleSetupStarted({
           worktreeId: event.worktreeId,
           ptyId: event.ptyId

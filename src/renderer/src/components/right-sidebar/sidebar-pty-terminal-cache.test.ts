@@ -3,6 +3,7 @@
    the default 300-line threshold. Splitting would scatter the shared
    mock state across files. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AttachOptions } from './sidebar-pty-terminal-cache'
 
 // Why: vitest runs in `node` (no jsdom + no real xterm). Mock xterm and
 // the pty-dispatcher, then drive the cache through its public lifecycle
@@ -195,8 +196,15 @@ const fakeSettings = {
   terminalFontFamily: 'JetBrainsMono Nerd Font'
 }
 
-function attachOpts(systemPrefersDark = true): Record<string, unknown> {
-  return { settings: fakeSettings, systemPrefersDark, effectiveMacOptionAsAlt: 'true' }
+function attachOpts(systemPrefersDark = true): AttachOptions {
+  // Why: cache only forwards `settings` to the (mocked) builder, so a
+  // structural stand-in is enough — the cast keeps the signature happy
+  // without dragging the full GlobalSettings shape into the test.
+  return {
+    settings: fakeSettings as unknown as AttachOptions['settings'],
+    systemPrefersDark,
+    effectiveMacOptionAsAlt: 'true'
+  }
 }
 
 describe('sidebar-pty-terminal-cache — first attach', () => {
