@@ -98,6 +98,36 @@ beforeEach(() => {
   ;(globalThis as unknown as { window: { api: unknown } }).window = {
     api: { pty: { resize: ptyResize, write: ptyWrite } }
   }
+  // Why: cache.buildContainer() calls document.createElement to mint
+  // the persistent xterm host div. Stub a minimal document with the
+  // appendChild/removeChild/contains/parentNode surface the cache uses.
+  ;(globalThis as unknown as { document: unknown }).document = {
+    createElement: (_tag: string) => {
+      const children: unknown[] = []
+      const node: Record<string, unknown> = {
+        style: {},
+        children,
+        parentNode: null,
+        appendChild(child: unknown) {
+          children.push(child)
+          ;(child as { parentNode: unknown }).parentNode = node
+          return child
+        },
+        removeChild(child: unknown) {
+          const i = children.indexOf(child)
+          if (i !== -1) {
+            children.splice(i, 1)
+          }
+          ;(child as { parentNode: unknown }).parentNode = null
+          return child
+        },
+        contains(child: unknown) {
+          return children.includes(child)
+        }
+      }
+      return node
+    }
+  }
   // Why: ResizeObserver / requestAnimationFrame are missing in node.
   // Provide minimal shims so the deferred-fit branch executes.
   ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
