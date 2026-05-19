@@ -299,3 +299,32 @@ Existing `AutomationRun` rows render in the run viewer as single-step legacy run
 3. **Concurrency under Linear bursts.** `maxConcurrentRuns` and `deduplicationKey` are the v1 guardrails. Watch real traffic before relaxing the defaults.
 4. **Variable picker scope creep.** The template engine is strings-only. Resist adding expressions, filters, or conditionals — the moment users want logic, that is a signal for a v2 conversation about a real graph, not a feature creep in v1.
 5. **Tab clutter.** Chain runs create tabs that the user owns afterward. If chains run heavily, the worktree's tab strip fills up. Possible mitigations (group, auto-archive, prefix) deferred to a follow-up.
+
+## Status
+
+- 2026-05-19: Design approved.
+- 2026-05-19: Phase 1 (foundation) shipped on branch `bright_robin`. Re-plan begins for Phase 2 (step palette expansion).
+
+### Phase 1 deliverables
+
+Foundation commits (chronological, `git log --oneline 5da45de9..d359f136`):
+
+- Chain types alongside legacy (`7a9f240d`, `0515c20b`)
+- Template variable resolver (`f58be9da`, `dfa7ac5b`)
+- StepRunner interface + RunPromptRunner skeleton (`63a31c67`, `66de7a98`)
+- Persistence migration (`5c381d84`)
+- Main↔renderer openPromptPane IPC (`80070a96`, `7599ff3b`)
+- Agent-status registry + lifecycle (`e5e056d1`, `e1ae9083`)
+- Chain executor (`bf4189a0`, `f836dff8`)
+- runNow integration (`f75aa621`)
+- Step-state UI (`d359f136`)
+
+### Phase 1 known follow-ups
+
+Carried into Phase 2 polish (not blocking, surfaced by code reviews):
+- `template.ts`: multi-line tokens become literal text (regex narrowing trade-off).
+- `service.ts`: `requestDispatch` reads `this.webContents` directly while chain path uses `getWebContents()` — cosmetic inconsistency.
+- Snappy immediate tick in `runNow` can block up to ~30s on `openPromptPane` timeout (worst case).
+- Pre-existing race between `runNow`'s immediate tick and a concurrent periodic `tickRunningChains` — narrow window, but real.
+- Chain executor `tickRunningChains` and `evaluateDueRuns` share the `evaluating` flag, serializing scheduling and chain progress against each other.
+- Tracker cleanup deferred — RunPromptRunner trackers grow per (runId, stepId) without release; pick up in Phase 2 or when fan-out support lands.
