@@ -47,6 +47,7 @@ import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId } from '../shared/worktree-id'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
+import { upgradeLegacyAutomation } from './persistence-automation-migration'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -417,7 +418,9 @@ export class Store {
           sshRemotePtyLeases: (parsed.sshRemotePtyLeases ?? [])
             .map(normalizeSshRemotePtyLease)
             .filter((lease): lease is SshRemotePtyLease => lease !== null),
-          automations: Array.isArray(parsed.automations) ? parsed.automations : [],
+          automations: Array.isArray(parsed.automations)
+            ? parsed.automations.map(upgradeLegacyAutomation)
+            : [],
           automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
           onboarding: (() => {
             // Why: if we successfully parsed an existing orca-data.json that
