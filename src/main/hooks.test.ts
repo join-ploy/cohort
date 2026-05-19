@@ -205,6 +205,64 @@ describe('parseOrcaYaml', () => {
     const result = parseOrcaYaml(yaml)
     expect(result?.databaseUrl).toBeUndefined()
   })
+
+  it('parses an inline reviewPreferences scalar', () => {
+    const yaml = `reviewPreferences: Be strict about Windows path handling.\n`
+    const result = parseOrcaYaml(yaml)
+    expect(result).toEqual({
+      scripts: {},
+      reviewPreferences: 'Be strict about Windows path handling.'
+    })
+  })
+
+  it('parses a multi-line reviewPreferences block scalar', () => {
+    const yaml = [
+      'reviewPreferences: |',
+      '  Project conventions:',
+      '  - Always quote file paths',
+      '  - Surface SSH-only failure modes'
+    ].join('\n')
+    const result = parseOrcaYaml(yaml)
+    expect(result?.reviewPreferences).toBe(
+      'Project conventions:\n- Always quote file paths\n- Surface SSH-only failure modes'
+    )
+  })
+
+  it('parses createPrPreferences alongside scripts and databaseUrl', () => {
+    const yaml = [
+      'scripts:',
+      '  run: pnpm dev',
+      'databaseUrl: postgresql://127.0.0.1/db',
+      'createPrPreferences: |',
+      '  Use Conventional Commits for the PR title.',
+      '  Include a Test plan section.'
+    ].join('\n')
+    const result = parseOrcaYaml(yaml)
+    expect(result).toEqual({
+      scripts: { run: 'pnpm dev' },
+      databaseUrl: 'postgresql://127.0.0.1/db',
+      createPrPreferences:
+        'Use Conventional Commits for the PR title.\nInclude a Test plan section.'
+    })
+  })
+
+  it('parses both reviewPreferences and createPrPreferences in one file', () => {
+    const yaml = [
+      'reviewPreferences: |',
+      '  Review guidance line.',
+      'createPrPreferences: |',
+      '  Create PR guidance line.'
+    ].join('\n')
+    const result = parseOrcaYaml(yaml)
+    expect(result?.reviewPreferences).toBe('Review guidance line.')
+    expect(result?.createPrPreferences).toBe('Create PR guidance line.')
+  })
+
+  it('treats an empty reviewPreferences scalar as undefined', () => {
+    const yaml = `scripts:\n  run: pnpm dev\nreviewPreferences: ''\n`
+    const result = parseOrcaYaml(yaml)
+    expect(result?.reviewPreferences).toBeUndefined()
+  })
 })
 
 describe('parseConductorJson', () => {
@@ -272,6 +330,38 @@ describe('parseConductorJson', () => {
     ).toBeUndefined()
     expect(
       parseConductorJson(JSON.stringify({ scripts: { run: 'x' }, databaseUrl: '' }))?.databaseUrl
+    ).toBeUndefined()
+  })
+
+  it('picks up top-level reviewPreferences and createPrPreferences alongside scripts', () => {
+    const json = JSON.stringify({
+      scripts: { run: 'npm run dev' },
+      reviewPreferences: 'Look for missing tests.',
+      createPrPreferences: 'Match existing PR-title casing.'
+    })
+    const result = parseConductorJson(json)
+    expect(result?.reviewPreferences).toBe('Look for missing tests.')
+    expect(result?.createPrPreferences).toBe('Match existing PR-title casing.')
+  })
+
+  it('returns hooks with only reviewPreferences when nothing else is set', () => {
+    const json = JSON.stringify({
+      scripts: {},
+      reviewPreferences: 'Review-only repo guidance.'
+    })
+    const result = parseConductorJson(json)
+    expect(result?.reviewPreferences).toBe('Review-only repo guidance.')
+    expect(result?.scripts).toEqual({})
+  })
+
+  it('omits review/createPr preferences when missing or empty', () => {
+    expect(
+      parseConductorJson(JSON.stringify({ scripts: { run: 'x' }, reviewPreferences: '' }))
+        ?.reviewPreferences
+    ).toBeUndefined()
+    expect(
+      parseConductorJson(JSON.stringify({ scripts: { run: 'x' }, createPrPreferences: '' }))
+        ?.createPrPreferences
     ).toBeUndefined()
   })
 })
@@ -771,6 +861,110 @@ describe('getEffectiveHooks', () => {
       databaseUrl: 'postgresql://override-only/db'
     })
   })
+
+  it('returns yaml reviewPreferences and createPrPreferences when no overrides exist', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      [
+        'reviewPreferences: |',
+        '  Review yaml line.',
+        'createPrPreferences: |',
+        '  Create PR yaml line.'
+      ].join('\n')
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const result = getEffectiveHooks(makeRepo())
+
+    expect(result?.reviewPreferences).toBe('Review yaml line.')
+    expect(result?.createPrPreferences).toBe('Create PR yaml line.')
+  })
+
+  it('lets the persisted reviewPreferences override the yaml value', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      ['reviewPreferences: |', '  Yaml-only review prefs.'].join('\n')
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithPromptPrefs({
+      reviewPreferences: 'Override review prefs.'
+    })
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.reviewPreferences).toBe('Override review prefs.')
+  })
+
+  it('falls back to yaml reviewPreferences when persisted override is blank', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      ['reviewPreferences: |', '  Yaml review prefs.'].join('\n')
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithPromptPrefs({ reviewPreferences: '   ' })
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.reviewPreferences).toBe('Yaml review prefs.')
+  })
+
+  it('lets the persisted createPrPreferences override the yaml value', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      ['createPrPreferences: |', '  Yaml-only PR prefs.'].join('\n')
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithPromptPrefs({
+      createPrPreferences: 'Override PR prefs.'
+    })
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.createPrPreferences).toBe('Override PR prefs.')
+  })
+
+  it('returns hooks with only prompt preferences when nothing else is configured', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithPromptPrefs({
+      reviewPreferences: 'Persisted review prefs.',
+      createPrPreferences: 'Persisted PR prefs.'
+    })
+    const result = getEffectiveHooks(repo)
+
+    expect(result).toEqual({
+      scripts: {},
+      reviewPreferences: 'Persisted review prefs.',
+      createPrPreferences: 'Persisted PR prefs.'
+    })
+  })
+
+  // Why: shared helper that lets the new prompt-preferences cases pass a
+  // hookSettings shape without restating the full Repo. Mirrors the existing
+  // makeRepoWithDbOverride helper.
+  function makeRepoWithPromptPrefs(prefs: {
+    reviewPreferences?: string
+    createPrPreferences?: string
+  }): Repo {
+    return {
+      id: 'test-id',
+      path: '/test/repo',
+      displayName: 'Test Repo',
+      badgeColor: '#000',
+      addedAt: Date.now(),
+      hookSettings: {
+        mode: 'auto',
+        scripts: { setup: '', archive: '' },
+        ...prefs
+      }
+    } as unknown as Repo
+  }
 
   // Why: builder helper that lets databaseUrl tests pass a `hookSettings` shape
   // without restating the full Repo. Keeps the test bodies focused on the

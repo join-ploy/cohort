@@ -25,17 +25,41 @@ function getHookShell(): string | undefined {
 
 /**
  * Parse a simple orca.yaml file. Handles only the supported `scripts:`,
- * `databaseUrl:`, and `issueCommand:` keys. `scripts:` and `issueCommand:`
- * accept block scalar `|` multiline values; `databaseUrl:` is a single-line
- * scalar (the rendered template lives in the context bar's opener dropdown).
+ * `databaseUrl:`, `issueCommand:`, `reviewPreferences:`, and
+ * `createPrPreferences:` keys. `scripts:`, `issueCommand:`,
+ * `reviewPreferences:`, and `createPrPreferences:` accept block scalar `|`
+ * multiline values; `databaseUrl:` is a single-line scalar (the rendered
+ * template lives in the context bar's opener dropdown).
  */
 export function parseOrcaYaml(content: string): OrcaHooks | null {
   const hooks: OrcaHooks = { scripts: {} }
   const lines = content.split(/\r?\n/)
 
-  let currentSection: 'scripts' | 'issueCommand' | null = null
+  // Why: `reviewPreferences` and `createPrPreferences` reuse the same
+  // top-level block-scalar parser as `issueCommand`. They share one buffer
+  // (`bufferedValue`) because only one such section can be open at a time —
+  // a new top-level key flushes the previous buffer into the right hooks
+  // field via the `flushPending` helper below.
+  let currentSection:
+    | 'scripts'
+    | 'issueCommand'
+    | 'reviewPreferences'
+    | 'createPrPreferences'
+    | null = null
   let currentKey: 'setup' | 'archive' | 'run' | null = null
-  let issueCommandValue = ''
+  let bufferedValue = ''
+
+  const flushPending = (): void => {
+    if (currentSection === 'scripts' && currentKey) {
+      hooks.scripts[currentKey] = bufferedValue.trimEnd()
+    } else if (currentSection === 'issueCommand') {
+      hooks.issueCommand = bufferedValue.trimEnd() || undefined
+    } else if (currentSection === 'reviewPreferences') {
+      hooks.reviewPreferences = bufferedValue.trimEnd() || undefined
+    } else if (currentSection === 'createPrPreferences') {
+      hooks.createPrPreferences = bufferedValue.trimEnd() || undefined
+    }
+  }
 
   // Why: an inline scalar written as `run: ''` or `run: ""` should behave the same as
   // omitting the key — without this, the literal quote characters survive and the empty
@@ -46,15 +70,11 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
   for (const line of lines) {
     const topLevelKeyMatch = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(\|)?\s*(.*)$/)
     if (topLevelKeyMatch) {
-      if (currentSection === 'scripts' && currentKey) {
-        hooks.scripts[currentKey] = issueCommandValue.trimEnd()
-      } else if (currentSection === 'issueCommand') {
-        hooks.issueCommand = issueCommandValue.trimEnd() || undefined
-      }
+      flushPending()
 
       const [, key, blockScalar, rest] = topLevelKeyMatch
       currentKey = null
-      issueCommandValue = ''
+      bufferedValue = ''
 
       if (key === 'scripts') {
         currentSection = 'scripts'
@@ -66,7 +86,27 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
         if (blockScalar) {
           continue
         }
-        hooks.issueCommand = rest.trim() || undefined
+        hooks.issueCommand = stripEmptyQuotedScalar(rest.trim()) || undefined
+        currentSection = null
+        continue
+      }
+
+      if (key === 'reviewPreferences') {
+        currentSection = 'reviewPreferences'
+        if (blockScalar) {
+          continue
+        }
+        hooks.reviewPreferences = stripEmptyQuotedScalar(rest.trim()) || undefined
+        currentSection = null
+        continue
+      }
+
+      if (key === 'createPrPreferences') {
+        currentSection = 'createPrPreferences'
+        if (blockScalar) {
+          continue
+        }
+        hooks.createPrPreferences = stripEmptyQuotedScalar(rest.trim()) || undefined
         currentSection = null
         continue
       }
@@ -97,41 +137,45 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
       if (keyMatch) {
         // Save previous key
         if (currentKey) {
-          hooks.scripts[currentKey] = issueCommandValue.trimEnd()
+          hooks.scripts[currentKey] = bufferedValue.trimEnd()
         }
         currentKey = keyMatch[1] as 'setup' | 'archive' | 'run'
         const inlineValue = stripEmptyQuotedScalar(keyMatch[3] ?? '')
-        issueCommandValue = inlineValue ? `${inlineValue}\n` : ''
+        bufferedValue = inlineValue ? `${inlineValue}\n` : ''
         continue
       }
 
       // Content line (indented by 4+ spaces under a key)
       if (currentKey && line.startsWith('    ')) {
-        issueCommandValue += `${line.slice(4)}\n`
+        bufferedValue += `${line.slice(4)}\n`
       }
       continue
     }
 
-    if (currentSection === 'issueCommand' && line.startsWith('  ')) {
-      // Why: `issueCommand` is a top-level scalar in `orca.yaml`, so its block
-      // content must stay separate from the `scripts:` parser rather than being
-      // shoehorned into that section's indentation rules.
-      issueCommandValue += `${line.slice(2)}\n`
+    // Why: `issueCommand`, `reviewPreferences`, and `createPrPreferences`
+    // are top-level scalar sections. Their block-scalar bodies are indented
+    // by two spaces (one level under the top-level key) — keep them out of
+    // the `scripts:` parser's four-space indentation rule.
+    if (
+      (currentSection === 'issueCommand' ||
+        currentSection === 'reviewPreferences' ||
+        currentSection === 'createPrPreferences') &&
+      line.startsWith('  ')
+    ) {
+      bufferedValue += `${line.slice(2)}\n`
     }
   }
 
-  if (currentSection === 'scripts' && currentKey) {
-    hooks.scripts[currentKey] = issueCommandValue.trimEnd()
-  } else if (currentSection === 'issueCommand') {
-    hooks.issueCommand = issueCommandValue.trimEnd() || undefined
-  }
+  flushPending()
 
   if (
     !hooks.scripts.setup &&
     !hooks.scripts.archive &&
     !hooks.scripts.run &&
     !hooks.issueCommand &&
-    !hooks.databaseUrl
+    !hooks.databaseUrl &&
+    !hooks.reviewPreferences &&
+    !hooks.createPrPreferences
   ) {
     return null
   }
@@ -175,7 +219,25 @@ export function parseConductorJson(content: string): OrcaHooks | null {
   if (typeof databaseUrl === 'string' && databaseUrl.trim()) {
     out.databaseUrl = databaseUrl
   }
-  if (!out.scripts.setup && !out.scripts.run && !out.scripts.archive && !out.databaseUrl) {
+  // Why: the Review / Create PR prompt preferences are equally repo-level
+  // text and benefit from living in the same shared config surface, so we
+  // accept them from either orca.yaml or conductor.json.
+  const reviewPreferences = (parsed as { reviewPreferences?: unknown }).reviewPreferences
+  if (typeof reviewPreferences === 'string' && reviewPreferences.trim()) {
+    out.reviewPreferences = reviewPreferences
+  }
+  const createPrPreferences = (parsed as { createPrPreferences?: unknown }).createPrPreferences
+  if (typeof createPrPreferences === 'string' && createPrPreferences.trim()) {
+    out.createPrPreferences = createPrPreferences
+  }
+  if (
+    !out.scripts.setup &&
+    !out.scripts.run &&
+    !out.scripts.archive &&
+    !out.databaseUrl &&
+    !out.reviewPreferences &&
+    !out.createPrPreferences
+  ) {
     return null
   }
   return out
@@ -235,7 +297,13 @@ export function getActiveHookConfigKind(repoPath: string): 'orca-yaml' | 'conduc
 // return `null` from `parseOrcaYaml` and show a confusing "could not be parsed"
 // error.  Detecting well-formed but unrecognised keys lets the UI suggest an
 // update instead of implying the file is broken.
-const RECOGNIZED_ORCA_YAML_KEYS = new Set(['scripts', 'issueCommand', 'databaseUrl'])
+const RECOGNIZED_ORCA_YAML_KEYS = new Set([
+  'scripts',
+  'issueCommand',
+  'databaseUrl',
+  'reviewPreferences',
+  'createPrPreferences'
+])
 
 /**
  * Return true when `orca.yaml` contains at least one top-level key that this
@@ -379,8 +447,18 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
   const persistedDbUrl = repo.hookSettings?.databaseUrl?.trim()
   const yamlDbUrl = yamlHooks?.databaseUrl?.trim()
   const databaseUrl = persistedDbUrl || yamlDbUrl
+  // Why: Review / Create PR preferences use the same persisted-override-wins
+  // precedence as databaseUrl. Empty override falls through to the yaml
+  // value so the user can clear the local override and re-inherit the
+  // committed default without an empty string clobbering it.
+  const persistedReviewPrefs = repo.hookSettings?.reviewPreferences?.trim()
+  const yamlReviewPrefs = yamlHooks?.reviewPreferences?.trim()
+  const reviewPreferences = persistedReviewPrefs || yamlReviewPrefs
+  const persistedCreatePrPrefs = repo.hookSettings?.createPrPreferences?.trim()
+  const yamlCreatePrPrefs = yamlHooks?.createPrPreferences?.trim()
+  const createPrPreferences = persistedCreatePrPrefs || yamlCreatePrPrefs
 
-  if (!setup && !archive && !run && !databaseUrl) {
+  if (!setup && !archive && !run && !databaseUrl && !reviewPreferences && !createPrPreferences) {
     return null
   }
 
@@ -394,7 +472,9 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
       ...(archive ? { archive } : {}),
       ...(run ? { run } : {})
     },
-    ...(databaseUrl ? { databaseUrl } : {})
+    ...(databaseUrl ? { databaseUrl } : {}),
+    ...(reviewPreferences ? { reviewPreferences } : {}),
+    ...(createPrPreferences ? { createPrPreferences } : {})
   }
 }
 

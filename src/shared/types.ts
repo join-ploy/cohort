@@ -850,6 +850,14 @@ export type OrcaHooks = {
    *  postgresql://postgres:postgres@127.0.0.1/${WORKSPACE_NAME}_server_dev?statusColor=... */
   databaseUrl?: string
   issueCommand?: string // Shared default command for linked GitHub issues
+  /** Repo-specific preferences appended to every Review prompt body before
+   *  the right-sidebar Review button invokes its command. Lets a repo add
+   *  project conventions on top of the user's global Review prompt. */
+  reviewPreferences?: string
+  /** Repo-specific preferences appended to every Create PR prompt body before
+   *  the right-sidebar Create PR button invokes its command. Mirrors
+   *  `reviewPreferences` semantics but for the Create PR surface. */
+  createPrPreferences?: string
 }
 
 export type RepoHookSettings = {
@@ -868,6 +876,29 @@ export type RepoHookSettings = {
    *  so individual users can point at their own local DB without editing the
    *  committed orca.yaml. */
   databaseUrl?: string
+  /** Persisted override of orca.yaml's `reviewPreferences` field. When set
+   *  (non-empty), takes precedence over the yaml value via getEffectiveHooks
+   *  so individuals can tweak the appended Review preferences without
+   *  editing the committed orca.yaml. */
+  reviewPreferences?: string
+  /** Persisted override of orca.yaml's `createPrPreferences` field. Same
+   *  precedence as `reviewPreferences`. */
+  createPrPreferences?: string
+}
+
+/** A configurable command surfaced in the right-sidebar Review / Create PR
+ *  dropdowns. Clicking the entry writes `prompt` to ~/.orca/prompts/<label>.md
+ *  (filename sanitized from label) and opens a new central terminal tab
+ *  running: <command> "$(cat <absolute-prompt-path>)". */
+export type SidebarPromptCommand = {
+  /** Stable UUID — keys list reorders + edit forms. */
+  id: string
+  /** Shown in the dropdown and used to derive the prompt filename. */
+  label: string
+  /** Shell command to invoke (e.g. "claude", "codex"). */
+  command: string
+  /** Markdown body written to <label>.md before invocation. */
+  prompt: string
 }
 
 export type WorktreeSetupLaunch = {
@@ -1350,6 +1381,15 @@ export type GlobalSettings = {
    *  configuration surface and edge cases (conflicts with existing paths,
    *  cleanup on worktree delete) are still being worked out. */
   experimentalWorktreeSymlinks: boolean
+  /** Right-sidebar Review dropdown entries. Each entry pairs a CLI command
+   *  (e.g. "claude", "codex") with a markdown prompt; clicking writes the
+   *  prompt to ~/.orca/prompts/<label>.md and opens a new central terminal
+   *  tab running `<command> "$(cat <prompt-path>)"`. */
+  reviewCommands: SidebarPromptCommand[]
+  /** Right-sidebar Create PR dropdown entries. Same shape as
+   *  `reviewCommands`; the button only renders when the active worktree's
+   *  branch has no open PR cached. */
+  createPrCommands: SidebarPromptCommand[]
   /** GitHub Project mode state — pinned/recent/active project, last selected
    *  view per project. Optional because profiles created before this feature
    *  landed won't have the key; `getDefaultSettings()` hydrates the empty
