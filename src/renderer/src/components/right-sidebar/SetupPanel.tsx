@@ -54,8 +54,10 @@ function SetupHeader({
   onStop
 }: Pick<SetupPanelViewProps, 'setupState' | 'onReRun' | 'onStop'>): React.JSX.Element {
   const isRunning = setupState?.status === 'running'
+  // Why: h-9 (36px) matches the `.titlebar` height in main.css so the setup
+  // panel chrome lines up with the terminal-pane tab strip above it.
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border">
+    <div className="flex h-9 items-center justify-between gap-2 px-3 border-b border-border">
       <span className="text-xs text-muted-foreground truncate">{statusLabel(setupState)}</span>
       {isRunning ? (
         <Button
