@@ -1,3 +1,8 @@
+/* eslint-disable max-lines -- Why: this file is the single source of truth
+   for default global settings, default repo hook settings, default
+   onboarding state, default UI state, default workspace session, and a
+   handful of related shared constants. Splitting it would only spread the
+   defaults across multiple files without a meaningful boundary. */
 import type {
   GlobalSettings,
   NotificationSettings,
@@ -6,6 +11,7 @@ import type {
   PersistedState,
   PersistedUIState,
   RepoHookSettings,
+  SidebarPromptCommand,
   StatusBarItem,
   WorkspaceSessionState,
   WorktreeCardProperty
@@ -79,6 +85,64 @@ export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
   // alternative agent-activity surface in the sidebar.
   'inline-agents'
 ]
+
+// Why: long markdown defaults for the right-sidebar Review / Create PR
+// dropdowns. Kept verbatim from the product brief so the user can replace
+// them entirely by editing the seeded entry in Settings.
+const DEFAULT_REVIEW_PROMPT = `Review guidelines:
+You are acting as a reviewer for the changes on the current branch. Focus on
+correctness, clarity, and risk before style.
+
+Process:
+- Diff the current branch against its base ref. Read both sides of every hunk;
+  do not approve a change you have not actually looked at.
+- For each change, ask: what is the intent, what could break, and is the test
+  coverage sufficient? Surface assumptions the change relies on.
+- Treat error handling, concurrency, and SSH/remote execution paths as
+  high-risk regions. Flag silent swallowed errors and stringly-typed wire
+  formats explicitly.
+- Verify cross-platform behavior. Code that hardcodes \`/\`, \`metaKey\`, or
+  POSIX-only shells is broken on Windows.
+- Quote file paths and line ranges in your feedback so the author can jump to
+  them. Group related findings together rather than listing them randomly.
+
+Output:
+- Lead with a short summary (one or two sentences) of what the change does
+  and your overall confidence.
+- Then bulleted findings, ordered most to least important. Mark each finding
+  as Blocking / Question / Nit so the author knows what gates merge.
+- Close with explicit "Looks good to merge" or "Needs changes before merge"
+  with a one-line justification.
+
+File: src/client/frontends/desktop-app/core/UserData.ts`
+
+const DEFAULT_CREATE_PR_PROMPT = `The user likes the current state of the
+branch and wants you to open a pull request that accurately represents it.
+
+Process:
+- Inspect the full diff between the current branch and its base ref. Do not
+  rely on the latest commit message alone — earlier commits in the branch
+  often carry user-facing context that belongs in the PR body.
+- Group changes by theme. A single PR may touch multiple concerns; the body
+  should reflect that grouping rather than dumping a flat file list.
+- If anything in the diff looks unintentional (debug logs, commented-out
+  code, stray TODOs) pause and ask before opening the PR.
+
+PR title:
+- Use the project's prevailing tense and style (look at recent merged PRs).
+- Stay under 70 characters; put detail in the body, not the title.
+
+PR body:
+- Lead with a Summary section: 1-3 bullets describing what changed and why.
+- Add a Test plan section: bulleted checklist of how the change was or should
+  be verified. Include manual steps when automated coverage is partial.
+- Note anything reviewers should look at first (load-bearing assumptions,
+  risk areas, follow-up work intentionally deferred).
+
+User preferences and Linear MCP:
+- If the user has Linear preferences configured, link the PR to the matching
+  Linear issue and use the issue title/key in the PR body.
+- Honor the user's commit-style conventions when generating the title.`
 
 export const DEFAULT_STATUS_BAR_ITEMS: StatusBarItem[] = [
   'claude',
@@ -242,6 +306,11 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     experimentalPet: false,
     experimentalActivity: true,
     experimentalWorktreeSymlinks: false,
+    // Why: ship one seeded entry for each dropdown so the buttons render with
+    // something usable out of the box. Users can rename / replace / delete
+    // from the General settings pane.
+    reviewCommands: getDefaultReviewCommands(),
+    createPrCommands: getDefaultCreatePrCommands(),
     // Why: hydrate an empty default so the renderer's optional-chained reads
     // (`settings?.githubProjects?.activeProject`) land on a stable shape
     // instead of `undefined`. Upgraded profiles inherit this via the
@@ -253,6 +322,33 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
       activeProject: null
     }
   }
+}
+
+// Why: seeded with placeholder UUIDs so the renderer can render the entry on
+// first launch before any user has saved a custom one. Editing or deleting
+// from Settings replaces the entry — no special protection. `claude` is the
+// default `command` because it is the user's coding CLI of choice; users on
+// other CLIs (codex, opencode, etc.) can rename in one click.
+export function getDefaultReviewCommands(): SidebarPromptCommand[] {
+  return [
+    {
+      id: 'default-review',
+      label: 'Review',
+      command: 'claude',
+      prompt: DEFAULT_REVIEW_PROMPT
+    }
+  ]
+}
+
+export function getDefaultCreatePrCommands(): SidebarPromptCommand[] {
+  return [
+    {
+      id: 'default-create-pr',
+      label: 'Create PR',
+      command: 'claude',
+      prompt: DEFAULT_CREATE_PR_PROMPT
+    }
+  ]
 }
 
 export function getDefaultRepoHookSettings(): RepoHookSettings {

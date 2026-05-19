@@ -164,6 +164,23 @@ describe('Store', () => {
     expect(settings.floatingTerminalEnabled).toBe(true)
     expect(settings.floatingTerminalDefaultedForAllUsers).toBe(true)
     expect(settings.notifications.customSoundPath).toBeNull()
+    // Why: each right-sidebar dropdown ships with one seeded entry so the
+    // buttons render with something usable on first launch. Persisted profiles
+    // hydrate this via the `{ ...defaults, ...parsed }` merge in persistence.
+    expect(settings.reviewCommands).toHaveLength(1)
+    expect(settings.reviewCommands[0]).toMatchObject({
+      id: 'default-review',
+      label: 'Review',
+      command: 'claude'
+    })
+    expect(settings.reviewCommands[0].prompt).toContain('Review guidelines')
+    expect(settings.createPrCommands).toHaveLength(1)
+    expect(settings.createPrCommands[0]).toMatchObject({
+      id: 'default-create-pr',
+      label: 'Create PR',
+      command: 'claude'
+    })
+    expect(settings.createPrCommands[0].prompt).toContain('pull request')
   })
 
   it('returns default UI state when no data file exists', async () => {
