@@ -988,6 +988,13 @@ export class Store {
     return run
   }
 
+  /** Fetch a single automation run by id. Returns the live reference (no
+   *  copy) so callers that mutate-then-persist see the same object the store
+   *  holds — mirrors the listAutomationRuns() / replaceAutomationRun() pair. */
+  getAutomationRun(runId: string): AutomationRun | undefined {
+    return (this.state.automationRuns ?? []).find((entry) => entry.id === runId)
+  }
+
   advanceAutomationNextRun(id: string, now = Date.now()): Automation {
     const index = (this.state.automations ?? []).findIndex((entry) => entry.id === id)
     if (index === -1) {

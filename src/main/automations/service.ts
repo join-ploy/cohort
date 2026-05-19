@@ -117,6 +117,30 @@ export class AutomationService {
     if (!automation) {
       throw new Error('Automation not found.')
     }
+    // Chain-shape automation: seed the run as `running` with an empty
+    // stepStates array and tick the executor once immediately so the UI sees
+    // progress without waiting a full tick cadence. Subsequent ticks fall
+    // through the normal 60s evaluateDueRuns() loop.
+    if (automation.trigger && automation.steps && automation.steps.length > 0) {
+      const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
+      run.status = 'running'
+      // Seed the chain context with automation metadata so templates like
+      // `{{automation.workspaceId}}` resolve on the very first tick.
+      run.context = { automation: { workspaceId: automation.workspaceId } }
+      run.stepStates = []
+      this.store.replaceAutomationRun(run)
+      try {
+        await this.chainExecutor.tick(automation, run)
+      } catch (e) {
+        // Why: a synchronous tick failure on the manual-run path must not
+        // bubble up as an unhandled IPC rejection. Finalize the run the same
+        // way tickRunningChains() does so the operator sees a `failed` row
+        // with a real error message instead of a phantom `running` row.
+        this.finalizeFailedRun(run, e)
+      }
+      return this.store.getAutomationRun(run.id) ?? run
+    }
+    // Legacy automation: same dispatch flow as scheduled runs.
     const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
     await this.requestDispatch(automation, run)
     return run
@@ -172,27 +196,32 @@ export class AutomationService {
         // Why: an unhandled runner error must not poison the tick loop for
         // every other run. Mark this run failed and persist so the operator
         // sees the error instead of an indefinite `running` row.
-        const errorMessage = e instanceof Error ? e.message : String(e)
-        const now = Date.now()
-        // Finalize any trailing non-terminal step state so the UI doesn't show
-        // an indefinitely "running" step under a failed run. Share the
-        // run-level error with steps that don't already have one so the
-        // operator can correlate the failure to the step it crashed on.
-        if (run.stepStates) {
-          for (const state of run.stepStates) {
-            if (state.status === 'running' || state.status === 'pending') {
-              state.status = 'failed'
-              state.finishedAt = now
-              state.error = state.error ?? errorMessage
-            }
-          }
-        }
-        run.status = 'failed'
-        run.error = errorMessage
-        run.finishedAt = now
-        this.store.replaceAutomationRun(run)
+        this.finalizeFailedRun(run, e)
       }
     }
+  }
+
+  /** Mark a run failed in response to a tick-time error and finalize any
+   *  trailing non-terminal step states so the UI never shows an indefinitely
+   *  "running" step under a failed run. Shared between the manual `runNow`
+   *  path and the scheduled `tickRunningChains` loop so both follow the same
+   *  cleanup contract. */
+  private finalizeFailedRun(run: AutomationRun, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const now = Date.now()
+    if (run.stepStates) {
+      for (const state of run.stepStates) {
+        if (state.status === 'running' || state.status === 'pending') {
+          state.status = 'failed'
+          state.finishedAt = now
+          state.error = state.error ?? errorMessage
+        }
+      }
+    }
+    run.status = 'failed'
+    run.error = errorMessage
+    run.finishedAt = now
+    this.store.replaceAutomationRun(run)
   }
 
   private async evaluateAutomation(automation: Automation, now: number): Promise<void> {
