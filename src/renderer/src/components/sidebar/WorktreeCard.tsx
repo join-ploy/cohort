@@ -529,8 +529,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
               <div className="flex items-baseline gap-1.5 min-w-0">
                 <span
                   className={cn(
-                    'text-[13px] truncate leading-tight text-foreground',
-                    showUnreadEmphasis ? 'font-semibold' : 'font-normal'
+                    'text-[13px] truncate leading-tight',
+                    showUnreadEmphasis ? 'font-semibold' : 'font-normal',
+                    // Why: matches GitHub's merged-PR icon color so users can
+                    // spot merged worktrees at a glance without expanding the
+                    // PR row. Overrides text-foreground only when merged.
+                    pr?.state === 'merged' ? 'text-[#8957e5]' : 'text-foreground'
                   )}
                 >
                   {/* Why: the card root is a non-interactive <div>, so aria-label
