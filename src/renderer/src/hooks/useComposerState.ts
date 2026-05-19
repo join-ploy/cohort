@@ -216,6 +216,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setSidebarOpen: s.setSidebarOpen,
       setRightSidebarOpen: s.setRightSidebarOpen,
       setRightSidebarTab: s.setRightSidebarTab,
+      markWorktreeForSetupAutoSwitch: s.markWorktreeForSetupAutoSwitch,
       closeModal: s.closeModal,
       openSettingsPage: s.openSettingsPage,
       openSettingsTarget: s.openSettingsTarget,
@@ -231,6 +232,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     setSidebarOpen,
     setRightSidebarOpen,
     setRightSidebarTab,
+    markWorktreeForSetupAutoSwitch,
     closeModal,
     openSettingsPage,
     openSettingsTarget,
@@ -1410,7 +1412,16 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         })
       }
       setSidebarOpen(true)
-      if (settings?.rightSidebarOpenByDefault) {
+      // Why: when create-time setup will actually spawn, surface the Setup tab
+      // so the user sees the script run live. Mark the worktree so the
+      // matching setup:exited handoff in useIpcEvents flips the tab to Run.
+      // Manual Re-run does NOT mark, so this handoff only happens once.
+      const willRunSetup = Boolean(setupConfig) && effectiveSetupDecision !== 'skip'
+      if (willRunSetup) {
+        setRightSidebarOpen(true)
+        setRightSidebarTab('setup')
+        markWorktreeForSetupAutoSwitch(worktree.id)
+      } else if (settings?.rightSidebarOpenByDefault) {
         setRightSidebarTab('explorer')
         setRightSidebarOpen(true)
       }
@@ -1448,7 +1459,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     settings?.rightSidebarOpenByDefault,
     setRightSidebarOpen,
     setRightSidebarTab,
+    markWorktreeForSetupAutoSwitch,
     setSidebarOpen,
+    setupConfig,
     setupDecision,
     sparseEnabled,
     sparseError,
@@ -1614,7 +1627,15 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           })
         }
         setSidebarOpen(true)
-        if (settings?.rightSidebarOpenByDefault) {
+        // Why: same create-time Setup handoff as the main submit path —
+        // see comment there. The quick flow uses the same setupConfig and
+        // effectiveSetupDecision values so the will-run check is identical.
+        const willRunSetup = Boolean(setupConfig) && effectiveSetupDecision !== 'skip'
+        if (willRunSetup) {
+          setRightSidebarOpen(true)
+          setRightSidebarTab('setup')
+          markWorktreeForSetupAutoSwitch(worktree.id)
+        } else if (settings?.rightSidebarOpenByDefault) {
           setRightSidebarTab('explorer')
           setRightSidebarOpen(true)
         }
@@ -1654,7 +1675,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       settings?.rightSidebarOpenByDefault,
       setRightSidebarOpen,
       setRightSidebarTab,
+      markWorktreeForSetupAutoSwitch,
       setSidebarOpen,
+      setupConfig,
       setupDecision,
       sparseEnabled,
       sparseError,

@@ -154,4 +154,51 @@ describe('scripts slice', () => {
     expect(entry.setup.exitCode).toBe(5)
     expect(entry.run.status).toBe('idle')
   })
+
+  describe('worktreeIdsAwaitingSetupAutoSwitch', () => {
+    it('starts empty', () => {
+      const store = createScriptsStore()
+      expect(store.getState().worktreeIdsAwaitingSetupAutoSwitch.size).toBe(0)
+    })
+
+    it('mark adds the worktree id to the awaiting set', () => {
+      const store = createScriptsStore()
+      store.getState().markWorktreeForSetupAutoSwitch('wt-1')
+      expect(store.getState().worktreeIdsAwaitingSetupAutoSwitch.has('wt-1')).toBe(true)
+    })
+
+    it('clear removes the worktree id from the awaiting set', () => {
+      const store = createScriptsStore()
+      store.getState().markWorktreeForSetupAutoSwitch('wt-1')
+      store.getState().clearWorktreeSetupAutoSwitch('wt-1')
+      expect(store.getState().worktreeIdsAwaitingSetupAutoSwitch.has('wt-1')).toBe(false)
+    })
+
+    it('mark on an already-marked id is a no-op that does not mint a new Set', () => {
+      const store = createScriptsStore()
+      store.getState().markWorktreeForSetupAutoSwitch('wt-1')
+      const firstSet = store.getState().worktreeIdsAwaitingSetupAutoSwitch
+      store.getState().markWorktreeForSetupAutoSwitch('wt-1')
+      // Why: the no-op path skips set() so subscribers don't re-render on
+      // every composer keystroke when the same worktree id is re-marked.
+      expect(store.getState().worktreeIdsAwaitingSetupAutoSwitch).toBe(firstSet)
+    })
+
+    it('clear on an unmarked id is a no-op that does not mint a new Set', () => {
+      const store = createScriptsStore()
+      const firstSet = store.getState().worktreeIdsAwaitingSetupAutoSwitch
+      store.getState().clearWorktreeSetupAutoSwitch('wt-ghost')
+      expect(store.getState().worktreeIdsAwaitingSetupAutoSwitch).toBe(firstSet)
+    })
+
+    it('tracks multiple worktree ids independently', () => {
+      const store = createScriptsStore()
+      store.getState().markWorktreeForSetupAutoSwitch('wt-1')
+      store.getState().markWorktreeForSetupAutoSwitch('wt-2')
+      store.getState().clearWorktreeSetupAutoSwitch('wt-1')
+      const awaiting = store.getState().worktreeIdsAwaitingSetupAutoSwitch
+      expect(awaiting.has('wt-1')).toBe(false)
+      expect(awaiting.has('wt-2')).toBe(true)
+    })
+  })
 })

@@ -1202,6 +1202,19 @@ export function useIpcEvents(): void {
           worktreeId: event.worktreeId,
           code: event.code
         })
+        // Why: the composer marks new worktrees so the create-time Setup
+        // tab handoff flips to Run when setup finishes. Manual Re-run is
+        // never marked, so this branch only runs once per worktree.
+        // Skip the flip if the user has navigated away (Explorer, etc.)
+        // or has already switched to a different worktree — yanking them
+        // back to Run would be hostile.
+        const state = useAppStore.getState()
+        if (state.worktreeIdsAwaitingSetupAutoSwitch.has(event.worktreeId)) {
+          state.clearWorktreeSetupAutoSwitch(event.worktreeId)
+          if (state.activeWorktreeId === event.worktreeId && state.rightSidebarTab === 'setup') {
+            state.setRightSidebarTab('run')
+          }
+        }
       })
     )
 

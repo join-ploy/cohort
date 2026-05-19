@@ -27,10 +27,17 @@ export type WorktreeScriptsEntry = { run: ScriptState; setup: ScriptState }
 
 export type ScriptsSlice = {
   scriptsByWorktree: Record<string, WorktreeScriptsEntry>
+  /** Worktree IDs whose create-time setup spawn is still pending. When the
+   *  matching setup:exited fires, useIpcEvents flips the right-sidebar tab
+   *  from 'setup' to 'run' (if the user hasn't navigated away). Manual
+   *  Re-run does NOT mark, so only the post-create handoff auto-switches. */
+  worktreeIdsAwaitingSetupAutoSwitch: Set<string>
   handleRunStarted: (args: { worktreeId: string; ptyId: string }) => void
   handleRunExited: (args: { worktreeId: string; code: number }) => void
   handleSetupStarted: (args: { worktreeId: string; ptyId: string }) => void
   handleSetupExited: (args: { worktreeId: string; code: number }) => void
+  markWorktreeForSetupAutoSwitch: (worktreeId: string) => void
+  clearWorktreeSetupAutoSwitch: (worktreeId: string) => void
 }
 
 function ensureWorktreeEntry(
@@ -62,6 +69,7 @@ function applyExited(prev: ScriptState, code: number): ScriptState {
 
 export const createScriptsSlice: StateCreator<AppState, [], [], ScriptsSlice> = (set) => ({
   scriptsByWorktree: {},
+  worktreeIdsAwaitingSetupAutoSwitch: new Set<string>(),
 
   handleRunStarted: ({ worktreeId, ptyId }) => {
     set((s) => {
@@ -120,6 +128,31 @@ export const createScriptsSlice: StateCreator<AppState, [], [], ScriptsSlice> = 
           }
         }
       }
+    })
+  },
+
+  markWorktreeForSetupAutoSwitch: (worktreeId) => {
+    set((s) => {
+      // Why: re-marking an already-marked id should be a no-op so we don't
+      // mint a new Set (and trigger subscriber fan-out) on every composer
+      // re-render that happens to land on the same worktree.
+      if (s.worktreeIdsAwaitingSetupAutoSwitch.has(worktreeId)) {
+        return s
+      }
+      const next = new Set(s.worktreeIdsAwaitingSetupAutoSwitch)
+      next.add(worktreeId)
+      return { worktreeIdsAwaitingSetupAutoSwitch: next }
+    })
+  },
+
+  clearWorktreeSetupAutoSwitch: (worktreeId) => {
+    set((s) => {
+      if (!s.worktreeIdsAwaitingSetupAutoSwitch.has(worktreeId)) {
+        return s
+      }
+      const next = new Set(s.worktreeIdsAwaitingSetupAutoSwitch)
+      next.delete(worktreeId)
+      return { worktreeIdsAwaitingSetupAutoSwitch: next }
     })
   }
 })

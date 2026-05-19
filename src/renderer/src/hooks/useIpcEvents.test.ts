@@ -2357,3 +2357,363 @@ describe('useIpcEvents agent status snapshot integration', () => {
     expect(setAgentStatus).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('useIpcEvents setup-exit auto-switch', () => {
+  type SetupExitedEvent = { worktreeId: string; code: number }
+  type SetupExitedListener = (event: SetupExitedEvent) => void
+  type StoreLike = Record<string, unknown>
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  function buildBaseStore(overrides: StoreLike): StoreLike {
+    return {
+      setUpdateStatus: vi.fn(),
+      fetchRepos: vi.fn(),
+      fetchWorktrees: vi.fn(),
+      setActiveView: vi.fn(),
+      activeModal: null,
+      closeModal: vi.fn(),
+      openModal: vi.fn(),
+      activeView: 'terminal',
+      setActiveRepo: vi.fn(),
+      setActiveWorktree: vi.fn(),
+      revealWorktreeInSidebar: vi.fn(),
+      setIsFullScreen: vi.fn(),
+      updateBrowserTabPageState: vi.fn(),
+      activeTabType: 'terminal',
+      editorFontZoomLevel: 0,
+      setEditorFontZoomLevel: vi.fn(),
+      setRateLimitsFromPush: vi.fn(),
+      updateWorktreeBaseStatus: vi.fn(),
+      updateWorktreeRemoteBranchConflict: vi.fn(),
+      setSshConnectionState: vi.fn(),
+      setSshTargetLabels: vi.fn(),
+      setPortForwards: vi.fn(),
+      clearPortForwards: vi.fn(),
+      setDetectedPorts: vi.fn(),
+      enqueueSshCredentialRequest: vi.fn(),
+      removeSshCredentialRequest: vi.fn(),
+      clearTabPtyId: vi.fn(),
+      handleRunStarted: vi.fn(),
+      handleRunExited: vi.fn(),
+      handleSetupStarted: vi.fn(),
+      handleSetupExited: vi.fn(),
+      scriptsByWorktree: {},
+      workspaceSessionReady: false,
+      settings: { terminalFontSize: 13 },
+      ...overrides
+    }
+  }
+
+  function buildWindow(args: {
+    onSetupExited: (cb: SetupExitedListener) => () => void
+  }): Record<string, unknown> {
+    return {
+      api: {
+        repos: { onChanged: () => () => {} },
+        worktrees: {
+          onChanged: () => () => {},
+          onBaseStatus: () => () => {},
+          onRemoteBranchConflict: () => () => {}
+        },
+        ui: {
+          onOpenSettings: () => () => {},
+          onToggleLeftSidebar: () => () => {},
+          onToggleRightSidebar: () => () => {},
+          onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
+          onOpenQuickOpen: () => () => {},
+          onOpenNewWorkspace: () => () => {},
+          onJumpToWorktreeIndex: () => () => {},
+          onWorktreeHistoryNavigate: () => () => {},
+          onActivateWorktree: () => () => {},
+          onCreateTerminal: () => () => {},
+          onRequestTerminalCreate: () => () => {},
+          replyTerminalCreate: () => {},
+          onSplitTerminal: () => () => {},
+          onRenameTerminal: () => () => {},
+          onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
+          onCloseTerminal: () => () => {},
+          onSleepWorktree: () => () => {},
+          onNewBrowserTab: () => () => {},
+          onRequestTabCreate: () => () => {},
+          replyTabCreate: () => {},
+          onRequestTabClose: () => () => {},
+          replyTabClose: () => {},
+          onRequestTabSetProfile: () => () => {},
+          replyTabSetProfile: () => {},
+          onNewTerminalTab: () => () => {},
+          onCloseActiveTab: () => () => {},
+          onSwitchTab: () => () => {},
+          onSwitchTabAcrossAllTypes: () => () => {},
+          onSwitchTerminalTab: () => () => {},
+          onToggleStatusBar: () => () => {},
+          onShortcutRunScript: () => () => {},
+          onFullscreenChanged: () => () => {},
+          onTerminalZoom: () => () => {},
+          getZoomLevel: () => 0,
+          set: vi.fn()
+        },
+        settings: { onChanged: () => () => {} },
+        updater: {
+          getStatus: () => Promise.resolve({ state: 'idle' }),
+          onStatus: () => () => {},
+          onClearDismissal: () => () => {}
+        },
+        browser: {
+          onGuestLoadFailed: () => () => {},
+          onPaneFocus: () => () => {},
+          onOpenLinkInOrcaTab: () => () => {},
+          onNavigationUpdate: () => () => {},
+          onActivateView: () => () => {}
+        },
+        rateLimits: {
+          get: () => Promise.resolve({ limits: {}, lastUpdatedAt: Date.now() }),
+          onUpdate: () => () => {}
+        },
+        runtime: {
+          getTerminalFitOverrides: () => Promise.resolve([]),
+          onTerminalFitOverrideChanged: () => () => {},
+          onTerminalDriverChanged: () => () => {}
+        },
+        ssh: {
+          listTargets: () => Promise.resolve([]),
+          listPortForwards: () => Promise.resolve([]),
+          listDetectedPorts: () => Promise.resolve([]),
+          getState: () => Promise.resolve(null),
+          onStateChanged: () => () => {},
+          onCredentialRequest: () => () => {},
+          onCredentialResolved: () => () => {},
+          onPortForwardsChanged: () => () => {},
+          onDetectedPortsChanged: () => () => {}
+        },
+        agentStatus: {
+          onSet: () => () => {},
+          getSnapshot: vi.fn(() => Promise.resolve([])),
+          drop: vi.fn()
+        },
+        runScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: () => () => {}
+        },
+        setupScript: {
+          start: vi.fn(),
+          stop: vi.fn(),
+          onStarted: () => () => {},
+          onExited: args.onSetupExited
+        }
+      }
+    }
+  }
+
+  function commonAuxStubs(): void {
+    vi.doMock('react', async () => {
+      const actual = await vi.importActual<typeof ReactModule>('react')
+      return {
+        ...actual,
+        useEffect: (effect: () => void | (() => void)) => {
+          effect()
+        }
+      }
+    })
+    vi.doMock('@/lib/ui-zoom', () => ({ applyUIZoom: vi.fn() }))
+    vi.doMock('@/lib/worktree-activation', () => ({
+      activateAndRevealWorktree: vi.fn(),
+      ensureWorktreeHasInitialTerminal: vi.fn()
+    }))
+    vi.doMock('@/components/sidebar/visible-worktrees', () => ({
+      getVisibleWorktreeIds: () => []
+    }))
+    vi.doMock('@/lib/editor-font-zoom', () => ({
+      nextEditorFontZoomLevel: vi.fn(() => 0),
+      computeEditorFontSize: vi.fn(() => 13)
+    }))
+    vi.doMock('@/components/settings/SettingsConstants', () => ({
+      zoomLevelToPercent: vi.fn(() => 100),
+      ZOOM_MIN: -3,
+      ZOOM_MAX: 3
+    }))
+    vi.doMock('@/lib/zoom-events', () => ({ dispatchZoomLevelChanged: vi.fn() }))
+    // Why: the IPC hook calls these terminal-cache helpers via setupScript
+    // onStarted, which never fires in these tests — but the modules are
+    // still imported. Stub them so dependency resolution doesn't pull
+    // browser-only bits into the test environment.
+    vi.doMock('@/components/right-sidebar/sidebar-pty-terminal-cache', () => ({
+      disposeCachedTerminal: vi.fn()
+    }))
+    vi.doMock('./dispose-stale-sidebar-pty-cache', () => ({
+      disposePriorScriptCachedTerminal: vi.fn(),
+      disposeWorktreeCachedSidebarTerminals: vi.fn()
+    }))
+  }
+
+  it('flips rightSidebarTab from setup to run when the marked worktree finishes setup', async () => {
+    const setRightSidebarTab = vi.fn()
+    const clearWorktreeSetupAutoSwitch = vi.fn()
+    const handleSetupExited = vi.fn()
+    const setupListenerRef: { current: SetupExitedListener | null } = { current: null }
+
+    const storeState: StoreLike = buildBaseStore({
+      activeWorktreeId: 'wt-new',
+      rightSidebarTab: 'setup',
+      worktreeIdsAwaitingSetupAutoSwitch: new Set(['wt-new']),
+      setRightSidebarTab,
+      clearWorktreeSetupAutoSwitch,
+      handleSetupExited
+    })
+
+    commonAuxStubs()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    vi.stubGlobal(
+      'window',
+      buildWindow({
+        onSetupExited: (cb) => {
+          setupListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    expect(typeof setupListenerRef.current).toBe('function')
+    setupListenerRef.current?.({ worktreeId: 'wt-new', code: 0 })
+
+    expect(handleSetupExited).toHaveBeenCalledWith({ worktreeId: 'wt-new', code: 0 })
+    expect(clearWorktreeSetupAutoSwitch).toHaveBeenCalledWith('wt-new')
+    expect(setRightSidebarTab).toHaveBeenCalledWith('run')
+  })
+
+  it('clears the mark but does not switch tabs when the user has navigated to a different tab', async () => {
+    const setRightSidebarTab = vi.fn()
+    const clearWorktreeSetupAutoSwitch = vi.fn()
+    const setupListenerRef: { current: SetupExitedListener | null } = { current: null }
+
+    const storeState: StoreLike = buildBaseStore({
+      activeWorktreeId: 'wt-new',
+      // Why: user clicked away to Explorer mid-setup — the auto-switch
+      // must respect that and only clear the mark.
+      rightSidebarTab: 'explorer',
+      worktreeIdsAwaitingSetupAutoSwitch: new Set(['wt-new']),
+      setRightSidebarTab,
+      clearWorktreeSetupAutoSwitch,
+      handleSetupExited: vi.fn()
+    })
+
+    commonAuxStubs()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    vi.stubGlobal(
+      'window',
+      buildWindow({
+        onSetupExited: (cb) => {
+          setupListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    setupListenerRef.current?.({ worktreeId: 'wt-new', code: 0 })
+
+    expect(clearWorktreeSetupAutoSwitch).toHaveBeenCalledWith('wt-new')
+    expect(setRightSidebarTab).not.toHaveBeenCalled()
+  })
+
+  it('does not switch tabs when the user has activated a different worktree', async () => {
+    const setRightSidebarTab = vi.fn()
+    const clearWorktreeSetupAutoSwitch = vi.fn()
+    const setupListenerRef: { current: SetupExitedListener | null } = { current: null }
+
+    const storeState: StoreLike = buildBaseStore({
+      // Why: the user moved to another worktree before setup finished —
+      // flipping their current view's tab would be hostile, so this path
+      // must clear the mark and stay put.
+      activeWorktreeId: 'wt-other',
+      rightSidebarTab: 'setup',
+      worktreeIdsAwaitingSetupAutoSwitch: new Set(['wt-new']),
+      setRightSidebarTab,
+      clearWorktreeSetupAutoSwitch,
+      handleSetupExited: vi.fn()
+    })
+
+    commonAuxStubs()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    vi.stubGlobal(
+      'window',
+      buildWindow({
+        onSetupExited: (cb) => {
+          setupListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    setupListenerRef.current?.({ worktreeId: 'wt-new', code: 0 })
+
+    expect(clearWorktreeSetupAutoSwitch).toHaveBeenCalledWith('wt-new')
+    expect(setRightSidebarTab).not.toHaveBeenCalled()
+  })
+
+  it('does nothing for the right sidebar when an unmarked worktree exits setup (manual re-run)', async () => {
+    const setRightSidebarTab = vi.fn()
+    const clearWorktreeSetupAutoSwitch = vi.fn()
+    const setupListenerRef: { current: SetupExitedListener | null } = { current: null }
+
+    const storeState: StoreLike = buildBaseStore({
+      activeWorktreeId: 'wt-existing',
+      rightSidebarTab: 'setup',
+      // Why: manual Re-run never marks the worktree, so the exit handler
+      // touches neither the awaiting set nor the right-sidebar tab.
+      worktreeIdsAwaitingSetupAutoSwitch: new Set<string>(),
+      setRightSidebarTab,
+      clearWorktreeSetupAutoSwitch,
+      handleSetupExited: vi.fn()
+    })
+
+    commonAuxStubs()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    vi.stubGlobal(
+      'window',
+      buildWindow({
+        onSetupExited: (cb) => {
+          setupListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    setupListenerRef.current?.({ worktreeId: 'wt-existing', code: 0 })
+
+    expect(clearWorktreeSetupAutoSwitch).not.toHaveBeenCalled()
+    expect(setRightSidebarTab).not.toHaveBeenCalled()
+  })
+})
