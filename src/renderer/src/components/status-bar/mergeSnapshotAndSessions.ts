@@ -90,6 +90,13 @@ export type MergeContext = {
   tabsByWorktree: Record<string, TerminalTab[]>
   /** From useAppStore: maps tabId → ptyIds[] for the bound check. */
   ptyIdsByTabId: Record<string, string[]>
+  /** From useAppStore: per-worktree run/setup script PTY state. Lets the
+   *  merge classify script PTYs as bound (not orphans) and attribute them
+   *  to their owning worktree even though they don't live in any tab. */
+  scriptsByWorktree: Record<
+    string,
+    { run: { ptyId: string | null }; setup: { ptyId: string | null } }
+  >
   /** From useAppStore: per-tab live pane titles (for label resolution). */
   runtimePaneTitlesByTabId: Record<string, Record<number, string>>
   /** From useAppStore: false until the renderer has booted enough state to
@@ -223,6 +230,10 @@ function resolveDaemonSessionLabel(
 type MergeIndex = {
   ptyIdToTabId: Map<string, string>
   tabIdToWorktreeId: Map<string, string>
+  /** Run/setup script PTY id → owning worktree id. Script PTYs don't live
+   *  in any tab, so the tab walk would otherwise miss them; this index
+   *  lets them be classified as bound and attributed to the right repo. */
+  scriptPtyIdToWorktreeId: Map<string, string>
 }
 
 function buildMergeIndex(ctx: MergeContext): MergeIndex {
@@ -240,7 +251,16 @@ function buildMergeIndex(ctx: MergeContext): MergeIndex {
       tabIdToWorktreeId.set(tab.id, worktreeId)
     }
   }
-  return { ptyIdToTabId, tabIdToWorktreeId }
+  const scriptPtyIdToWorktreeId = new Map<string, string>()
+  for (const [worktreeId, entry] of Object.entries(ctx.scriptsByWorktree)) {
+    if (entry?.run.ptyId) {
+      scriptPtyIdToWorktreeId.set(entry.run.ptyId, worktreeId)
+    }
+    if (entry?.setup.ptyId) {
+      scriptPtyIdToWorktreeId.set(entry.setup.ptyId, worktreeId)
+    }
+  }
+  return { ptyIdToTabId, tabIdToWorktreeId, scriptPtyIdToWorktreeId }
 }
 
 // ─── Public merge function ─────────────────────────────────────────
@@ -256,11 +276,12 @@ export function mergeSnapshotAndSessions(
   const repos = new Map<string, UnifiedRepoGroup>()
   const seenSessionIds = new Set<string>()
   const index = buildMergeIndex(ctx)
-  // Why: bound = the daemon session id appears as a pty id under some tab.
-  // ptyIdToTabId already encodes that membership in O(1), so the bound set
-  // is just its keys.
+  // Why: bound = the daemon session id appears as a pty id under some tab
+  // OR is the active run/setup script PTY for a worktree. Both indices
+  // encode that membership in O(1), so the bound set is the union of
+  // their keys.
   const boundPtyIds = ctx.workspaceSessionReady
-    ? new Set(index.ptyIdToTabId.keys())
+    ? new Set([...index.ptyIdToTabId.keys(), ...index.scriptPtyIdToWorktreeId.keys()])
     : new Set<string>()
 
   function isRepoRemote(repoId: string): boolean {
@@ -344,6 +365,12 @@ export function mergeSnapshotAndSessions(
     // 2a: tab-store walk — does this session belong to a tab in this renderer?
     const tabId = index.ptyIdToTabId.get(session.id) ?? null
     let worktreeId = tabId ? (index.tabIdToWorktreeId.get(tabId) ?? null) : null
+
+    // 2a': script PTY lookup — run/setup scripts don't live in any tab
+    // but are owned by a specific worktree via the scripts slice.
+    if (!worktreeId) {
+      worktreeId = index.scriptPtyIdToWorktreeId.get(session.id) ?? null
+    }
 
     // 2b: @@-parse — recover worktreeId from the minted session id format.
     if (!worktreeId) {

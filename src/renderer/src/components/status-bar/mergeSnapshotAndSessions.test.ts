@@ -53,6 +53,7 @@ function makeTab(id: string, defaultTitle = 'Terminal'): TerminalTab {
 const baseCtx = (overrides: Partial<MergeContext> = {}): MergeContext => ({
   tabsByWorktree: {},
   ptyIdsByTabId: {},
+  scriptsByWorktree: {},
   runtimePaneTitlesByTabId: {},
   workspaceSessionReady: true,
   repoDisplayNameById: new Map(),

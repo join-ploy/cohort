@@ -773,6 +773,7 @@ export function ResourceUsageStatusSegment({
         ? mergeSnapshotAndSessions(snapshot, sessions, {
             tabsByWorktree,
             ptyIdsByTabId,
+            scriptsByWorktree,
             runtimePaneTitlesByTabId,
             workspaceSessionReady,
             repoDisplayNameById,
@@ -785,6 +786,7 @@ export function ResourceUsageStatusSegment({
       sessions,
       tabsByWorktree,
       ptyIdsByTabId,
+      scriptsByWorktree,
       runtimePaneTitlesByTabId,
       workspaceSessionReady,
       repoDisplayNameById,
