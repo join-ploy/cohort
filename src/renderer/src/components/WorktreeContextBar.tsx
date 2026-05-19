@@ -133,12 +133,17 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
               editor-picker dropdown once Orca grows a defaultEditor setting.
               For now the dropdown is a disabled stub. */}
           <div className="flex max-w-[260px] items-center">
+            {/* Why: backgroundColor inherits the bar's --titlebar-background
+                token so the selector visually flattens into the bar instead
+                of sitting on a darker bg-background that read as a heavy
+                inset. Hover keeps an accent wash for affordance. */}
             <button
               type="button"
               onClick={handleOpenExternal}
               aria-label={openExternalLabel}
               title={openExternalLabel}
-              className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border bg-background px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
+              className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
+              style={{ backgroundColor: 'var(--titlebar-background)' }}
             >
               <FolderOpen className="size-3 shrink-0" />
               <span className="min-w-0 truncate">{worktreePath}</span>
@@ -149,7 +154,8 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
               // Why: no editor-picker UI exists yet. Disabled-styling makes
               // the stub state obvious; wire a DropdownMenu when an
               // external-editor concept lands.
-              className="flex h-6 cursor-default items-center rounded-sm rounded-l-none border border-border bg-background px-1.5 text-muted-foreground hover:bg-accent"
+              className="flex h-6 cursor-default items-center rounded-sm rounded-l-none border border-border px-1.5 text-muted-foreground hover:bg-accent"
+              style={{ backgroundColor: 'var(--titlebar-background)' }}
               disabled
             >
               <ChevronDown className="size-3" />
