@@ -51,7 +51,12 @@ import { codexHookService } from './codex/hook-service'
 import { geminiHookService } from './gemini/hook-service'
 import { cursorHookService } from './cursor/hook-service'
 import { droidHookService } from './droid/hook-service'
-import { getPtyIdForPaneKey, registerPaneKeyTeardownListener, getLocalPtyProvider } from './ipc/pty'
+import {
+  getPtyIdForPaneKey,
+  registerPaneKeyTeardownListener,
+  getLocalPtyProvider,
+  setPtyExitRegistry
+} from './ipc/pty'
 import { killAllRunScripts } from './ipc/run-script'
 import { killAllSetupScripts, setSetupScriptRegistry } from './ipc/setup-script'
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
@@ -60,6 +65,7 @@ import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { AgentStatusRegistry } from './agent-status/registry'
 import { SetupScriptRegistry } from './setup-script/registry'
+import { PtyExitRegistry } from './pty/exit-registry'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -92,6 +98,12 @@ const agentStatusRegistry = new AgentStatusRegistry()
 // without an IPC roundtrip.
 const setupScriptRegistry = new SetupScriptRegistry()
 setSetupScriptRegistry(setupScriptRegistry)
+// Why: main-process source of truth for PTY exit observations. Written by
+// src/main/ipc/pty.ts at PTY teardown, read by the AutomationService's
+// RunCommandRunner so chain steps can detect command completion without an
+// IPC roundtrip.
+const ptyExitRegistry = new PtyExitRegistry()
+setPtyExitRegistry(ptyExitRegistry)
 
 installUncaughtPipeErrorGuard()
 // Why: propagate the Orca app version into `process.env` so PTY-env
@@ -553,6 +565,9 @@ app.whenReady().then(async () => {
     // chain executor's WaitForSetupRunner (wired in P2.5) can read setup
     // state directly. Stored now for a stable constructor surface.
     getSetupScript: (worktreeId) => setupScriptRegistry.get(worktreeId),
+    // Why: hand the PTY exit registry's reader to the service so the chain
+    // executor's RunCommandRunner can detect command completion directly.
+    getPtyExit: (ptyId) => ptyExitRegistry.get(ptyId),
     // Why: resolve the renderer + ipc lazily so the RunPromptRunner picks up
     // the current BrowserWindow on each tick (it can change across reload)
     // and so the service stays decoupled from the import-time `electron`

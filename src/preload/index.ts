@@ -2485,6 +2485,44 @@ const api = {
       result: { ok: true; paneKey: string } | { ok: false; error: string }
     ): void => {
       ipcRenderer.send(`automations:openPromptPane:reply:${requestId}`, result)
+    },
+    /** Subscribe to per-step command-pane requests from the main-process chain
+     *  executor (RunCommandRunner). The renderer should resolve the configured
+     *  SidebarPromptCommand (or use customCommand for source='custom'), spawn
+     *  a background terminal tab in the target worktree, and reply with the
+     *  resulting ptyId + paneKey. */
+    onOpenCommandPane: (
+      callback: (request: {
+        requestId: string
+        worktreeId: string
+        source: 'review' | 'create-pr' | 'custom'
+        commandId?: string
+        customCommand?: string
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        request: {
+          requestId: string
+          worktreeId: string
+          source: 'review' | 'create-pr' | 'custom'
+          commandId?: string
+          customCommand?: string
+        }
+      ) => callback(request)
+      ipcRenderer.on('automations:openCommandPane', listener)
+      return () => ipcRenderer.removeListener('automations:openCommandPane', listener)
+    },
+    /** Send a structured reply back to the main-process chain executor for the
+     *  matching openCommandPane request. `ok: true` carries the ptyId (for
+     *  exit tracking via PtyExitRegistry) and the paneKey (for surfacing in
+     *  the run output); `ok: false` carries a renderer-side reason that the
+     *  executor surfaces as the step's `error` (fail-fast — no retry). */
+    replyOpenCommandPane: (
+      requestId: string,
+      result: { ok: true; ptyId: string; paneKey: string } | { ok: false; error: string }
+    ): void => {
+      ipcRenderer.send(`automations:openCommandPane:reply:${requestId}`, result)
     }
   },
 

@@ -1334,6 +1334,19 @@ export type PreloadApi = {
       requestId: string,
       result: { ok: true; paneKey: string } | { ok: false; error: string }
     ) => void
+    onOpenCommandPane: (
+      callback: (request: {
+        requestId: string
+        worktreeId: string
+        source: 'review' | 'create-pr' | 'custom'
+        commandId?: string
+        customCommand?: string
+      }) => void
+    ) => () => void
+    replyOpenCommandPane: (
+      requestId: string,
+      result: { ok: true; ptyId: string; paneKey: string } | { ok: false; error: string }
+    ) => void
   }
   wsl: {
     isAvailable: () => Promise<boolean>

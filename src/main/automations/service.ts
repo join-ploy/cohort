@@ -9,10 +9,13 @@ import type {
 } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
 import type { SetupScriptEntry } from '../setup-script/registry'
+import type { PtyExitEntry } from '../pty/exit-registry'
 import { ChainExecutor } from './chain-executor'
 import { openPromptPane } from './open-prompt-pane'
+import { openCommandPane } from './open-command-pane'
 import { RunPromptRunner } from './runners/run-prompt-runner'
 import { WaitForSetupRunner } from './runners/wait-for-setup-runner'
+import { RunCommandRunner } from './runners/run-command-runner'
 import type { StepRunner } from './step-runner'
 
 const DEFAULT_TICK_MS = 60 * 1000
@@ -28,6 +31,11 @@ export type AutomationServiceOpts = {
    *  executor's WaitForSetupRunner (P2.5) can poll setup state without an IPC
    *  roundtrip. */
   getSetupScript?: (worktreeId: string) => SetupScriptEntry | undefined
+  /** Reads the main-process PTY exit registry by ptyId. Wired in
+   *  src/main/index.ts from the singleton PtyExitRegistry so the chain
+   *  executor's RunCommandRunner can detect command completion without an
+   *  IPC roundtrip. */
+  getPtyExit?: (ptyId: string) => PtyExitEntry | undefined
   /** Lazy accessor for the renderer process. Resolved at call-time on every
    *  runner tick because the BrowserWindow lifecycle is independent of this
    *  service — capturing a WebContents reference eagerly would let the service
@@ -43,6 +51,7 @@ export class AutomationService {
   private readonly tickMs: number
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
   private readonly getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
+  private readonly getPtyExit: (ptyId: string) => PtyExitEntry | undefined
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
@@ -51,6 +60,7 @@ export class AutomationService {
   private evaluating = false
   private readonly runPromptRunner: RunPromptRunner
   private readonly waitForSetupRunner: WaitForSetupRunner
+  private readonly runCommandRunner: RunCommandRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -58,6 +68,7 @@ export class AutomationService {
     this.tickMs = opts.tickMs ?? DEFAULT_TICK_MS
     this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
     this.getSetupScript = opts.getSetupScript ?? (() => undefined)
+    this.getPtyExit = opts.getPtyExit ?? (() => undefined)
     // Default getWebContents to the service's own setWebContents-tracked
     // reference so tests that don't supply a factory still get the WebContents
     // through the existing setWebContents() path.
@@ -85,6 +96,25 @@ export class AutomationService {
 
     this.waitForSetupRunner = new WaitForSetupRunner({
       getSetupScript: this.getSetupScript,
+      now: () => Date.now()
+    })
+
+    this.runCommandRunner = new RunCommandRunner({
+      openCommandPane: async (params) => {
+        const webContents = this.getWebContents()
+        if (!webContents || webContents.isDestroyed()) {
+          throw new Error('No renderer available to open command pane.')
+        }
+        if (!this.getIpcMain) {
+          throw new Error('AutomationService missing getIpcMain wiring.')
+        }
+        return openCommandPane(params, {
+          webContents,
+          ipc: this.getIpcMain(),
+          requestId: randomUUID()
+        })
+      },
+      getPtyExit: this.getPtyExit,
       now: () => Date.now()
     })
 
@@ -171,6 +201,9 @@ export class AutomationService {
     }
     if (kind === 'wait-for-setup') {
       return this.waitForSetupRunner
+    }
+    if (kind === 'run-command') {
+      return this.runCommandRunner
     }
     return undefined
   }
