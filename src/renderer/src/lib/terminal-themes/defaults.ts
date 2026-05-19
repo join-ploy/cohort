@@ -27,6 +27,33 @@ export const DEFAULT_TERMINAL_THEMES: TerminalThemeMap = {
     brightWhite: '#eaeaea'
   },
 
+  // Why: Orca-native warm-dark palette. Background sits between Ghostty
+  // Default Style Dark and pure black so the terminal feels embedded in the
+  // dark chrome without losing contrast against panel borders.
+  Melty: {
+    background: '#141110',
+    foreground: '#eae8e6',
+    cursor: '#eae8e6',
+    cursorAccent: '#131110',
+    selectionBackground: '#f3f2f1',
+    black: '#f3f2f1',
+    red: '#f87272',
+    green: '#4ade80',
+    yellow: '#ffea80',
+    blue: '#61a6fa',
+    magenta: '#e852ff',
+    cyan: '#3ed8ef',
+    white: '#2c2826',
+    brightBlack: '#a5a09c',
+    brightRed: '#fca6a6',
+    brightGreen: '#85efac',
+    brightYellow: '#fff1ad',
+    brightBlue: '#91c3fd',
+    brightMagenta: '#f08fff',
+    brightCyan: '#7bebf9',
+    brightWhite: '#211e1c'
+  },
+
   'Builtin Tango Light': {
     background: '#ffffff',
     foreground: '#2e3434',
