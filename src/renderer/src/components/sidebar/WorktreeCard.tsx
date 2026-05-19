@@ -545,18 +545,18 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </span>
                 {/* Why: GitHub-style diff stats vs the PR base read straight off
                      the cached PR (no separate IPC). Hidden when both totals are
-                     0 so unchanged worktrees stay uncluttered. */}
-                {pr &&
-                  (typeof pr.additions === 'number' || typeof pr.deletions === 'number') &&
-                  ((pr.additions ?? 0) > 0 || (pr.deletions ?? 0) > 0) && (
-                    <span
-                      className="text-[10px] tabular-nums leading-none shrink-0"
-                      aria-label={`+${pr.additions ?? 0} additions, -${pr.deletions ?? 0} deletions`}
-                    >
-                      <span className="text-emerald-500">+{pr.additions ?? 0}</span>{' '}
-                      <span className="text-rose-500">−{pr.deletions ?? 0}</span>
-                    </span>
-                  )}
+                     0 so unchanged worktrees stay uncluttered; the null-coalesce
+                     also handles cached PRs from before the additions/deletions
+                     fields were tracked. */}
+                {pr && ((pr.additions ?? 0) > 0 || (pr.deletions ?? 0) > 0) && (
+                  <span
+                    className="text-[10px] tabular-nums leading-none shrink-0"
+                    aria-label={`+${pr.additions ?? 0} additions, -${pr.deletions ?? 0} deletions`}
+                  >
+                    <span className="text-emerald-500">+{pr.additions ?? 0}</span>{' '}
+                    <span className="text-rose-500">−{pr.deletions ?? 0}</span>
+                  </span>
+                )}
               </div>
               {/* Why: workspaceName is the immutable, DB-safe handle injected
                    into setup/run/archive scripts as CONDUCTOR_WORKSPACE_NAME.
