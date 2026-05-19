@@ -297,6 +297,10 @@ export function getDefaultUIState(): PersistedUIState {
     lastActiveWorktreeId: null,
     sidebarWidth: 280,
     rightSidebarWidth: 350,
+    // Why: open-by-default is the new persisted baseline; the renderer's
+    // hydration also treats absent → true for upgrade users who never
+    // had this key on disk.
+    rightSidebarOpen: true,
     groupBy: 'repo',
     sortBy: 'recent',
     showActiveOnly: false,

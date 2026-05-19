@@ -1494,6 +1494,12 @@ export type PersistedUIState = {
   lastActiveWorktreeId: string | null
   sidebarWidth: number
   rightSidebarWidth: number
+  /** Whether the right sidebar is currently expanded. Absent on disk for
+   *  upgrade users — hydratePersistedUI treats that as open so the new
+   *  default-open behavior reaches existing installs. Distinct from the
+   *  `rightSidebarOpenByDefault` user setting, which only seeds the open
+   *  state for freshly-launched workspaces. */
+  rightSidebarOpen?: boolean
   groupBy: 'none' | 'repo' | 'pr-status'
   sortBy: 'name' | 'smart' | 'recent' | 'repo'
   showActiveOnly: boolean

@@ -595,6 +595,10 @@ function App(): React.JSX.Element {
       void window.api.ui.set({
         sidebarWidth,
         rightSidebarWidth,
+        // Why: persist open/closed alongside width so a deliberate close
+        // survives restart. Hydration treats absent as `true`, so this only
+        // changes behavior for users who have actually toggled the sidebar.
+        rightSidebarOpen,
         groupBy,
         sortBy,
         showActiveOnly,
@@ -614,6 +618,7 @@ function App(): React.JSX.Element {
     persistedUIReady,
     sidebarWidth,
     rightSidebarWidth,
+    rightSidebarOpen,
     groupBy,
     sortBy,
     showActiveOnly,

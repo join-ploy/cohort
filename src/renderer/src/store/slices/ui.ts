@@ -767,6 +767,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
           s.rightSidebarWidth,
           MAX_RIGHT_SIDEBAR_WIDTH
         ),
+        // Why: absent → true so upgrade users (who never had this persisted)
+        // see the new default-open behavior. Only an explicit close from the
+        // user persists `false` and survives across launches.
+        rightSidebarOpen: ui.rightSidebarOpen ?? true,
         groupBy: ui.groupBy,
         sortBy,
         // Why: "Active only" is part of the user's sidebar working set, not a

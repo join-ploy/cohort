@@ -552,7 +552,10 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     }),
 
   // Right sidebar
-  rightSidebarOpen: false,
+  // Why: open is the pre-hydration baseline; hydratePersistedUI then
+  // overrides with the persisted value (or keeps `true` when absent so
+  // upgrade users see the sidebar open on first launch).
+  rightSidebarOpen: true,
   rightSidebarWidth: 280,
   rightSidebarTab: 'explorer',
   activityBarPosition: 'top',
