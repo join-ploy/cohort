@@ -88,8 +88,11 @@ export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
 
 // Why: long markdown defaults for the right-sidebar Review / Create PR
 // dropdowns. Kept verbatim from the product brief so the user can replace
-// them entirely by editing the seeded entry in Settings.
-const DEFAULT_REVIEW_PROMPT = `Review guidelines:
+// them entirely by editing the seeded entry in Settings. Exported so the
+// Settings UI can pre-fill the prompt textarea when the user adds a brand
+// new Review or Create PR entry — saves them copy-pasting the default
+// body every time they want a variant.
+export const DEFAULT_REVIEW_PROMPT = `Review guidelines:
 You are acting as a reviewer for the changes on the current branch. Focus on
 correctness, clarity, and risk before style.
 
@@ -116,7 +119,7 @@ Output:
 
 File: src/client/frontends/desktop-app/core/UserData.ts`
 
-const DEFAULT_CREATE_PR_PROMPT = `The user likes the current state of the
+export const DEFAULT_CREATE_PR_PROMPT = `The user likes the current state of the
 branch and wants you to open a pull request that accurately represents it.
 
 Process:

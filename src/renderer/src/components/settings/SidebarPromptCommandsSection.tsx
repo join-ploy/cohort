@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { SidebarPromptCommand } from '../../../../shared/types'
+import { DEFAULT_CREATE_PR_PROMPT, DEFAULT_REVIEW_PROMPT } from '../../../../shared/constants'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
@@ -85,7 +86,10 @@ function PromptCommandsList({
       id: globalThis.crypto.randomUUID(),
       label: kind === 'review' ? 'New review' : 'New create-PR',
       command: 'claude',
-      prompt: ''
+      // Why: pre-fill with the canonical default prompt body so users
+      // adding a Review/Create-PR variant don't have to copy-paste the
+      // base prompt every time. Edit-on-demand from the textarea below.
+      prompt: kind === 'review' ? DEFAULT_REVIEW_PROMPT : DEFAULT_CREATE_PR_PROMPT
     }
     onChange([...commands, defaults])
   }, [commands, kind, onChange])
