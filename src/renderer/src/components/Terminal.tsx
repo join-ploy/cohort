@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import TabBar from './tab-bar/TabBar'
 import TerminalPane from './terminal-pane/TerminalPane'
+import WorktreeContextBar from './WorktreeContextBar'
 import {
   ORCA_EDITOR_REQUEST_FILE_CLOSE_EVENT,
   ORCA_EDITOR_SAVE_AND_CLOSE_EVENT,
@@ -1167,6 +1168,10 @@ function Terminal(): React.JSX.Element | null {
       className={`flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden${activeWorktreeId ? '' : ' hidden'}`}
     >
       <EditorAutosaveController />
+
+      {/* Why: surfaces the active repo + worktree identity above the central
+          tab strip. The bar self-hides for views other than 'terminal'. */}
+      <WorktreeContextBar />
 
       {/* Why: once split groups are enabled, each group owns its own tab strip
           inline like VS Code. The old titlebar portal stays only as a fallback
