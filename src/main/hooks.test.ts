@@ -704,6 +704,91 @@ describe('getEffectiveHooks', () => {
 
     expect(result?.scripts.run).toBe('pnpm dev')
   })
+
+  it('returns the orca.yaml databaseUrl when no persisted override exists', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'scripts:\n  run: pnpm dev\ndatabaseUrl: postgresql://yaml/db\n'
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const result = getEffectiveHooks(makeRepo())
+
+    expect(result?.databaseUrl).toBe('postgresql://yaml/db')
+  })
+
+  it('returns the persisted databaseUrl override when set, overriding yaml', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'scripts:\n  run: pnpm dev\ndatabaseUrl: postgresql://yaml/db\n'
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithDbOverride('postgresql://override/db')
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.databaseUrl).toBe('postgresql://override/db')
+  })
+
+  it('falls back to yaml databaseUrl when the persisted override is empty', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      'scripts:\n  run: pnpm dev\ndatabaseUrl: postgresql://yaml/db\n'
+    )
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithDbOverride('   ')
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.databaseUrl).toBe('postgresql://yaml/db')
+  })
+
+  it('omits databaseUrl when neither yaml nor persisted override define one', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue('scripts:\n  run: pnpm dev\n')
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithDbOverride('')
+    const result = getEffectiveHooks(repo)
+
+    expect(result?.databaseUrl).toBeUndefined()
+  })
+
+  it('returns hooks containing only databaseUrl when no scripts are configured', async () => {
+    const fs = await import('fs')
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const { getEffectiveHooks } = await import('./hooks')
+    const repo = makeRepoWithDbOverride('postgresql://override-only/db')
+    const result = getEffectiveHooks(repo)
+
+    expect(result).toEqual({
+      scripts: {},
+      databaseUrl: 'postgresql://override-only/db'
+    })
+  })
+
+  // Why: builder helper that lets databaseUrl tests pass a `hookSettings` shape
+  // without restating the full Repo. Keeps the test bodies focused on the
+  // yaml/override merge semantics.
+  function makeRepoWithDbOverride(databaseUrl: string): Repo {
+    return {
+      id: 'test-id',
+      path: '/test/repo',
+      displayName: 'Test Repo',
+      badgeColor: '#000',
+      addedAt: Date.now(),
+      hookSettings: {
+        mode: 'auto',
+        scripts: { setup: '', archive: '' },
+        databaseUrl
+      }
+    } as unknown as Repo
+  }
 })
 
 describe('runHook', () => {

@@ -373,8 +373,14 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
   const setup = yamlHooks?.scripts.setup?.trim() || legacySetup
   const archive = yamlHooks?.scripts.archive?.trim() || legacyArchive
   const run = yamlHooks?.scripts.run?.trim() || legacyRun
+  // Why: persisted per-repo override wins over orca.yaml so individual users
+  // can point at their own local DB without editing the committed file. Empty
+  // override falls through to the yaml value (parity with setup/archive).
+  const persistedDbUrl = repo.hookSettings?.databaseUrl?.trim()
+  const yamlDbUrl = yamlHooks?.databaseUrl?.trim()
+  const databaseUrl = persistedDbUrl || yamlDbUrl
 
-  if (!setup && !archive && !run) {
+  if (!setup && !archive && !run && !databaseUrl) {
     return null
   }
 
@@ -387,7 +393,8 @@ export function getEffectiveHooks(repo: Repo, worktreePath?: string): OrcaHooks 
       ...(setup ? { setup } : {}),
       ...(archive ? { archive } : {}),
       ...(run ? { run } : {})
-    }
+    },
+    ...(databaseUrl ? { databaseUrl } : {})
   }
 }
 

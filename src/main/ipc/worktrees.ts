@@ -555,12 +555,27 @@ export function registerWorktreeHandlers(
     }
 
     const has = hasHookConfig(repo.path)
-    const hooks = has ? loadHooks(repo.path) : null
+    const yamlHooks = has ? loadHooks(repo.path) : null
+    // Why: the renderer's WorktreeContextBar reads `hooks.databaseUrl` from
+    // this response to wire the Database opener. Surface the persisted
+    // per-repo override here so an empty orca.yaml `databaseUrl` does not
+    // silently disable the opener for users who configured it in Settings.
+    const persistedDbUrl = repo.hookSettings?.databaseUrl?.trim()
+    const yamlDbUrl = yamlHooks?.databaseUrl?.trim()
+    const resolvedDbUrl = persistedDbUrl || yamlDbUrl
+    const hooks =
+      yamlHooks || persistedDbUrl
+        ? {
+            scripts: yamlHooks?.scripts ?? {},
+            ...(yamlHooks?.issueCommand ? { issueCommand: yamlHooks.issueCommand } : {}),
+            ...(resolvedDbUrl ? { databaseUrl: resolvedDbUrl } : {})
+          }
+        : null
     // Why: when a newer Orca version adds a top-level key to `orca.yaml`, older
     // versions that don't recognise it return null and show "could not be parsed".
     // Detecting well-formed but unrecognised keys lets the UI suggest updating
     // instead of implying the file is broken.
-    const mayNeedUpdate = has && !hooks && hasUnrecognizedOrcaYamlKeys(repo.path)
+    const mayNeedUpdate = has && !yamlHooks && hasUnrecognizedOrcaYamlKeys(repo.path)
     return {
       hasHooks: has,
       hooks,

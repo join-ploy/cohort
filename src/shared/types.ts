@@ -863,6 +863,11 @@ export type RepoHookSettings = {
     archive: string
     run?: string
   }
+  /** Optional persisted override of orca.yaml's `databaseUrl` field. When set
+   *  (non-empty), takes precedence over the yaml value via getEffectiveHooks
+   *  so individual users can point at their own local DB without editing the
+   *  committed orca.yaml. */
+  databaseUrl?: string
 }
 
 export type WorktreeSetupLaunch = {
