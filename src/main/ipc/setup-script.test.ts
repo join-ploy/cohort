@@ -1,3 +1,7 @@
+/* eslint-disable max-lines -- Why: keeps the registry, handleSetupStart,
+runSetup, and handleSetupStop suites together so a regression in any one
+path is caught against the full IPC surface instead of being split across
+files. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -5,13 +9,17 @@ const {
   getSshPtyProviderMock,
   getEffectiveHooksMock,
   createSetupRunnerScriptMock,
-  getAllWindowsMock
+  getAllWindowsMock,
+  registerPtyMock,
+  unregisterPtyMock
 } = vi.hoisted(() => ({
   getLocalPtyProviderMock: vi.fn(),
   getSshPtyProviderMock: vi.fn(),
   getEffectiveHooksMock: vi.fn(),
   createSetupRunnerScriptMock: vi.fn(),
-  getAllWindowsMock: vi.fn()
+  getAllWindowsMock: vi.fn(),
+  registerPtyMock: vi.fn(),
+  unregisterPtyMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -29,6 +37,11 @@ vi.mock('../hooks', () => ({
   getEffectiveHooks: getEffectiveHooksMock
 }))
 
+vi.mock('../memory/pty-registry', () => ({
+  registerPty: registerPtyMock,
+  unregisterPty: unregisterPtyMock
+}))
+
 import { _testing as registry, handleSetupStart, handleSetupStop, runSetup } from './setup-script'
 import {
   type FakeProvider,
@@ -42,8 +55,9 @@ describe('setupPtyByWorktree registry', () => {
   beforeEach(() => registry.clear())
 
   it('records and clears with generation + ptyId guards', () => {
-    registry.set('wt-A', { ptyId: 'pty-A', generation: 1 })
-    expect(registry.get('wt-A')).toEqual({ ptyId: 'pty-A', generation: 1 })
+    const entry = { ptyId: 'pty-A', generation: 1, connectionId: null }
+    registry.set('wt-A', entry)
+    expect(registry.get('wt-A')).toEqual(entry)
     expect(registry.get('missing')).toBeNull()
     // Stale generation (e.g. an onExit from a previous PTY race) must not clear.
     registry.clearIfMatches('wt-A', 'pty-A', 0)
@@ -75,6 +89,8 @@ describe('handleSetupStart', () => {
       runnerScriptPath: '/tmp/.git/orca/setup-runner.sh',
       envVars: { ORCA_WORKTREE_PATH: worktreePath }
     })
+    registerPtyMock.mockReset()
+    unregisterPtyMock.mockReset()
   })
 
   it('returns no-setup-script when scripts.setup is empty', async () => {
@@ -141,6 +157,11 @@ describe('handleSetupStart', () => {
       worktreeId,
       ptyId: 'pty-NEW'
     })
+    // Why: the memory collector needs PTYs attributed to their worktree, or
+    // they fall through to ORPHAN_WORKTREE_ID.
+    expect(registerPtyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ptyId: 'pty-NEW', worktreeId })
+    )
   })
 
   it('isolates registry entries across worktrees in the same repo', async () => {
@@ -161,7 +182,7 @@ describe('handleSetupStart', () => {
   })
 
   it('re-running setup in the same worktree kills prior + emits exit code 130', async () => {
-    registry.set(worktreeId, { ptyId: 'pty-OLD', generation: 99 })
+    registry.set(worktreeId, { ptyId: 'pty-OLD', generation: 99, connectionId: null })
     await handleSetupStart({ worktreeId }, { store: makeMultiRepoStore([repo]) as never })
     expect(provider.shutdown).toHaveBeenCalledWith(
       'pty-OLD',
@@ -190,6 +211,7 @@ describe('handleSetupStart', () => {
   it('clears registry + broadcasts setup:exited on natural pty exit', async () => {
     await handleSetupStart({ worktreeId }, { store: makeMultiRepoStore([repo]) as never })
     win.webContents.send.mockClear()
+    unregisterPtyMock.mockClear()
     provider.fireExit({ id: 'pty-NEW', code: 0 })
     expect(registry.get(worktreeId)).toBeNull()
     expect(win.webContents.send).toHaveBeenCalledWith('setup:exited', {
@@ -197,6 +219,8 @@ describe('handleSetupStart', () => {
       worktreeId,
       code: 0
     })
+    // Why: stop attributing memory to a defunct PTY.
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('uses the SSH pty provider when the repo has a connectionId', async () => {
@@ -305,7 +329,7 @@ describe('handleSetupStop', () => {
     const win = makeWindow()
     getLocalPtyProviderMock.mockReset().mockReturnValue(provider)
     getAllWindowsMock.mockReset().mockReturnValue([win])
-    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 7 })
+    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 7, connectionId: null })
     const result = await handleSetupStop(
       { worktreeId },
       { store: makeMultiRepoStore([repo]) as never }

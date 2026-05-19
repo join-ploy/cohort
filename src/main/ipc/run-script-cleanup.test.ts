@@ -5,13 +5,17 @@ const {
   getSshPtyProviderMock,
   getEffectiveHooksMock,
   createRunRunnerScriptMock,
-  getAllWindowsMock
+  getAllWindowsMock,
+  registerPtyMock,
+  unregisterPtyMock
 } = vi.hoisted(() => ({
   getLocalPtyProviderMock: vi.fn(),
   getSshPtyProviderMock: vi.fn(),
   getEffectiveHooksMock: vi.fn(),
   createRunRunnerScriptMock: vi.fn(),
-  getAllWindowsMock: vi.fn()
+  getAllWindowsMock: vi.fn(),
+  registerPtyMock: vi.fn(),
+  unregisterPtyMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -27,6 +31,11 @@ vi.mock('./pty', () => ({
 vi.mock('../hooks', () => ({
   createRunRunnerScript: createRunRunnerScriptMock,
   getEffectiveHooks: getEffectiveHooksMock
+}))
+
+vi.mock('../memory/pty-registry', () => ({
+  registerPty: registerPtyMock,
+  unregisterPty: unregisterPtyMock
 }))
 
 import { _testing as registry, killRunForWorktree } from './run-script'
@@ -65,7 +74,12 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
     // Why: the run registry is per-repo, so deleting worktree A must not touch
     // a live run owned by sibling worktree B.
     const siblingWorktreeId = `${repo.id}::/test/repo/wt-SIBLING`
-    registry.set(repo.id, { ptyId: 'pty-SIBLING', worktreeId: siblingWorktreeId, generation: 5 })
+    registry.set(repo.id, {
+      ptyId: 'pty-SIBLING',
+      worktreeId: siblingWorktreeId,
+      generation: 5,
+      connectionId: null
+    })
     const store = makeSingleRepoStore(repo)
 
     await killRunForWorktree({ repoId: repo.id, worktreeId }, { store: store as never })
@@ -79,7 +93,12 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
   })
 
   it('shuts down the pty, clears the registry, and broadcasts run:exited when owned by the deleted worktree', async () => {
-    registry.set(repo.id, { ptyId: 'pty-LIVE', worktreeId, generation: 9 })
+    registry.set(repo.id, {
+      ptyId: 'pty-LIVE',
+      worktreeId,
+      generation: 9,
+      connectionId: null
+    })
     const store = makeSingleRepoStore(repo)
 
     await killRunForWorktree({ repoId: repo.id, worktreeId }, { store: store as never })
@@ -100,7 +119,12 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
     const sshRepo = makeRepo({ connectionId: 'remote-1' })
     const sshProvider = makeProvider()
     getSshPtyProviderMock.mockReturnValue(sshProvider)
-    registry.set(sshRepo.id, { ptyId: 'ssh-pty', worktreeId, generation: 1 })
+    registry.set(sshRepo.id, {
+      ptyId: 'ssh-pty',
+      worktreeId,
+      generation: 1,
+      connectionId: 'remote-1'
+    })
     const store = makeSingleRepoStore(sshRepo)
 
     await killRunForWorktree({ repoId: sshRepo.id, worktreeId }, { store: store as never })
@@ -116,7 +140,12 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
   it('still clears the registry and broadcasts even if shutdown throws', async () => {
     // Why: best-effort cleanup — a backend that already lost the session
     // should not block the registry purge or the renderer state flip.
-    registry.set(repo.id, { ptyId: 'pty-LIVE', worktreeId, generation: 1 })
+    registry.set(repo.id, {
+      ptyId: 'pty-LIVE',
+      worktreeId,
+      generation: 1,
+      connectionId: null
+    })
     provider.shutdown.mockRejectedValueOnce(new Error('already gone'))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = makeSingleRepoStore(repo)

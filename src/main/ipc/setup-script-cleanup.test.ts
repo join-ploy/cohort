@@ -5,13 +5,17 @@ const {
   getSshPtyProviderMock,
   getEffectiveHooksMock,
   createSetupRunnerScriptMock,
-  getAllWindowsMock
+  getAllWindowsMock,
+  registerPtyMock,
+  unregisterPtyMock
 } = vi.hoisted(() => ({
   getLocalPtyProviderMock: vi.fn(),
   getSshPtyProviderMock: vi.fn(),
   getEffectiveHooksMock: vi.fn(),
   createSetupRunnerScriptMock: vi.fn(),
-  getAllWindowsMock: vi.fn()
+  getAllWindowsMock: vi.fn(),
+  registerPtyMock: vi.fn(),
+  unregisterPtyMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -27,6 +31,11 @@ vi.mock('./pty', () => ({
 vi.mock('../hooks', () => ({
   createSetupRunnerScript: createSetupRunnerScriptMock,
   getEffectiveHooks: getEffectiveHooksMock
+}))
+
+vi.mock('../memory/pty-registry', () => ({
+  registerPty: registerPtyMock,
+  unregisterPty: unregisterPtyMock
 }))
 
 import { _testing as registry, killSetupForWorktree } from './setup-script'
@@ -55,7 +64,7 @@ describe('killSetupForWorktree (worktree-delete cleanup)', () => {
     const win = makeWindow()
     getLocalPtyProviderMock.mockReset().mockReturnValue(provider)
     getAllWindowsMock.mockReset().mockReturnValue([win])
-    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 3 })
+    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 3, connectionId: null })
 
     await killSetupForWorktree({ worktreeId }, { store: makeMultiRepoStore([repo]) as never })
 
@@ -80,7 +89,11 @@ describe('killSetupForWorktree (worktree-delete cleanup)', () => {
     getLocalPtyProviderMock.mockReset().mockReturnValue(localProvider)
     getSshPtyProviderMock.mockReset().mockReturnValue(sshProvider)
     getAllWindowsMock.mockReset().mockReturnValue([makeWindow()])
-    registry.set(sshWorktreeId, { ptyId: 'ssh-pty', generation: 1 })
+    registry.set(sshWorktreeId, {
+      ptyId: 'ssh-pty',
+      generation: 1,
+      connectionId: 'remote-1'
+    })
 
     await killSetupForWorktree(
       { worktreeId: sshWorktreeId },
@@ -101,7 +114,7 @@ describe('killSetupForWorktree (worktree-delete cleanup)', () => {
     const win = makeWindow()
     getLocalPtyProviderMock.mockReset().mockReturnValue(provider)
     getAllWindowsMock.mockReset().mockReturnValue([win])
-    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 1 })
+    registry.set(worktreeId, { ptyId: 'pty-LIVE', generation: 1, connectionId: null })
     provider.shutdown.mockRejectedValueOnce(new Error('already gone'))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

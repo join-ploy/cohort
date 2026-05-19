@@ -8,13 +8,17 @@ const {
   getSshPtyProviderMock,
   getEffectiveHooksMock,
   createRunRunnerScriptMock,
-  getAllWindowsMock
+  getAllWindowsMock,
+  registerPtyMock,
+  unregisterPtyMock
 } = vi.hoisted(() => ({
   getLocalPtyProviderMock: vi.fn(),
   getSshPtyProviderMock: vi.fn(),
   getEffectiveHooksMock: vi.fn(),
   createRunRunnerScriptMock: vi.fn(),
-  getAllWindowsMock: vi.fn()
+  getAllWindowsMock: vi.fn(),
+  registerPtyMock: vi.fn(),
+  unregisterPtyMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -35,6 +39,11 @@ vi.mock('./pty', () => ({
 vi.mock('../hooks', () => ({
   createRunRunnerScript: createRunRunnerScriptMock,
   getEffectiveHooks: getEffectiveHooksMock
+}))
+
+vi.mock('../memory/pty-registry', () => ({
+  registerPty: registerPtyMock,
+  unregisterPty: unregisterPtyMock
 }))
 
 import { _testing as registry, handleRunStart, handleRunStop } from './run-script'
@@ -105,11 +114,17 @@ describe('runPtyByRepo registry', () => {
   beforeEach(() => registry.clear())
 
   it('records and returns the live pty for a repo', () => {
-    registry.set('repo-1', { ptyId: 'pty-A', worktreeId: 'wt-1', generation: 1 })
+    registry.set('repo-1', {
+      ptyId: 'pty-A',
+      worktreeId: 'wt-1',
+      generation: 1,
+      connectionId: null
+    })
     expect(registry.get('repo-1')).toEqual({
       ptyId: 'pty-A',
       worktreeId: 'wt-1',
-      generation: 1
+      generation: 1,
+      connectionId: null
     })
   })
 
@@ -118,7 +133,12 @@ describe('runPtyByRepo registry', () => {
   })
 
   it('clearIfMatches only clears when generation matches', () => {
-    registry.set('repo-1', { ptyId: 'pty-A', worktreeId: 'wt-1', generation: 1 })
+    registry.set('repo-1', {
+      ptyId: 'pty-A',
+      worktreeId: 'wt-1',
+      generation: 1,
+      connectionId: null
+    })
     // Stale generation (e.g. an onExit from a previous PTY race) must not clear.
     registry.clearIfMatches('repo-1', 'pty-A', 0)
     expect(registry.get('repo-1')).not.toBeNull()
@@ -128,7 +148,12 @@ describe('runPtyByRepo registry', () => {
   })
 
   it('clearIfMatches only clears when ptyId matches', () => {
-    registry.set('repo-1', { ptyId: 'pty-A', worktreeId: 'wt-1', generation: 1 })
+    registry.set('repo-1', {
+      ptyId: 'pty-A',
+      worktreeId: 'wt-1',
+      generation: 1,
+      connectionId: null
+    })
     // A PTY id that does not match the current entry must not clear it
     // (defends against onExit firing for a sibling PTY in another repo flow).
     registry.clearIfMatches('repo-1', 'pty-OTHER', 1)
@@ -163,6 +188,8 @@ describe('handleRunStart', () => {
       runnerScriptPath: '/tmp/.git/orca/run-runner.sh',
       envVars: { ORCA_WORKTREE_PATH: worktreePath }
     })
+    registerPtyMock.mockReset()
+    unregisterPtyMock.mockReset()
   })
 
   it('returns no-run-script and does not spawn when scripts.run is empty', async () => {
@@ -237,11 +264,23 @@ describe('handleRunStart', () => {
       worktreeId,
       ptyId: 'pty-NEW'
     })
+
+    // Why: the memory collector needs PTYs attributed to their worktree, or
+    // they fall through to ORPHAN_WORKTREE_ID. The handler must registerPty
+    // at spawn time with the spawned ptyId and worktreeId.
+    expect(registerPtyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ptyId: 'pty-NEW', worktreeId })
+    )
   })
 
   it('kills the existing pty and broadcasts run:exited for the prior worktree before spawning a new one', async () => {
     const priorWorktreeId = `${repo.id}::/test/repo/wt-A`
-    registry.set(repo.id, { ptyId: 'pty-OLD', worktreeId: priorWorktreeId, generation: 99 })
+    registry.set(repo.id, {
+      ptyId: 'pty-OLD',
+      worktreeId: priorWorktreeId,
+      generation: 99,
+      connectionId: null
+    })
 
     const store = makeStore(repo)
     const result = await handleRunStart({ repoId: repo.id, worktreeId }, { store: store as never })
@@ -295,6 +334,7 @@ describe('handleRunStart', () => {
     await handleRunStart({ repoId: repo.id, worktreeId }, { store: store as never })
 
     win.webContents.send.mockClear()
+    unregisterPtyMock.mockClear()
     provider.fireExit({ id: 'pty-NEW', code: 0 })
 
     expect(registry.get(repo.id)).toBeNull()
@@ -303,6 +343,8 @@ describe('handleRunStart', () => {
       worktreeId,
       code: 0
     })
+    // Why: the memory collector must stop attributing memory to defunct PTYs.
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('uses the SSH pty provider when the repo has a connectionId', async () => {
@@ -368,6 +410,8 @@ describe('handleRunStop', () => {
     getLocalPtyProviderMock.mockReset().mockReturnValue(provider)
     getSshPtyProviderMock.mockReset().mockReturnValue(undefined)
     getAllWindowsMock.mockReset().mockReturnValue([win])
+    registerPtyMock.mockReset()
+    unregisterPtyMock.mockReset()
   })
 
   it('returns ok:false when nothing is running for the repo', async () => {
@@ -378,7 +422,12 @@ describe('handleRunStop', () => {
   })
 
   it('shuts down the registered pty, clears the registry, and broadcasts run:exited', async () => {
-    registry.set(repo.id, { ptyId: 'pty-LIVE', worktreeId, generation: 7 })
+    registry.set(repo.id, {
+      ptyId: 'pty-LIVE',
+      worktreeId,
+      generation: 7,
+      connectionId: null
+    })
     const store = makeStore(repo)
 
     const result = await handleRunStop({ repoId: repo.id }, { store: store as never })
@@ -389,6 +438,7 @@ describe('handleRunStop', () => {
       expect.objectContaining({ immediate: true })
     )
     expect(registry.get(repo.id)).toBeNull()
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-LIVE')
     expect(win.webContents.send).toHaveBeenCalledWith('run:exited', {
       repoId: repo.id,
       worktreeId,

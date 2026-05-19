@@ -19,6 +19,7 @@ import type {
   SetupStopResult
 } from '../../shared/script-types'
 import { parseWorktreeId } from './worktree-logic'
+import { registerPty, unregisterPty } from '../memory/pty-registry'
 
 import { getLocalPtyProvider, getSshPtyProvider } from './pty'
 
@@ -27,6 +28,10 @@ export type { SetupStartResult, SetupStopResult } from '../../shared/script-type
 type SetupPtyEntry = {
   ptyId: string
   generation: number
+  // Why: captured at spawn time so app-quit cleanup can route shutdown to the
+  // right provider without needing the store (which may already be torn down).
+  // null means the local provider.
+  connectionId: string | null
 }
 
 const setupPtyByWorktree = new Map<string, SetupPtyEntry>()
@@ -163,6 +168,7 @@ async function setupStartLocked(
       )
     }
     clearIfMatches(args.worktreeId, prior.ptyId, prior.generation)
+    unregisterPty(prior.ptyId)
     broadcast('setup:exited', {
       repoId,
       worktreeId: args.worktreeId,
@@ -185,7 +191,7 @@ async function setupStartLocked(
     process.platform === 'win32' ? 'windows' : 'posix'
   )
 
-  let spawned: { id: string }
+  let spawned: { id: string; pid?: number | null }
   try {
     spawned = await provider.spawn({
       cols: 80,
@@ -201,7 +207,26 @@ async function setupStartLocked(
     return { ok: false, reason: 'spawn-failed' }
   }
 
-  set(args.worktreeId, { ptyId: spawned.id, generation })
+  set(args.worktreeId, {
+    ptyId: spawned.id,
+    generation,
+    connectionId: repo.connectionId ?? null
+  })
+
+  // Why: attribute this PTY to its worktree in the memory collector. Without
+  // this, the collector falls back to ORPHAN_WORKTREE_ID for setup scripts.
+  // SSH-backed PTYs run on a remote host so their pid is meaningless locally;
+  // registerPty tolerates null and the collector ignores remote entries.
+  registerPty({
+    ptyId: spawned.id,
+    worktreeId: args.worktreeId,
+    sessionId: null,
+    paneKey: null,
+    pid:
+      typeof spawned.pid === 'number' && Number.isFinite(spawned.pid) && spawned.pid > 0
+        ? spawned.pid
+        : null
+  })
 
   const unsubscribe = provider.onExit((payload) => {
     if (payload.id !== spawned.id) {
@@ -209,6 +234,7 @@ async function setupStartLocked(
     }
     unsubscribe()
     clearIfMatches(args.worktreeId, spawned.id, generation)
+    unregisterPty(spawned.id)
     broadcast('setup:exited', {
       repoId,
       worktreeId: args.worktreeId,
@@ -260,6 +286,7 @@ export async function handleSetupStop(
     )
   }
   clearIfMatches(args.worktreeId, entry.ptyId, entry.generation)
+  unregisterPty(entry.ptyId)
   broadcast('setup:exited', {
     repoId,
     worktreeId: args.worktreeId,
@@ -303,6 +330,7 @@ export async function killSetupForWorktree(
     }
   }
   clearIfMatches(args.worktreeId, entry.ptyId, entry.generation)
+  unregisterPty(entry.ptyId)
   broadcast('setup:exited', {
     repoId,
     worktreeId: args.worktreeId,

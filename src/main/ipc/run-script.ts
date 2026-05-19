@@ -18,6 +18,7 @@ import type {
   RunStopResult
 } from '../../shared/script-types'
 import { parseWorktreeId } from './worktree-logic'
+import { registerPty, unregisterPty } from '../memory/pty-registry'
 
 import { getLocalPtyProvider, getSshPtyProvider } from './pty'
 
@@ -30,6 +31,10 @@ type RunPtyEntry = {
   ptyId: string
   worktreeId: string
   generation: number
+  // Why: captured at spawn time so app-quit cleanup can route shutdown to the
+  // right provider without needing the store (which may already be torn down).
+  // null means the local provider.
+  connectionId: string | null
 }
 
 const runPtyByRepo = new Map<string, RunPtyEntry>()
@@ -164,6 +169,7 @@ async function runStartLocked(
       )
     }
     clearIfMatches(args.repoId, prior.ptyId, prior.generation)
+    unregisterPty(prior.ptyId)
     broadcast('run:exited', {
       repoId: args.repoId,
       worktreeId: prior.worktreeId,
@@ -192,7 +198,7 @@ async function runStartLocked(
   // invoke rejection while the renderer has no `run:started` event to react
   // to. Return `spawn-failed` so the caller can present an error and the
   // registry stays clean (no `set()` was called).
-  let spawned: { id: string }
+  let spawned: { id: string; pid?: number | null }
   try {
     spawned = await provider.spawn({
       cols: 80,
@@ -208,7 +214,27 @@ async function runStartLocked(
     return { ok: false, reason: 'spawn-failed' }
   }
 
-  set(args.repoId, { ptyId: spawned.id, worktreeId: args.worktreeId, generation })
+  set(args.repoId, {
+    ptyId: spawned.id,
+    worktreeId: args.worktreeId,
+    generation,
+    connectionId: repo.connectionId ?? null
+  })
+
+  // Why: attribute this PTY to its worktree in the memory collector. Without
+  // this, the collector falls back to ORPHAN_WORKTREE_ID for run scripts.
+  // SSH-backed PTYs run on a remote host so their pid is meaningless locally;
+  // registerPty tolerates null and the collector ignores remote entries.
+  registerPty({
+    ptyId: spawned.id,
+    worktreeId: args.worktreeId,
+    sessionId: null,
+    paneKey: null,
+    pid:
+      typeof spawned.pid === 'number' && Number.isFinite(spawned.pid) && spawned.pid > 0
+        ? spawned.pid
+        : null
+  })
 
   // Why: filter the global onExit by ptyId. The clearIfMatches guard then makes
   // the late-arriving exit of a superseded PTY a no-op, preventing it from
@@ -219,6 +245,7 @@ async function runStartLocked(
     }
     unsubscribe()
     clearIfMatches(args.repoId, spawned.id, generation)
+    unregisterPty(spawned.id)
     broadcast('run:exited', {
       repoId: args.repoId,
       worktreeId: args.worktreeId,
@@ -261,6 +288,7 @@ export async function handleRunStop(
     )
   }
   clearIfMatches(args.repoId, entry.ptyId, entry.generation)
+  unregisterPty(entry.ptyId)
   broadcast('run:exited', {
     repoId: args.repoId,
     worktreeId: entry.worktreeId,
@@ -296,6 +324,7 @@ export async function killRunForWorktree(
     }
   }
   clearIfMatches(args.repoId, entry.ptyId, entry.generation)
+  unregisterPty(entry.ptyId)
   broadcast('run:exited', {
     repoId: args.repoId,
     worktreeId: args.worktreeId,
