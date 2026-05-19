@@ -117,7 +117,7 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
 
   it('uses the SSH provider when the repo has a connectionId', async () => {
     const sshRepo = makeRepo({ connectionId: 'remote-1' })
-    const sshProvider = makeProvider()
+    const sshProvider = makeProvider({ asLocal: false })
     getSshPtyProviderMock.mockReturnValue(sshProvider)
     registry.set(sshRepo.id, {
       ptyId: 'ssh-pty',
@@ -211,7 +211,7 @@ describe('killAllRunScripts (app-quit cleanup)', () => {
   it('routes SSH entries to their SSH provider using the stored connectionId', async () => {
     // Why: SSH entries store connectionId at spawn time so quit-time cleanup
     // can route shutdown without needing the store (which may be torn down).
-    const sshProvider = makeProvider()
+    const sshProvider = makeProvider({ asLocal: false })
     getSshPtyProviderMock.mockImplementation((id: string) =>
       id === 'remote-1' ? sshProvider : undefined
     )

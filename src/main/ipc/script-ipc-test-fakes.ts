@@ -4,6 +4,7 @@
 
 import { vi } from 'vitest'
 import type { Repo } from '../../shared/types'
+import { LocalPtyProvider } from '../providers/local-pty-provider'
 
 type ExitListener = (payload: { id: string; code: number }) => void
 
@@ -12,9 +13,17 @@ export type FakeProvider = {
   shutdown: ReturnType<typeof vi.fn>
   onExit: ReturnType<typeof vi.fn>
   fireExit: (payload: { id: string; code: number }) => void
+  markPtyExemptFromOrphanKill: ReturnType<typeof vi.fn>
+  unmarkPtyExemptFromOrphanKill: ReturnType<typeof vi.fn>
 }
 
-export function makeProvider(opts?: { spawnIds?: string[] }): FakeProvider {
+export function makeProvider(opts?: {
+  spawnIds?: string[]
+  /** Default true: fake masquerades as LocalPtyProvider so handlers'
+   *  `provider instanceof LocalPtyProvider` orphan-exempt branch runs.
+   *  Set false for SSH-style fakes. */
+  asLocal?: boolean
+}): FakeProvider {
   const exitListeners = new Set<ExitListener>()
   const ids = opts?.spawnIds ? [...opts.spawnIds] : []
   let counter = 0
@@ -27,18 +36,28 @@ export function makeProvider(opts?: { spawnIds?: string[] }): FakeProvider {
     exitListeners.add(cb)
     return () => exitListeners.delete(cb)
   })
-  return {
+  // Why: handlers gate their orphan-exempt calls on `provider instanceof
+  // LocalPtyProvider`. Re-parent the fake onto LocalPtyProvider.prototype so
+  // the runtime check passes without spinning up node-pty or its native side.
+  // SSH-style providers opt out via asLocal:false so their tests still mirror
+  // production (the SSH provider never sees mark/unmark calls).
+  const asLocal = opts?.asLocal ?? true
+  const fake = (asLocal ? Object.create(LocalPtyProvider.prototype) : {}) as FakeProvider
+  Object.assign(fake, {
     spawn,
     shutdown,
     onExit,
-    fireExit: (payload) => {
+    markPtyExemptFromOrphanKill: vi.fn(),
+    unmarkPtyExemptFromOrphanKill: vi.fn(),
+    fireExit: (payload: { id: string; code: number }) => {
       // Snapshot to allow listeners to unsubscribe themselves during iteration.
       const snapshot = Array.from(exitListeners)
       for (const listener of snapshot) {
         listener(payload)
       }
     }
-  }
+  })
+  return fake
 }
 
 export function makeRepo(overrides: Partial<Repo> = {}): Repo {

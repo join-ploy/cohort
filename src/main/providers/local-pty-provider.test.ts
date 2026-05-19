@@ -323,6 +323,60 @@ describe('LocalPtyProvider', () => {
     })
   })
 
+  describe('killOrphanedPtys', () => {
+    it('preserves a PTY marked exempt across a generation change', async () => {
+      // Why: script PTYs (run/setup) are spawned out-of-band from the renderer
+      // tabs and carry the load generation captured at spawn time. The
+      // post-reload sweep would otherwise kill them; the exempt set is what
+      // keeps them alive across a renderer reload.
+      //
+      // killAll first to drop leftovers from preceding tests in this file —
+      // the underlying ptyProcesses map is module-scoped, so any survivor from
+      // an earlier `provider.spawn` would otherwise pollute the sweep result.
+      provider.killAll()
+
+      const exemptKill = vi.fn()
+      const orphanKill = vi.fn(() => exitCb?.({ exitCode: -1 }))
+      spawnMock
+        .mockReturnValueOnce({
+          ...mockProc,
+          kill: exemptKill,
+          onExit: vi.fn()
+        })
+        .mockReturnValueOnce({
+          ...mockProc,
+          kill: orphanKill,
+          onExit: vi.fn((cb) => {
+            exitCb = cb
+          })
+        })
+
+      const { id: exemptId } = await provider.spawn({ cols: 80, rows: 24 })
+      const { id: orphanId } = await provider.spawn({ cols: 80, rows: 24 })
+      provider.markPtyExemptFromOrphanKill(exemptId)
+
+      // Simulate a renderer reload: advance the generation and sweep entries
+      // tagged with the previous (now stale) generation.
+      const nextGen = provider.advanceGeneration()
+      const killed = provider.killOrphanedPtys(nextGen)
+
+      expect(killed.map((k) => k.id)).toEqual([orphanId])
+      expect(exemptKill).not.toHaveBeenCalled()
+      expect(orphanKill).toHaveBeenCalled()
+      // Exempt PTY survives in the live list; orphan is gone.
+      const survivors = await provider.listProcesses()
+      expect(survivors.map((p) => p.id)).toContain(exemptId)
+      expect(survivors.map((p) => p.id)).not.toContain(orphanId)
+
+      // Once unmarked, the next sweep removes the previously-exempt entry —
+      // proves the exempt flag is the only thing keeping it alive.
+      provider.unmarkPtyExemptFromOrphanKill(exemptId)
+      const killed2 = provider.killOrphanedPtys(nextGen)
+      expect(killed2.map((k) => k.id)).toEqual([exemptId])
+      expect(exemptKill).toHaveBeenCalled()
+    })
+  })
+
   describe('killAll', () => {
     it('kills all PTY processes', async () => {
       // Why: each spawn needs its own proc so the onExit-triggered POSIX kill

@@ -10,6 +10,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 
 import { createSetupRunnerScript, getEffectiveHooks } from '../hooks'
 import type { IPtyProvider } from '../providers/types'
+import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { Store } from '../persistence'
 import { buildSelfTerminatingScriptCommand } from '../../shared/setup-runner-command'
 import type {
@@ -93,6 +94,15 @@ function getProviderForConnection(connectionId: string | null | undefined): IPty
   return getSshPtyProvider(connectionId) ?? null
 }
 
+// Why: SSH-backed PTYs don't go through LocalPtyProvider's orphan-sweep, so
+// the exempt set is only meaningful for the local provider. These helpers
+// keep the call sites tight, accept null so the worktree-delete + app-quit
+// branches can drop their own provider guard.
+const markPtyOrphanExempt = (p: IPtyProvider | null, id: string): void =>
+  void (p instanceof LocalPtyProvider && p.markPtyExemptFromOrphanKill(id))
+const unmarkPtyOrphanExempt = (p: IPtyProvider | null, id: string): void =>
+  void (p instanceof LocalPtyProvider && p.unmarkPtyExemptFromOrphanKill(id))
+
 export async function handleSetupStart(
   args: { worktreeId: string },
   deps: SetupIpcDeps
@@ -169,6 +179,7 @@ async function setupStartLocked(
     }
     clearIfMatches(args.worktreeId, prior.ptyId, prior.generation)
     unregisterPty(prior.ptyId)
+    unmarkPtyOrphanExempt(provider, prior.ptyId)
     broadcast('setup:exited', {
       repoId,
       worktreeId: args.worktreeId,
@@ -228,6 +239,12 @@ async function setupStartLocked(
         : null
   })
 
+  // Why: shield this PTY from killOrphanedPtys, which sweeps any PTY whose
+  // load-generation tag is stale after a renderer reload. Setup PTYs are
+  // tagged at spawn time and never re-tagged, so without this they would be
+  // swept on the first reload after the setup starts.
+  markPtyOrphanExempt(provider, spawned.id)
+
   const unsubscribe = provider.onExit((payload) => {
     if (payload.id !== spawned.id) {
       return
@@ -235,6 +252,7 @@ async function setupStartLocked(
     unsubscribe()
     clearIfMatches(args.worktreeId, spawned.id, generation)
     unregisterPty(spawned.id)
+    unmarkPtyOrphanExempt(provider, spawned.id)
     broadcast('setup:exited', {
       repoId,
       worktreeId: args.worktreeId,
@@ -287,6 +305,7 @@ export async function handleSetupStop(
   }
   clearIfMatches(args.worktreeId, entry.ptyId, entry.generation)
   unregisterPty(entry.ptyId)
+  unmarkPtyOrphanExempt(provider, entry.ptyId)
   broadcast('setup:exited', {
     repoId,
     worktreeId: args.worktreeId,
@@ -331,6 +350,7 @@ export async function killSetupForWorktree(
   }
   clearIfMatches(args.worktreeId, entry.ptyId, entry.generation)
   unregisterPty(entry.ptyId)
+  unmarkPtyOrphanExempt(provider, entry.ptyId)
   broadcast('setup:exited', {
     repoId,
     worktreeId: args.worktreeId,
@@ -365,6 +385,7 @@ export async function killAllSetupScripts(): Promise<void> {
         }
       }
       unregisterPty(entry.ptyId)
+      unmarkPtyOrphanExempt(provider, entry.ptyId)
       setupPtyByWorktree.delete(worktreeId)
     })
   )

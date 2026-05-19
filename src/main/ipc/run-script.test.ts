@@ -47,6 +47,7 @@ vi.mock('../memory/pty-registry', () => ({
 }))
 
 import { _testing as registry, handleRunStart, handleRunStop } from './run-script'
+import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { Repo } from '../../shared/types'
 
 type ExitListener = (payload: { id: string; code: number }) => void
@@ -56,9 +57,11 @@ type FakeProvider = {
   shutdown: ReturnType<typeof vi.fn>
   onExit: ReturnType<typeof vi.fn>
   fireExit: (payload: { id: string; code: number }) => void
+  markPtyExemptFromOrphanKill: ReturnType<typeof vi.fn>
+  unmarkPtyExemptFromOrphanKill: ReturnType<typeof vi.fn>
 }
 
-function makeProvider(opts?: { spawnIds?: string[] }): FakeProvider {
+function makeProvider(opts?: { spawnIds?: string[]; asLocal?: boolean }): FakeProvider {
   const exitListeners = new Set<ExitListener>()
   const ids = opts?.spawnIds ? [...opts.spawnIds] : []
   let counter = 0
@@ -71,18 +74,27 @@ function makeProvider(opts?: { spawnIds?: string[] }): FakeProvider {
     exitListeners.add(cb)
     return () => exitListeners.delete(cb)
   })
-  return {
+  // Why: the handler gates orphan-exempt registration on `provider instanceof
+  // LocalPtyProvider`. Re-parenting the fake onto LocalPtyProvider.prototype
+  // makes the runtime check pass without needing the real native PTY. SSH-style
+  // fakes opt out so their tests still mirror production (no exempt calls).
+  const asLocal = opts?.asLocal ?? true
+  const fake = (asLocal ? Object.create(LocalPtyProvider.prototype) : {}) as FakeProvider
+  Object.assign(fake, {
     spawn,
     shutdown,
     onExit,
-    fireExit: (payload) => {
+    markPtyExemptFromOrphanKill: vi.fn(),
+    unmarkPtyExemptFromOrphanKill: vi.fn(),
+    fireExit: (payload: { id: string; code: number }) => {
       // Snapshot to allow listeners to unsubscribe themselves during iteration.
       const snapshot = Array.from(exitListeners)
       for (const listener of snapshot) {
         listener(payload)
       }
     }
-  }
+  })
+  return fake
 }
 
 function makeRepo(overrides: Partial<Repo> = {}): Repo {
@@ -271,6 +283,11 @@ describe('handleRunStart', () => {
     expect(registerPtyMock).toHaveBeenCalledWith(
       expect.objectContaining({ ptyId: 'pty-NEW', worktreeId })
     )
+    // Why: the run PTY must be exempted from killOrphanedPtys at spawn time
+    // so a renderer reload after Cmd+R doesn't sweep it. The exempt set is
+    // the only thing standing between the script PTY and the generation
+    // sweep on did-finish-load.
+    expect(provider.markPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('kills the existing pty and broadcasts run:exited for the prior worktree before spawning a new one', async () => {
@@ -345,11 +362,14 @@ describe('handleRunStart', () => {
     })
     // Why: the memory collector must stop attributing memory to defunct PTYs.
     expect(unregisterPtyMock).toHaveBeenCalledWith('pty-NEW')
+    // Why: the exempt set must shrink with the PTY map — otherwise a recycled
+    // PTY id from a future spawn would inherit the stale exemption.
+    expect(provider.unmarkPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('uses the SSH pty provider when the repo has a connectionId', async () => {
     const sshRepo = makeRepo({ connectionId: 'remote-1' })
-    const sshProvider = makeProvider({ spawnIds: ['ssh-pty'] })
+    const sshProvider = makeProvider({ spawnIds: ['ssh-pty'], asLocal: false })
     getSshPtyProviderMock.mockReturnValue(sshProvider)
     const store = makeStore(sshRepo)
 
@@ -439,6 +459,9 @@ describe('handleRunStop', () => {
     )
     expect(registry.get(repo.id)).toBeNull()
     expect(unregisterPtyMock).toHaveBeenCalledWith('pty-LIVE')
+    // Why: explicit stop must release the orphan-kill exemption so a recycled
+    // PTY id from a future spawn doesn't inherit a stale exemption.
+    expect(provider.unmarkPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-LIVE')
     expect(win.webContents.send).toHaveBeenCalledWith('run:exited', {
       repoId: repo.id,
       worktreeId,

@@ -91,7 +91,7 @@ describe('killSetupForWorktree (worktree-delete cleanup)', () => {
     const sshRepo = makeRepo({ connectionId: 'remote-1' })
     const sshWorktreeId = `${sshRepo.id}::/remote/repo/wt-1`
     const localProvider = makeProvider()
-    const sshProvider = makeProvider()
+    const sshProvider = makeProvider({ asLocal: false })
     getLocalPtyProviderMock.mockReset().mockReturnValue(localProvider)
     getSshPtyProviderMock.mockReset().mockReturnValue(sshProvider)
     getAllWindowsMock.mockReset().mockReturnValue([makeWindow()])
@@ -172,7 +172,7 @@ describe('killAllSetupScripts (app-quit cleanup)', () => {
   it('routes SSH entries to their SSH provider using the stored connectionId', async () => {
     // Why: SSH entries store connectionId at spawn time so quit-time cleanup
     // can route shutdown without needing the store (which may be torn down).
-    const sshProvider = makeProvider()
+    const sshProvider = makeProvider({ asLocal: false })
     getSshPtyProviderMock.mockImplementation((id: string) =>
       id === 'remote-1' ? sshProvider : undefined
     )

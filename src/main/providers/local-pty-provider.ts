@@ -42,6 +42,12 @@ const ptyDisposables = new Map<string, { dispose: () => void }[]>()
 
 let loadGeneration = 0
 const ptyLoadGeneration = new Map<string, number>()
+// Why: script PTYs (run/setup) are spawned out-of-band from the renderer's
+// terminal tabs, so they carry the load generation captured at spawn time
+// rather than at the latest reload. killOrphanedPtys() would otherwise sweep
+// them on every renderer reload. Callers register their script PTYs here so
+// the sweep skips them; the entry is cleared on natural exit / explicit kill.
+const ptyExemptFromOrphanKill = new Set<string>()
 
 type DataCallback = (payload: { id: string; data: string }) => void
 type ExitCallback = (payload: { id: string; code: number }) => void
@@ -81,6 +87,9 @@ function clearPtyState(id: string): void {
   ptyProcesses.delete(id)
   ptyShellName.delete(id)
   ptyLoadGeneration.delete(id)
+  // Why: exempt entries leak across PTY reincarnations if the caller forgets
+  // to unmark — clearing here keeps the set bounded by the live PTY map.
+  ptyExemptFromOrphanKill.delete(id)
 }
 
 function destroyPtyProcess(proc: pty.IPty): void {
@@ -451,6 +460,9 @@ export class LocalPtyProvider implements IPtyProvider {
     ptyProcesses.delete(id)
     ptyShellName.delete(id)
     ptyLoadGeneration.delete(id)
+    // Why: shutdown is the explicit teardown path; keep the exempt set bounded
+    // by the live PTY map so a re-used id from a future spawn starts clean.
+    ptyExemptFromOrphanKill.delete(id)
     this.opts.onExit?.(id, -1)
     for (const cb of exitListeners) {
       cb({ id, code: -1 })
@@ -581,12 +593,32 @@ export class LocalPtyProvider implements IPtyProvider {
   killOrphanedPtys(currentGeneration: number): { id: string }[] {
     const killed: { id: string }[] = []
     for (const [id, proc] of ptyProcesses) {
+      // Why: script PTYs (run/setup) carry a stale generation by design — they
+      // were spawned out-of-band from the renderer tabs, so the post-reload
+      // sweep would otherwise mistake them for orphans. The exempt set lets
+      // run/setup register their PTYs to survive the sweep.
+      if (ptyExemptFromOrphanKill.has(id)) {
+        continue
+      }
       if ((ptyLoadGeneration.get(id) ?? -1) < currentGeneration) {
         safeKillAndClean(id, proc)
         killed.push({ id })
       }
     }
     return killed
+  }
+
+  /** Exempt a PTY from killOrphanedPtys sweeps. Used by run/setup script IPC
+   *  handlers so their PTYs survive the post-reload generation sweep. */
+  markPtyExemptFromOrphanKill(id: string): void {
+    ptyExemptFromOrphanKill.add(id)
+  }
+
+  /** Remove a PTY's exemption. Called by the run/setup handlers on natural
+   *  exit, explicit kill, and worktree-delete so the exempt set stays bounded
+   *  by live PTYs. */
+  unmarkPtyExemptFromOrphanKill(id: string): void {
+    ptyExemptFromOrphanKill.delete(id)
   }
 
   /** Advance the load generation counter (called on renderer reload). */

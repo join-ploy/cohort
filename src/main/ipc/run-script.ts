@@ -9,6 +9,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 
 import { createRunRunnerScript, getEffectiveHooks } from '../hooks'
 import type { IPtyProvider } from '../providers/types'
+import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { Store } from '../persistence'
 import { buildSelfTerminatingScriptCommand } from '../../shared/setup-runner-command'
 import type {
@@ -108,6 +109,15 @@ function getProviderForConnection(connectionId: string | null | undefined): IPty
   return getSshPtyProvider(connectionId) ?? null
 }
 
+// Why: SSH-backed PTYs don't go through LocalPtyProvider's orphan-sweep, so
+// the exempt set is only meaningful for the local provider. These helpers
+// keep the call sites tight, accept null so the worktree-delete + app-quit
+// branches can drop their own provider guard.
+const markPtyOrphanExempt = (p: IPtyProvider | null, id: string): void =>
+  void (p instanceof LocalPtyProvider && p.markPtyExemptFromOrphanKill(id))
+const unmarkPtyOrphanExempt = (p: IPtyProvider | null, id: string): void =>
+  void (p instanceof LocalPtyProvider && p.unmarkPtyExemptFromOrphanKill(id))
+
 export async function handleRunStart(
   args: { repoId: string; worktreeId: string },
   deps: RunIpcDeps
@@ -170,6 +180,7 @@ async function runStartLocked(
     }
     clearIfMatches(args.repoId, prior.ptyId, prior.generation)
     unregisterPty(prior.ptyId)
+    unmarkPtyOrphanExempt(provider, prior.ptyId)
     broadcast('run:exited', {
       repoId: args.repoId,
       worktreeId: prior.worktreeId,
@@ -236,6 +247,12 @@ async function runStartLocked(
         : null
   })
 
+  // Why: shield this PTY from killOrphanedPtys, which sweeps any PTY whose
+  // load-generation tag is stale after a renderer reload. Script PTYs are
+  // tagged at spawn time and never re-tagged, so without this they would be
+  // swept on the first reload after Cmd+R.
+  markPtyOrphanExempt(provider, spawned.id)
+
   // Why: filter the global onExit by ptyId. The clearIfMatches guard then makes
   // the late-arriving exit of a superseded PTY a no-op, preventing it from
   // erasing the live registry entry.
@@ -246,6 +263,7 @@ async function runStartLocked(
     unsubscribe()
     clearIfMatches(args.repoId, spawned.id, generation)
     unregisterPty(spawned.id)
+    unmarkPtyOrphanExempt(provider, spawned.id)
     broadcast('run:exited', {
       repoId: args.repoId,
       worktreeId: args.worktreeId,
@@ -289,6 +307,7 @@ export async function handleRunStop(
   }
   clearIfMatches(args.repoId, entry.ptyId, entry.generation)
   unregisterPty(entry.ptyId)
+  unmarkPtyOrphanExempt(provider, entry.ptyId)
   broadcast('run:exited', {
     repoId: args.repoId,
     worktreeId: entry.worktreeId,
@@ -325,6 +344,7 @@ export async function killRunForWorktree(
   }
   clearIfMatches(args.repoId, entry.ptyId, entry.generation)
   unregisterPty(entry.ptyId)
+  unmarkPtyOrphanExempt(provider, entry.ptyId)
   broadcast('run:exited', {
     repoId: args.repoId,
     worktreeId: args.worktreeId,
@@ -359,6 +379,7 @@ export async function killAllRunScripts(): Promise<void> {
         }
       }
       unregisterPty(entry.ptyId)
+      unmarkPtyOrphanExempt(provider, entry.ptyId)
       runPtyByRepo.delete(repoId)
     })
   )

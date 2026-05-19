@@ -162,6 +162,9 @@ describe('handleSetupStart', () => {
     expect(registerPtyMock).toHaveBeenCalledWith(
       expect.objectContaining({ ptyId: 'pty-NEW', worktreeId })
     )
+    // Why: setup PTY must be exempted from killOrphanedPtys at spawn time so
+    // a renderer reload doesn't sweep it via the post-reload generation pass.
+    expect(provider.markPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('isolates registry entries across worktrees in the same repo', async () => {
@@ -221,11 +224,14 @@ describe('handleSetupStart', () => {
     })
     // Why: stop attributing memory to a defunct PTY.
     expect(unregisterPtyMock).toHaveBeenCalledWith('pty-NEW')
+    // Why: the exempt set must shrink with the PTY map — otherwise a recycled
+    // PTY id from a future spawn would inherit the stale exemption.
+    expect(provider.unmarkPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-NEW')
   })
 
   it('uses the SSH pty provider when the repo has a connectionId', async () => {
     const sshRepo = makeRepo({ connectionId: 'remote-1' })
-    const sshProvider = makeProvider({ spawnIds: ['ssh-pty'] })
+    const sshProvider = makeProvider({ spawnIds: ['ssh-pty'], asLocal: false })
     getSshPtyProviderMock.mockReturnValue(sshProvider)
     const result = await handleSetupStart(
       { worktreeId },
@@ -340,6 +346,9 @@ describe('handleSetupStop', () => {
       expect.objectContaining({ immediate: true })
     )
     expect(registry.get(worktreeId)).toBeNull()
+    // Why: explicit stop must release the orphan-kill exemption so a recycled
+    // PTY id from a future spawn doesn't inherit a stale exemption.
+    expect(provider.unmarkPtyExemptFromOrphanKill).toHaveBeenCalledWith('pty-LIVE')
     expect(win.webContents.send).toHaveBeenCalledWith('setup:exited', {
       repoId: repo.id,
       worktreeId,
