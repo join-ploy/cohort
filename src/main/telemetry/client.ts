@@ -62,18 +62,20 @@ const TELEMETRY_ENABLED = true
 // us the compile-time substitution in production and a safe `undefined`
 // in tests — both of which resolve to `IS_OFFICIAL_BUILD === false`, which
 // is the fail-closed default we want anywhere outside an official CI build.
-const BUILD_IDENTITY: 'stable' | 'rc' | null =
-  typeof ORCA_BUILD_IDENTITY !== 'undefined'
-    ? ORCA_BUILD_IDENTITY
-    : ((globalThis as { ORCA_BUILD_IDENTITY?: 'stable' | 'rc' | null }).ORCA_BUILD_IDENTITY ?? null)
-const WRITE_KEY: string | null =
-  typeof ORCA_POSTHOG_WRITE_KEY !== 'undefined'
-    ? ORCA_POSTHOG_WRITE_KEY
-    : ((globalThis as { ORCA_POSTHOG_WRITE_KEY?: string | null }).ORCA_POSTHOG_WRITE_KEY ?? null)
-const IS_OFFICIAL_BUILD: boolean =
-  (BUILD_IDENTITY === 'stable' || BUILD_IDENTITY === 'rc') &&
-  typeof WRITE_KEY === 'string' &&
-  WRITE_KEY.length > 0
+// Fork disable: hardcode telemetry off so this fork never transmits to
+// upstream's PostHog endpoint and the ambient ORCA_BUILD_IDENTITY /
+// ORCA_POSTHOG_WRITE_KEY constants (vite-injected at build time, see
+// electron.vite.config.ts) are not referenced — tsc's standalone
+// typecheck couldn't resolve those ambients without electron-vite in the
+// pipeline, blocking `pnpm typecheck` / `pnpm build`. Restore the
+// original typeof-checks (visible in git history) once this fork wires
+// up its own analytics destination.
+const BUILD_IDENTITY: 'stable' | 'rc' | null = null
+const WRITE_KEY: string | null = null
+// Fork disable: see the comment above. IS_OFFICIAL_BUILD is hardcoded
+// false so every guarded transmission path falls through to the
+// console-mirror branch — the fork never opens a PostHog session.
+const IS_OFFICIAL_BUILD: boolean = false
 
 // Module-level singletons. There is exactly one Store / one main process /
 // one telemetry session at a time; threading `store` through every export
