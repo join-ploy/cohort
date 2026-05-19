@@ -212,7 +212,13 @@ export async function createRemoteWorktree(
     /* no username configured */
   }
 
-  const branchName = computeBranchName(sanitizedName, settings, username)
+  // Why: only apply the configured branchPrefix when the create is anchored
+  // to a tracked work item (linked issue / PR). Ad-hoc worktrees use the raw
+  // workspace name so the branch matches what the user typed in the picker.
+  const hasLinkedWorkItem = args.linkedIssue !== undefined || args.linkedPR !== undefined
+  const branchName = hasLinkedWorkItem
+    ? computeBranchName(sanitizedName, settings, username)
+    : sanitizedName
 
   // Check branch conflict on remote
   try {
@@ -459,6 +465,10 @@ export async function createLocalWorktree(
   let effectiveSanitizedName = sanitizedName
   let branchName = ''
   let worktreePath = ''
+  // Why: only apply the configured branchPrefix when the create is anchored
+  // to a tracked work item (linked issue / PR). Ad-hoc worktrees use the raw
+  // workspace name so the branch matches what the user typed in the picker.
+  const hasLinkedWorkItem = args.linkedIssue !== undefined || args.linkedPR !== undefined
 
   // Why: silently resolve branch/path/PR name collisions by appending -2/-3/etc.
   // instead of failing and forcing the user back to the name picker. This is
@@ -479,7 +489,9 @@ export async function createLocalWorktree(
           ? `${requestedName}-${suffix}`
           : effectiveSanitizedName
 
-    branchName = computeBranchName(effectiveSanitizedName, settings, username)
+    branchName = hasLinkedWorkItem
+      ? computeBranchName(effectiveSanitizedName, settings, username)
+      : effectiveSanitizedName
     lastBranchConflictKind = await getBranchConflictKind(repo.path, branchName)
     if (lastBranchConflictKind) {
       continue

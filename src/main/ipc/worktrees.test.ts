@@ -579,6 +579,142 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
+  it('applies the configured branch prefix when a linked issue is present', async () => {
+    // Why: branchPrefix is meaningful for ticket-anchored worktrees so the
+    // prefixed branch matches the user's namespacing convention.
+    store.getSettings.mockReturnValue({
+      branchPrefix: 'git-username',
+      nestWorkspaces: false,
+      refreshLocalBaseRefOnWorktreeCreate: false,
+      workspaceDir: '/workspace'
+    })
+    getGitUsernameMock.mockReturnValue('jdoe')
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'jdoe/improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+    ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      linkedIssue: 123
+    })
+
+    expect(addWorktreeMock).toHaveBeenCalledWith(
+      '/workspace/repo',
+      expect.any(String),
+      'jdoe/improve-dashboard',
+      'origin/main',
+      false
+    )
+  })
+
+  it('skips the branch prefix when no linked work item is provided', async () => {
+    // Why: ad-hoc worktrees should use the raw workspace name as the branch
+    // so it matches what the user typed in the picker.
+    store.getSettings.mockReturnValue({
+      branchPrefix: 'git-username',
+      nestWorkspaces: false,
+      refreshLocalBaseRefOnWorktreeCreate: false,
+      workspaceDir: '/workspace'
+    })
+    getGitUsernameMock.mockReturnValue('jdoe')
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+    ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard'
+    })
+
+    expect(addWorktreeMock).toHaveBeenCalledWith(
+      '/workspace/repo',
+      expect.any(String),
+      'improve-dashboard',
+      'origin/main',
+      false
+    )
+  })
+
+  it('applies the custom branch prefix when a linked PR is present', async () => {
+    store.getSettings.mockReturnValue({
+      branchPrefix: 'custom',
+      branchPrefixCustom: 'team',
+      nestWorkspaces: false,
+      refreshLocalBaseRefOnWorktreeCreate: false,
+      workspaceDir: '/workspace'
+    })
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'team/improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+    ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      linkedPR: 456
+    })
+
+    expect(addWorktreeMock).toHaveBeenCalledWith(
+      '/workspace/repo',
+      expect.any(String),
+      'team/improve-dashboard',
+      'origin/main',
+      false
+    )
+  })
+
+  it('uses the raw workspace name when branchPrefix is "none" regardless of link state', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/improve-dashboard',
+        head: 'abc123',
+        branch: 'improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+    ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'improve-dashboard',
+      linkedIssue: 123
+    })
+
+    expect(addWorktreeMock).toHaveBeenCalledWith(
+      '/workspace/repo',
+      expect.any(String),
+      'improve-dashboard',
+      'origin/main',
+      false
+    )
+  })
+
   it('persists the selected creation agent during local create', async () => {
     listWorktreesMock.mockResolvedValue([
       {

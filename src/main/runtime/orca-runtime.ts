@@ -3764,7 +3764,13 @@ export class OrcaRuntimeService {
     const requestedName = args.name
     const sanitizedName = sanitizeWorktreeName(args.name)
     const username = getGitUsername(repo.path)
-    const branchName = computeBranchName(sanitizedName, settings, username)
+    // Why: only apply the configured branchPrefix when the create is anchored
+    // to a tracked work item (linked issue). Ad-hoc worktrees use the raw
+    // workspace name so the branch matches what the user named.
+    const hasLinkedWorkItem = args.linkedIssue !== null && args.linkedIssue !== undefined
+    const branchName = hasLinkedWorkItem
+      ? computeBranchName(sanitizedName, settings, username)
+      : sanitizedName
 
     const branchConflictKind = await getBranchConflictKind(repo.path, branchName)
     if (branchConflictKind) {
