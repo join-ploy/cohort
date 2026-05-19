@@ -279,6 +279,7 @@ function App(): React.JSX.Element {
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const acknowledgedAgentsByPaneKey = useAppStore((s) => s.acknowledgedAgentsByPaneKey)
+  const pathOpenerChoice = useAppStore((s) => s.pathOpenerChoice)
   const persistedUIReady = useAppStore((s) => s.persistedUIReady)
   const rightSidebarWidth = useAppStore((s) => s.rightSidebarWidth)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
@@ -609,7 +610,11 @@ function App(): React.JSX.Element {
         // agent-status.ts (close/dismiss) both flow to disk through map
         // identity changes. Without persisting, agent rows that survive
         // restart come back bold even when the user had already visited them.
-        acknowledgedAgentsByPaneKey
+        acknowledgedAgentsByPaneKey,
+        // Why: setPathOpenerChoice writes immediately for snappy persistence,
+        // but riding the debounced batch too is a cheap safety net in case the
+        // immediate write races a slice rehydrate during a fast launch sequence.
+        pathOpenerChoice
       })
     }, 150)
 
@@ -624,7 +629,8 @@ function App(): React.JSX.Element {
     showActiveOnly,
     hideDefaultBranchWorkspace,
     filterRepoIds,
-    acknowledgedAgentsByPaneKey
+    acknowledgedAgentsByPaneKey,
+    pathOpenerChoice
   ])
 
   // Apply theme to document

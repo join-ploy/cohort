@@ -177,6 +177,10 @@ describe('Store', () => {
     // Why: open-by-default is the persisted baseline; only an explicit Close
     // from the user should write a `false` value.
     expect(ui.rightSidebarOpen).toBe(true)
+    // Why: pathOpenerChoice seeds 'finder' so a fresh install behaves like the
+    // pre-dropdown reveal-in-OS click. Users only persist 'vscode' deliberately
+    // via the WorktreeContextBar opener dropdown.
+    expect(ui.pathOpenerChoice).toBe('finder')
   })
 
   // ── 2. Load from existing valid file ─────────────────────────────────

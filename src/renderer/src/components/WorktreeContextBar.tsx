@@ -1,8 +1,22 @@
 import React, { useCallback, useRef } from 'react'
-import { ChevronDown, ChevronRight, Ellipsis, FolderOpen, PanelRight } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  Ellipsis,
+  Folder,
+  FolderOpen,
+  PanelRight
+} from 'lucide-react'
 import { useAppStore } from '../store'
 import { useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 
 const isMac = navigator.userAgent.includes('Mac')
 
@@ -19,6 +33,11 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
+  // Why: nullish-coalesce guards the brief pre-hydration window when the slice
+  // initializer has not yet run (older tests + first-paint), so the bar never
+  // renders an undefined opener choice.
+  const pathOpenerChoice = useAppStore((s) => s.pathOpenerChoice ?? 'finder')
+  const setPathOpenerChoice = useAppStore((s) => s.setPathOpenerChoice)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -29,18 +48,26 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
 
   // Why: macOS opens Finder, Windows opens File Explorer, Linux opens Files —
   // the label matches what the underlying shell.openPath actually invokes.
-  const openExternalLabel = isMac
+  const finderLabel = isMac
     ? 'Reveal in Finder'
     : navigator.userAgent.includes('Linux')
       ? 'Open Containing Folder'
       : 'Reveal in File Explorer'
 
-  const handleOpenExternal = useCallback((): void => {
+  const primaryLabel = pathOpenerChoice === 'vscode' ? 'Open in VS Code' : finderLabel
+
+  const handleOpenPath = useCallback((): void => {
     if (!worktreePath) {
       return
     }
-    window.api.shell.openPath(worktreePath)
-  }, [worktreePath])
+    if (pathOpenerChoice === 'vscode') {
+      // Why: vscode://file/ is a no-op on machines without VS Code installed,
+      // matching shell.openPath's "open whatever the OS associates" behavior.
+      window.api.shell.openVscode(worktreePath)
+    } else {
+      window.api.shell.openPath(worktreePath)
+    }
+  }, [worktreePath, pathOpenerChoice])
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -128,10 +155,10 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: split button — left segment is the primary "reveal in
-              OS file manager" action; right segment will host an
-              editor-picker dropdown once Orca grows a defaultEditor setting.
-              For now the dropdown is a disabled stub. */}
+          {/* Why: split button — left segment dispatches to the currently
+              selected opener (Finder/Explorer/Files or VS Code); right segment
+              is the DropdownMenu that picks which opener that primary click
+              uses. The chosen opener persists via PersistedUIState. */}
           <div className="flex max-w-[260px] items-center">
             {/* Why: backgroundColor inherits the bar's --titlebar-background
                 token so the selector visually flattens into the bar instead
@@ -139,27 +166,43 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                 inset. Hover keeps an accent wash for affordance. */}
             <button
               type="button"
-              onClick={handleOpenExternal}
-              aria-label={openExternalLabel}
-              title={openExternalLabel}
+              onClick={handleOpenPath}
+              aria-label={primaryLabel}
+              title={primaryLabel}
               className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
               style={{ backgroundColor: 'var(--titlebar-background)' }}
             >
               <FolderOpen className="size-3 shrink-0" />
               <span className="min-w-0 truncate">{worktreePath}</span>
             </button>
-            <button
-              type="button"
-              aria-label="Choose editor"
-              // Why: no editor-picker UI exists yet. Disabled-styling makes
-              // the stub state obvious; wire a DropdownMenu when an
-              // external-editor concept lands.
-              className="flex h-6 cursor-default items-center rounded-sm rounded-l-none border border-border px-1.5 text-muted-foreground hover:bg-accent"
-              style={{ backgroundColor: 'var(--titlebar-background)' }}
-              disabled
-            >
-              <ChevronDown className="size-3" />
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Choose opener"
+                  className="flex h-6 cursor-pointer items-center rounded-sm rounded-l-none border border-border px-1.5 text-muted-foreground hover:bg-accent"
+                  style={{ backgroundColor: 'var(--titlebar-background)' }}
+                >
+                  <ChevronDown className="size-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 p-1">
+                <DropdownMenuItem
+                  onSelect={() => setPathOpenerChoice('finder')}
+                  className="flex items-center gap-2"
+                >
+                  <Folder className="size-3.5" />
+                  <span>Finder</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => setPathOpenerChoice('vscode')}
+                  className="flex items-center gap-2"
+                >
+                  <Code2 className="size-3.5" />
+                  <span>VS Code</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           {/* Why: hosts the right-sidebar toggle inside the bar's no-drag
               region. App.tsx removes its workspace-view floating copy when

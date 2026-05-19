@@ -1619,6 +1619,10 @@ export type PersistedUIState = {
    *  using their existing settings paths; this only restores transient tabs
    *  and applied searches. */
   taskResumeState?: TaskResumeState
+  /** Which app opens when the user clicks the worktree path button in the
+   *  context bar. 'finder' reveals in OS file manager (default). 'vscode'
+   *  opens via vscode://file/. */
+  pathOpenerChoice?: 'finder' | 'vscode'
 }
 
 export const PET_SIZE_MIN = 60

@@ -309,7 +309,8 @@ export function getDefaultUIState(): PersistedUIState {
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     trustedOrcaHooks: {},
-    acknowledgedAgentsByPaneKey: {}
+    acknowledgedAgentsByPaneKey: {},
+    pathOpenerChoice: 'finder'
   }
 }
 

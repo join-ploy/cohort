@@ -357,6 +357,11 @@ export type UISlice = {
   setBrowserDefaultSearchEngine: (engine: 'google' | 'duckduckgo' | 'bing' | 'kagi' | null) => void
   browserKagiSessionLink: string | null
   setBrowserKagiSessionLink: (link: string | null) => void
+  /** Which app opens when the user activates the worktree path button in
+   *  WorktreeContextBar's split-button selector. Persisted via the
+   *  PersistedUIState pipeline so the choice survives restart. */
+  pathOpenerChoice: 'finder' | 'vscode'
+  setPathOpenerChoice: (choice: 'finder' | 'vscode') => void
 }
 
 export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) => ({
@@ -827,6 +832,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         acknowledgedAgentsByPaneKey: sanitizeAcknowledgedAgentsByPaneKey(
           ui.acknowledgedAgentsByPaneKey
         ),
+        // Why: absent → 'finder' so upgrade users default to the Reveal-in-OS
+        // behavior they had before the opener dropdown landed. Unknown values
+        // also collapse to 'finder' rather than letting a typo-tampered file
+        // disable the path button entirely.
+        pathOpenerChoice: ui.pathOpenerChoice === 'vscode' ? 'vscode' : 'finder',
         persistedUIReady: true
       }
     }),
@@ -912,5 +922,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     const normalized = link ? normalizeKagiSessionLink(link) : null
     void window.api.ui.set({ browserKagiSessionLink: normalized }).catch(console.error)
     set({ browserKagiSessionLink: normalized })
+  },
+
+  pathOpenerChoice: 'finder',
+  setPathOpenerChoice: (choice) => {
+    void window.api.ui.set({ pathOpenerChoice: choice }).catch(console.error)
+    set({ pathOpenerChoice: choice })
   }
 })

@@ -147,6 +147,33 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().rightSidebarOpen).toBe(true)
   })
 
+  it('restores pathOpenerChoice=vscode from persisted UI state', () => {
+    const store = createUIStore()
+
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        pathOpenerChoice: 'vscode'
+      })
+    )
+
+    expect(store.getState().pathOpenerChoice).toBe('vscode')
+  })
+
+  it("defaults pathOpenerChoice to 'finder' when absent from persisted UI state", () => {
+    // Why: upgrade users have no pathOpenerChoice key on disk; absent collapses
+    // to 'finder' so the path-button keeps the pre-dropdown reveal-in-OS behavior.
+    const store = createUIStore()
+
+    store.setState({ pathOpenerChoice: 'vscode' })
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        pathOpenerChoice: undefined
+      })
+    )
+
+    expect(store.getState().pathOpenerChoice).toBe('finder')
+  })
+
   it('hydrates a valid Kagi session link', () => {
     const store = createUIStore()
 
