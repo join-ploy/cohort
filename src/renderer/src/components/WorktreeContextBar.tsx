@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -18,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import type { OrcaHooks } from '../../../shared/types'
 
 const isMac = navigator.userAgent.includes('Mac')
 
@@ -39,18 +40,41 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   // renders an undefined opener choice.
   const pathOpenerChoice = useAppStore((s) => s.pathOpenerChoice ?? 'finder')
   const setPathOpenerChoice = useAppStore((s) => s.setPathOpenerChoice)
-  // Why: read the live template from settings (not just at click time) so the
-  // Database menu item enables/disables reactively when the user edits it in
-  // Settings without needing to reopen the dropdown.
-  const databaseConnectionTemplate = useAppStore(
-    (s) => s.settings?.databaseConnectionTemplate ?? ''
-  )
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
   const workspaceName = worktree?.workspaceName ?? ''
-  const databaseTemplateConfigured = databaseConnectionTemplate.trim().length > 0
+  // Why: databaseUrl now lives in the repo's orca.yaml / conductor.json so
+  // teammates share one connection template. Mirror RunPanel's hooks:check
+  // pattern — re-fetch when the active repo changes and store the trimmed
+  // value in local state. Empty/missing → Database opener stays disabled.
+  const [databaseUrl, setDatabaseUrl] = useState<string>('')
+  useEffect(() => {
+    if (!repo?.id) {
+      setDatabaseUrl('')
+      return
+    }
+    let cancelled = false
+    void window.api.hooks
+      .check({ repoId: repo.id })
+      .then((result) => {
+        if (cancelled) {
+          return
+        }
+        const hooks = (result.hooks as OrcaHooks | null) ?? null
+        setDatabaseUrl(hooks?.databaseUrl?.trim() ?? '')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDatabaseUrl('')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [repo?.id])
+  const databaseTemplateConfigured = databaseUrl.length > 0
 
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
@@ -76,11 +100,10 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
       // Database in the dropdown silently no-ops instead of dispatching an
       // invalid URL. Empty workspaceName is impossible for non-null worktree,
       // but the check costs nothing and protects the URL substitution.
-      const template = databaseConnectionTemplate.trim()
-      if (!template || !workspaceName) {
+      if (!databaseUrl || !workspaceName) {
         return
       }
-      const resolvedUrl = template.split('${WORKSPACE_NAME}').join(workspaceName)
+      const resolvedUrl = databaseUrl.split('${WORKSPACE_NAME}').join(workspaceName)
       void window.api.shell.openDatabase(resolvedUrl)
       return
     }
@@ -94,7 +117,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     } else {
       window.api.shell.openPath(worktreePath)
     }
-  }, [worktreePath, pathOpenerChoice, databaseConnectionTemplate, workspaceName])
+  }, [worktreePath, pathOpenerChoice, databaseUrl, workspaceName])
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
