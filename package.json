@@ -24,6 +24,7 @@
     "typecheck": "tsc --noEmit -p config/tsconfig.node.json --composite false && tsc --noEmit -p config/tsconfig.cli.json --composite false && tsc --noEmit -p config/tsconfig.web.json --composite false",
     "start": "electron-vite preview",
     "dev": "node config/scripts/run-electron-vite-dev.mjs",
+    "sync:dev-from-prod": "node config/scripts/sync-prod-data-to-dev.mjs",
     "build:relay": "node config/scripts/build-relay.mjs",
     "build:computer-macos": "node config/scripts/build-computer-macos.mjs",
     "smoke:computer": "node config/scripts/computer-use-smoke.mjs",

@@ -524,131 +524,139 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
         {/* Content area */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-          {/* Header row: Title and Checks */}
-          <div className="flex items-center justify-between min-w-0 gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {repo?.connectionId && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="shrink-0 inline-flex items-center">
-                      {isSshDisconnected ? (
-                        <ServerOff className="size-3 text-red-400" />
-                      ) : (
-                        <Server className="size-3 text-muted-foreground" />
-                      )}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8}>
-                    {isSshDisconnected ? 'SSH disconnected' : 'Remote repository via SSH'}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+          {/* Header row: Title and Checks
+             Why: indicators (change count, CI, run dot) sit in the same flex
+             row as the title with items-center, so they line up with the
+             title's vertical center instead of getting pushed down by the
+             workspaceName row below them. */}
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center justify-between min-w-0 gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {repo?.connectionId && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 inline-flex items-center">
+                        {isSshDisconnected ? (
+                          <ServerOff className="size-3 text-red-400" />
+                        ) : (
+                          <Server className="size-3 text-muted-foreground" />
+                        )}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      {isSshDisconnected ? 'SSH disconnected' : 'Remote repository via SSH'}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
 
-              {/* Why: weight alone carries the unread signal; color stays
-                 at text-foreground in both states so the title keeps
-                 hierarchy against the muted workspaceName/repo chip below
-                 (muting the title as well flattened the card). */}
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-baseline gap-1.5 min-w-0">
-                  <span
-                    className={cn(
-                      'text-[13px] truncate leading-tight',
-                      showUnreadEmphasis ? 'font-semibold' : 'font-normal',
-                      // Why: matches GitHub's merged-PR icon color so users can
-                      // spot merged worktrees at a glance without expanding the
-                      // PR row. Overrides text-foreground only when merged.
-                      pr?.state === 'merged' ? 'text-[#8957e5]' : 'text-foreground'
-                    )}
-                  >
-                    {/* Why: the card root is a non-interactive <div>, so aria-label
-                       on it is announced inconsistently across screen readers.
-                       A visible-text prefix inside the accessible name is reliable. */}
-                    {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
-                    {worktree.displayName}
-                  </span>
-                  {/* Why: GitHub-style diff stats vs the PR base read straight off
-                     the cached PR (no separate IPC). Hidden when both totals are
-                     0 so unchanged worktrees stay uncluttered; the null-coalesce
-                     also handles cached PRs from before the additions/deletions
-                     fields were tracked. */}
-                  {pr && ((pr.additions ?? 0) > 0 || (pr.deletions ?? 0) > 0) && (
-                    <span
-                      className="text-[10px] tabular-nums leading-none shrink-0"
-                      aria-label={`+${pr.additions ?? 0} additions, -${pr.deletions ?? 0} deletions`}
-                    >
-                      <span className="text-emerald-500">+{pr.additions ?? 0}</span>{' '}
-                      <span className="text-rose-500">−{pr.deletions ?? 0}</span>
-                    </span>
+                {/* Why: weight alone carries the unread signal; color stays
+                   at text-foreground in both states so the title keeps
+                   hierarchy against the muted workspaceName/repo chip below
+                   (muting the title as well flattened the card). */}
+                <span
+                  className={cn(
+                    'text-[13px] truncate leading-tight',
+                    showUnreadEmphasis ? 'font-semibold' : 'font-normal',
+                    // Why: matches GitHub's merged-PR icon color so users can
+                    // spot merged worktrees at a glance without expanding the
+                    // PR row. Overrides text-foreground only when merged.
+                    pr?.state === 'merged' ? 'text-[#8957e5]' : 'text-foreground'
                   )}
-                </div>
-                {/* Why: workspaceName is the immutable, DB-safe handle injected
-                   into setup/run/archive scripts as CONDUCTOR_WORKSPACE_NAME.
-                   Surfaced here so users can copy/grep the exact identifier
-                   their hooks see. Hidden when missing (defensive — backfill
-                   on persistence load makes a true gap rare). */}
-                {worktree.workspaceName && (
-                  <span className="text-[10px] font-mono text-muted-foreground truncate leading-tight">
-                    {worktree.workspaceName}
+                >
+                  {/* Why: the card root is a non-interactive <div>, so aria-label
+                     on it is announced inconsistently across screen readers.
+                     A visible-text prefix inside the accessible name is reliable. */}
+                  {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
+                  {worktree.displayName}
+                </span>
+                {/* Why: GitHub-style diff stats vs the PR base read straight off
+                   the cached PR (no separate IPC). Hidden when both totals are
+                   0 so unchanged worktrees stay uncluttered; the null-coalesce
+                   also handles cached PRs from before the additions/deletions
+                   fields were tracked. */}
+                {pr && ((pr.additions ?? 0) > 0 || (pr.deletions ?? 0) > 0) && (
+                  <span
+                    className="text-[10px] tabular-nums leading-none shrink-0"
+                    aria-label={`+${pr.additions ?? 0} additions, -${pr.deletions ?? 0} deletions`}
+                  >
+                    <span className="text-emerald-500">+{pr.additions ?? 0}</span>{' '}
+                    <span className="text-rose-500">−{pr.deletions ?? 0}</span>
                   </span>
+                )}
+
+                {worktree.isSparse && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge
+                        variant="outline"
+                        className="h-[16px] px-1.5 text-[10px] font-medium rounded shrink-0 leading-none text-amber-700 dark:text-amber-300 border-amber-500/30 bg-amber-500/5"
+                      >
+                        sparse
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8} className="max-w-72">
+                      <div className="space-y-1">
+                        <div>Partial checkout. Files outside these paths are not on disk.</div>
+                        {worktree.sparseDirectories && worktree.sparseDirectories.length > 0 ? (
+                          <div className="font-mono text-[11px] opacity-80">
+                            {formatSparseDirectoryPreview(worktree.sparseDirectories)}
+                          </div>
+                        ) : null}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 )}
               </div>
 
-              {worktree.isSparse && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge
-                      variant="outline"
-                      className="h-[16px] px-1.5 text-[10px] font-medium rounded shrink-0 leading-none text-amber-700 dark:text-amber-300 border-amber-500/30 bg-amber-500/5"
-                    >
-                      sparse
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8} className="max-w-72">
-                    <div className="space-y-1">
-                      <div>Partial checkout. Files outside these paths are not on disk.</div>
-                      {worktree.sparseDirectories && worktree.sparseDirectories.length > 0 ? (
-                        <div className="font-mono text-[11px] opacity-80">
-                          {formatSparseDirectoryPreview(worktree.sparseDirectories)}
-                        </div>
-                      ) : null}
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              {/* Right-side cluster: CI/PR state and the live run-script dot. */}
+              <div className="flex items-center gap-2 shrink-0">
+                {cardProps.includes('ci') && pr && pr.checksStatus !== 'neutral' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center opacity-80 hover:opacity-100 transition-opacity">
+                        {pr.checksStatus === 'success' && (
+                          <CircleCheck className="size-3.5 text-emerald-500" />
+                        )}
+                        {pr.checksStatus === 'failure' && (
+                          <CircleX className="size-3.5 text-rose-500" />
+                        )}
+                        {pr.checksStatus === 'pending' && (
+                          <LoaderCircle className="size-3.5 text-amber-500 animate-spin" />
+                        )}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      <span>CI checks {checksLabel(pr.checksStatus).toLowerCase()}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                {/* Why: 3-bar equalizer marks worktrees whose run script is alive
+                   so the user can spot active services in the sidebar at a glance.
+                   Vanishes on exit (no persisted exit-color here). Keyframes and
+                   reduced-motion fallback live in main.css under .orca-run-eq. */}
+                {isRunActive && (
+                  <span
+                    className="orca-run-eq shrink-0"
+                    role="img"
+                    aria-label="Run script is running"
+                  >
+                    <span className="orca-run-eq__bar" />
+                    <span className="orca-run-eq__bar" />
+                    <span className="orca-run-eq__bar" />
+                  </span>
+                )}
+              </div>
             </div>
-
-            {/* Right-side cluster: CI/PR state and the live run-script dot. */}
-            <div className="flex items-center gap-2 shrink-0">
-              {cardProps.includes('ci') && pr && pr.checksStatus !== 'neutral' && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex items-center opacity-80 hover:opacity-100 transition-opacity">
-                      {pr.checksStatus === 'success' && (
-                        <CircleCheck className="size-3.5 text-emerald-500" />
-                      )}
-                      {pr.checksStatus === 'failure' && (
-                        <CircleX className="size-3.5 text-rose-500" />
-                      )}
-                      {pr.checksStatus === 'pending' && (
-                        <LoaderCircle className="size-3.5 text-amber-500 animate-spin" />
-                      )}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={8}>
-                    <span>CI checks {checksLabel(pr.checksStatus).toLowerCase()}</span>
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {/* Why: small amber pulse marks worktrees whose run script is alive
-                 so the user can spot active services in the sidebar at a glance.
-                 Vanishes on exit (no persisted exit-color here). */}
-              {isRunActive && (
-                <span
-                  className="bg-amber-500 animate-pulse rounded-full size-[6px]"
-                  aria-label="Run script is running"
-                />
-              )}
-            </div>
+            {/* Why: workspaceName is the immutable, DB-safe handle injected
+               into setup/run/archive scripts as CONDUCTOR_WORKSPACE_NAME.
+               Surfaced here so users can copy/grep the exact identifier
+               their hooks see. Hidden when missing (defensive — backfill
+               on persistence load makes a true gap rare). */}
+            {worktree.workspaceName && (
+              <span className="text-[10px] font-mono text-muted-foreground truncate leading-tight">
+                {worktree.workspaceName}
+              </span>
+            )}
           </div>
 
           {/* Subtitle row: Repo badge + Branch */}
