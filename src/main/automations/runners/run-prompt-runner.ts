@@ -18,7 +18,18 @@ export type RunPromptDeps = {
   now: () => number
 }
 
-type Tracker = { paneKey: string; firstDoneAt: number | null }
+type Tracker = {
+  paneKey: string
+  /** Wall-clock when the pane was first opened — anchors the per-step timeout
+   *  and is included in the success output so the executor can record run
+   *  durations. Set once when the tracker is recorded; never re-stamped. */
+  openedAt: number
+  /** Wall-clock of the first `done` ping that started the current debounce
+   *  window. Reset to null whenever the agent flips back to `working`, so a
+   *  brief done → working → done sequence cannot accidentally satisfy the
+   *  debounce. */
+  firstDoneAt: number | null
+}
 
 export class RunPromptRunner implements StepRunner {
   // Nested map keyed by (runId, stepId) so a step.id containing ':' can't
@@ -65,13 +76,71 @@ export class RunPromptRunner implements StepRunner {
         }
         throw e
       }
-      tracker = { paneKey, firstDoneAt: null }
+      tracker = { paneKey, openedAt: this.deps.now(), firstDoneAt: null }
       if (!runTrackers) {
         runTrackers = new Map()
         this.trackers.set(ctx.runId, runTrackers)
       }
       runTrackers.set(ctx.step.id, tracker)
       return { outcome: 'needs-more-time', status: 'running' }
+    }
+
+    const now = this.deps.now()
+
+    // Per design § "Agent step lifecycle": the step-level timeout is the only
+    // hard escape valve when the agent fails to converge on `done`. Check it
+    // BEFORE reading status so a long-pending or missing status can still time
+    // out cleanly — never gate the timeout on having a fresh status entry.
+    if (ctx.step.timeoutSeconds != null) {
+      const elapsedMs = now - tracker.openedAt
+      if (elapsedMs >= ctx.step.timeoutSeconds * 1000) {
+        return {
+          outcome: 'failed',
+          status: 'timed-out',
+          error: `Step exceeded timeout of ${ctx.step.timeoutSeconds}s.`
+        }
+      }
+    }
+
+    const status = this.deps.getAgentStatus(tracker.paneKey)
+
+    if (!status) {
+      // No status yet — pane just opened, hook hasn't pinged. Treat as still
+      // warming up so we don't prematurely fail on a missing entry.
+      return { outcome: 'needs-more-time', status: 'running' }
+    }
+
+    if (status.state === 'blocked' || status.state === 'waiting') {
+      // Why: chain steps cannot make progress when the agent is asking for
+      // human input. Halting here surfaces the block to the operator instead
+      // of silently spinning until the step timeout fires.
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: `Agent needs human input (${status.state}). Chain halted.`
+      }
+    }
+
+    if (status.state === 'working') {
+      // Why: any work flip after a done ping invalidates the debounce window.
+      // Without this reset a brief done → working → done could satisfy the
+      // window using the original firstDoneAt timestamp.
+      tracker.firstDoneAt = null
+      return { outcome: 'needs-more-time', status: 'running' }
+    }
+
+    // status.state === 'done'
+    if (tracker.firstDoneAt == null) {
+      tracker.firstDoneAt = now
+      return { outcome: 'needs-more-time', status: 'running' }
+    }
+    const debounceMs = config.doneDebounceSeconds * 1000
+    if (now - tracker.firstDoneAt >= debounceMs) {
+      return {
+        outcome: 'done',
+        status: 'succeeded',
+        output: { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
+      }
     }
     return { outcome: 'needs-more-time', status: 'running' }
   }

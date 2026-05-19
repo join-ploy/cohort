@@ -58,6 +58,7 @@ import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
+import { AgentStatusRegistry } from './agent-status/registry'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -79,6 +80,11 @@ let starNag: StarNagService | null = null
 let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
 let automations: AutomationService | null = null
+// Why: main-process mirror of the renderer's agent-status map, written from
+// the same hook-event callback that fans events out via `agentStatus:set`.
+// The chain executor (next Phase 1 task) reads from this so RunPromptRunner
+// can poll agent state without an IPC roundtrip.
+const agentStatusRegistry = new AgentStatusRegistry()
 
 installUncaughtPipeErrorGuard()
 // Why: propagate the Orca app version into `process.env` so PTY-env
@@ -305,6 +311,12 @@ function openMainWindow(): BrowserWindow {
         receivedAt,
         stateStartedAt
       })
+      // Why: feed the same event into the main-process registry so the chain
+      // executor can poll agent state without an IPC roundtrip. receivedAt is
+      // the hook server's authoritative timestamp for this event — using it
+      // (instead of Date.now()) keeps registry ordering consistent with the
+      // renderer slice, which also keys monotonic updates off updatedAt.
+      agentStatusRegistry.set(paneKey, { state: payload.state, updatedAt: receivedAt })
       // Why: cursor-agent's OSC title stays "Cursor Agent" for the whole turn,
       // and opencode's stays bare "OpenCode" — neither carries a working/idle
       // signal the title heuristic can read. Synthesize an OSC title update
@@ -523,7 +535,11 @@ app.whenReady().then(async () => {
     // and defeat the teardown helper's prefix sweep (design §4.3 wire-up).
     getLocalProvider: () => getLocalPtyProvider()
   })
-  automations = new AutomationService(store)
+  automations = new AutomationService(store, {
+    // Why: hand the registry's reader to the service so the future chain
+    // executor can construct RunPromptRunner with main-process status access.
+    getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey)
+  })
   runtime.setAccountServices({ claudeAccounts, codexAccounts, rateLimits })
   starNag = new StarNagService(store, stats)
   starNag.start()

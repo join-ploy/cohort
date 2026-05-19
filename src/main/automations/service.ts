@@ -6,20 +6,40 @@ import type {
   AutomationDispatchResult,
   AutomationRun
 } from '../../shared/automations-types'
+import type { AgentStatusEntry } from './runners/run-prompt-runner'
 
 const DEFAULT_TICK_MS = 60 * 1000
+
+export type AutomationServiceOpts = {
+  tickMs?: number
+  /** Reads the main-process agent-status registry by paneKey. Wired in
+   *  src/main/index.ts from the singleton AgentStatusRegistry so the chain
+   *  executor's RunPromptRunner can poll agent state without an IPC roundtrip. */
+  getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
+}
 
 export class AutomationService {
   private readonly store: Store
   private readonly tickMs: number
+  /** Captured at construction so future runner-factory wiring can hand it to
+   *  RunPromptRunner. Defaults to a stub returning `undefined` for tests and
+   *  for the initial bootstrap path where no registry is attached. */
+  private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
   private timer: ReturnType<typeof setInterval> | null = null
   private webContents: WebContents | null = null
   private rendererReady = false
   private evaluating = false
 
-  constructor(store: Store, opts: { tickMs?: number } = {}) {
+  constructor(store: Store, opts: AutomationServiceOpts = {}) {
     this.store = store
     this.tickMs = opts.tickMs ?? DEFAULT_TICK_MS
+    this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
+  }
+
+  /** Exposed for the chain executor (next Phase 1 task) which constructs
+   *  RunPromptRunner with this getter. Tests can stub it via the constructor. */
+  getAgentStatusReader(): (paneKey: string) => AgentStatusEntry | undefined {
+    return this.getAgentStatus
   }
 
   setWebContents(webContents: WebContents | null): void {
