@@ -86,20 +86,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         // OS title chrome is hidden; interactive children opt out via
         // -webkit-app-region: no-drag below. Matches how `.titlebar` works.
         className="worktree-context-bar relative flex h-9 items-center justify-between border-b border-border bg-background pl-3 pr-1.5"
-        style={
-          {
-            WebkitAppRegion: 'drag',
-            // Why: when the right sidebar is closed, App.tsx floats the
-            // open-sidebar toggle button absolutely at the top-right of the
-            // center column (top:0, h-9), and on Windows it's further offset
-            // by var(--window-controls-width) to clear the window-controls
-            // overlay. Reserve matching right-side space here so the toggle
-            // never sits on top of this bar's right cluster.
-            paddingRight: rightSidebarOpen
-              ? undefined
-              : 'calc(var(--window-controls-width, 0px) + 2.5rem)'
-          } as React.CSSProperties
-        }
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
           {/* Why: no GitHub remote → no avatar URL available on the Repo
@@ -177,6 +164,27 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
             <SquareSplitHorizontal className="size-4" />
           </button>
         </div>
+
+        {/* Why: when the right sidebar is closed, App.tsx floats the
+            open-sidebar toggle absolutely at top-right of the center column
+            (top:0, h-9, offset by var(--window-controls-width) on Windows).
+            Without a no-drag spacer here, the OS drag region from the bar
+            extends under the floating toggle and intercepts pointer events,
+            making the toggle unclickable. `pointer-events: none` lets clicks
+            pass through to the toggle while still claiming layout space. */}
+        {!rightSidebarOpen && (
+          <div
+            aria-hidden
+            className="shrink-0"
+            style={
+              {
+                width: 'calc(var(--window-controls-width, 0px) + 2.5rem)',
+                pointerEvents: 'none',
+                WebkitAppRegion: 'no-drag'
+              } as React.CSSProperties
+            }
+          />
+        )}
       </div>
     </WorktreeContextMenu>
   )
