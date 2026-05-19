@@ -1155,32 +1155,12 @@ function App(): React.JSX.Element {
                 )
               ) : null}
               <div className="relative flex flex-1 min-w-0 min-h-0 overflow-hidden">
-                {/* Why: right sidebar toggle floats at the top-right of the center
-                    column so it's always accessible whether the right sidebar is
-                    open or closed. Match the RightSidebar header's 36px height and
-                    top-0 anchor so the icon's vertical center is identical between
-                    open and closed states — otherwise toggling makes the icon jump
-                    a few pixels, which reads as layout jitter. */}
-                {workspaceActive && !rightSidebarOpen && (
-                  <div
-                    className="absolute top-0 z-10 flex items-center h-[36px]"
-                    style={
-                      {
-                        // Why: right: var(--window-controls-width) is the single
-                        // mechanism that keeps the toggle clear of the
-                        // fixed-position window-controls overlay on Windows (138px)
-                        // and sits at the right edge on non-Windows (0px). No
-                        // internal spacer needed — adding one would push the button
-                        // a further 138px to the left and cover the pane-actions
-                        // Ellipsis button with an un-clickable div.
-                        right: 'var(--window-controls-width)',
-                        WebkitAppRegion: 'no-drag'
-                      } as React.CSSProperties
-                    }
-                  >
-                    {rightSidebarToggle}
-                  </div>
-                )}
+                {/* Why: in workspace view the right-sidebar toggle now lives
+                    inside WorktreeContextBar's right cluster (a no-drag
+                    region), which avoids the drag-region overlap that broke
+                    the previous absolutely-positioned floating toggle. The
+                    titlebar toggle above (line 1105) still serves
+                    Settings/Tasks/landing where the context bar isn't shown. */}
                 <div className="flex flex-1 min-w-0 min-h-0 flex-col">
                   <div
                     className={

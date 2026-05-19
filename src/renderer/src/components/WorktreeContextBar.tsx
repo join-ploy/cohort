@@ -1,25 +1,10 @@
 import React, { useCallback, useRef } from 'react'
-import {
-  ChevronDown,
-  ChevronRight,
-  Ellipsis,
-  FolderOpen,
-  SquareSplitHorizontal
-} from 'lucide-react'
+import { ChevronRight, Ellipsis, PanelRight } from 'lucide-react'
 import { useAppStore } from '../store'
 import { useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
 
 const isMac = navigator.userAgent.includes('Mac')
-const isLinux = navigator.userAgent.includes('Linux')
-
-// Why: macOS opens Finder, Windows opens File Explorer, Linux opens Files —
-// the label matches what the underlying shell.openPath actually invokes.
-const externalOpenLabel = isMac
-  ? 'Reveal in Finder'
-  : isLinux
-    ? 'Open Containing Folder'
-    : 'Reveal in File Explorer'
 
 /**
  * Above-tab-strip workspace context bar.
@@ -33,20 +18,13 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const activeView = useAppStore((s) => s.activeView)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
+  const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
-  const worktreePath = worktree?.path ?? ''
 
-  const handleOpenExternal = useCallback((): void => {
-    if (!worktreePath) {
-      return
-    }
-    // Why: matches the existing right-click "Open in Finder" action on
-    // WorktreeCard — there is no separate "external editor" IPC yet, so the
-    // reveal-in-OS-file-manager is the closest available action.
-    window.api.shell.openPath(worktreePath)
-  }, [worktreePath])
+  const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
+  const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -126,65 +104,21 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: split button — left segment is the primary "open in editor"
-              action; right segment will host an editor-picker dropdown once
-              Orca grows a defaultEditor setting. For now both segments fall
-              through to shell.openPath since there is no
-              external-editor-launcher IPC yet. */}
-          <div className="flex max-w-[260px] items-center">
-            <button
-              type="button"
-              onClick={handleOpenExternal}
-              aria-label={externalOpenLabel}
-              title={externalOpenLabel}
-              className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border bg-background px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
-            >
-              <FolderOpen className="size-3 shrink-0" />
-              <span className="min-w-0 truncate">{worktreePath}</span>
-            </button>
-            <button
-              type="button"
-              aria-label="Choose editor"
-              // Why: no editor-picker UI exists yet. Disabled-styling makes
-              // the stub state obvious; remove `cursor-default` and wire a
-              // DropdownMenu when an external-editor concept lands.
-              className="flex h-6 cursor-default items-center rounded-sm rounded-l-none border border-border bg-background px-1.5 text-muted-foreground hover:bg-accent"
-              disabled
-            >
-              <ChevronDown className="size-3" />
-            </button>
-          </div>
+          {/* Why: hosts the right-sidebar toggle inside the bar so it lives
+              in a no-drag region (the absolutely-positioned floating toggle
+              that previously sat on top of the bar fought the OS drag region
+              and couldn't reliably receive clicks). App.tsx removes its
+              floating copy when this bar is mounted. */}
           <button
             type="button"
-            aria-label="Open in external editor"
-            title={externalOpenLabel}
-            onClick={handleOpenExternal}
-            className="cursor-pointer text-muted-foreground hover:text-foreground"
+            onClick={toggleRightSidebar}
+            aria-label={`${toggleSidebarLabel} (${toggleSidebarShortcut})`}
+            title={`${toggleSidebarLabel} (${toggleSidebarShortcut})`}
+            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >
-            <SquareSplitHorizontal className="size-4" />
+            <PanelRight className="size-4" />
           </button>
         </div>
-
-        {/* Why: when the right sidebar is closed, App.tsx floats the
-            open-sidebar toggle absolutely at top-right of the center column
-            (top:0, h-9, offset by var(--window-controls-width) on Windows).
-            Without a no-drag spacer here, the OS drag region from the bar
-            extends under the floating toggle and intercepts pointer events,
-            making the toggle unclickable. `pointer-events: none` lets clicks
-            pass through to the toggle while still claiming layout space. */}
-        {!rightSidebarOpen && (
-          <div
-            aria-hidden
-            className="shrink-0"
-            style={
-              {
-                width: 'calc(var(--window-controls-width, 0px) + 2.5rem)',
-                pointerEvents: 'none',
-                WebkitAppRegion: 'no-drag'
-              } as React.CSSProperties
-            }
-          />
-        )}
       </div>
     </WorktreeContextMenu>
   )
