@@ -523,9 +523,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
             {/* Why: weight alone carries the unread signal; color stays
                  at text-foreground in both states so the title keeps
-                 hierarchy against the muted branch row below (muting the
-                 title as well flattened the card — same reasoning as the
-                 repo chip comment below). */}
+                 hierarchy against the muted workspaceName/repo chip below
+                 (muting the title as well flattened the card). */}
             <div className="flex flex-col min-w-0">
               <div
                 className={cn(
@@ -553,8 +552,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
             {/* Why: the primary worktree (the original clone directory) cannot be
                  deleted via `git worktree remove`. Placing this badge next to the
-                 name makes it immediately visible and avoids confusion with the
-                 branch name "main" shown below. */}
+                 name makes it immediately visible. */}
             {worktree.isMainWorktree && !isFolder && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -640,17 +638,16 @@ const WorktreeCard = React.memo(function WorktreeCard({
             </div>
           )}
 
-          {isFolder ? (
+          {/* Why: the branch name is no longer rendered here — it duplicates
+               the displayName for most worktrees and adds visual noise. The
+               folder-kind badge stays since it identifies non-git roots. */}
+          {isFolder && (
             <Badge
               variant="secondary"
               className="h-[16px] px-1.5 text-[10px] font-medium rounded shrink-0 text-muted-foreground bg-accent border border-border dark:bg-accent/80 dark:border-border/50 leading-none"
             >
               {repo ? getRepoKindLabel(repo) : 'Folder'}
             </Badge>
-          ) : (
-            <span className="text-[11px] text-muted-foreground truncate leading-none">
-              {branch}
-            </span>
           )}
 
           {/* Why: the conflict operation (merge/rebase/cherry-pick) is the
