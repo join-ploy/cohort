@@ -3,10 +3,16 @@ import { FitAddon } from '@xterm/addon-fit'
 import {
   applyTerminalOptionsToTerminal,
   buildTerminalOptionsFromSettings,
+  resolveTerminalThemeFromSettings,
   type TerminalOptionDeps
 } from '@/lib/pane-manager/build-terminal-options'
 import { subscribeToPtyData, subscribeToPtyExit } from '@/components/terminal-pane/pty-dispatcher'
 import type { GlobalSettings } from '../../../../shared/types'
+
+// Why: the gutter around xterm replaces the prior `px-2 pt-2` Tailwind
+// wrapper. Top + side padding only — no bottom — so the cursor row sits
+// flush with the panel base, matching how the regular pane is framed.
+const TERMINAL_GUTTER_CSS = '8px 8px 0 8px'
 
 // Why: the right-sidebar Run/Setup terminals live inside the React tree
 // (RunPanel / SetupPanel), which unmounts whenever the user navigates to
@@ -37,9 +43,14 @@ export type AttachOptions = {
 
 export type CachedTerminal = {
   ptyId: string
-  /** Persistent DOM node xterm rendered into. Moved between hosts on
-   *  attach/detach without ever being disposed. */
+  /** Persistent outer DOM node moved between hosts on attach/detach
+   *  without ever being disposed. Painted with the terminal theme's
+   *  background so the gutter blends with xterm's canvas. */
   container: HTMLDivElement
+  /** Inner padded wrapper xterm rendered into. Lives inside `container`
+   *  and provides the visible gutter; also painted with the theme
+   *  background so opacity/transparency settings can stack cleanly. */
+  inner: HTMLDivElement
   term: Terminal
   fit: FitAddon
 }
@@ -56,18 +67,41 @@ type CacheEntry = CachedTerminal & {
 
 const cache = new Map<string, CacheEntry>()
 
-function buildContainer(): HTMLDivElement {
-  // Why: xterm requires a single host for `term.open()`. Render into a
-  // dedicated, persistent div so we can move it between React hosts
-  // without ever calling `term.open()` again (which would tear down the
-  // current renderer state and lose scrollback).
-  const div = document.createElement('div')
-  // Why: the parent host already owns flex/min-h-0/overflow-hidden, so
-  // the container only needs to fill it. width:100%/height:100% covers
-  // both axes when the host is a flex child.
-  div.style.width = '100%'
-  div.style.height = '100%'
-  return div
+function buildContainer(): { container: HTMLDivElement; inner: HTMLDivElement } {
+  // Why: xterm requires a single host for `term.open()`. We render into an
+  // inner padded div so the gutter and the xterm canvas can share the same
+  // background color, making the terminal feel embedded into the panel
+  // rather than floating on a contrasting border. The outer container is
+  // the stable handle we move between React hosts — `term.open()` is only
+  // ever called on the inner div, so moving the outer doesn't tear down
+  // xterm's renderer state.
+  const container = document.createElement('div')
+  container.style.width = '100%'
+  container.style.height = '100%'
+  const inner = document.createElement('div')
+  inner.style.width = '100%'
+  inner.style.height = '100%'
+  inner.style.boxSizing = 'border-box'
+  inner.style.padding = TERMINAL_GUTTER_CSS
+  container.appendChild(inner)
+  return { container, inner }
+}
+
+function applyContainerBackground(entry: CacheEntry, opts: AttachOptions): void {
+  // Why: paint the gutter the same color xterm paints its canvas so the
+  // padding is invisible to the user. When settings haven't hydrated yet,
+  // leave the background unset and let the panel chrome show through —
+  // the appearance-notify call will repaint as soon as settings arrive.
+  if (!opts.settings) {
+    return
+  }
+  const { theme } = resolveTerminalThemeFromSettings(opts.settings, opts.systemPrefersDark)
+  const bg = theme?.background
+  if (!bg) {
+    return
+  }
+  entry.container.style.backgroundColor = bg
+  entry.inner.style.backgroundColor = bg
 }
 
 function runFit(entry: CacheEntry): void {
@@ -140,8 +174,10 @@ function createEntry(ptyId: string, opts: AttachOptions): CacheEntry {
   const term = new Terminal(initialOptions)
   const fit = new FitAddon()
   term.loadAddon(fit)
-  const container = buildContainer()
-  term.open(container)
+  const { container, inner } = buildContainer()
+  // Why: xterm renders into the inner padded div, not the outer
+  // container — the gutter (TERMINAL_GUTTER_CSS) sits between the two.
+  term.open(inner)
 
   const offData = subscribeToPtyData(ptyId, (data) => {
     term.write(data)
@@ -157,9 +193,10 @@ function createEntry(ptyId: string, opts: AttachOptions): CacheEntry {
     window.api.pty.write(ptyId, data)
   })
 
-  return {
+  const entry: CacheEntry = {
     ptyId,
     container,
+    inner,
     term,
     fit,
     host: null,
@@ -170,6 +207,10 @@ function createEntry(ptyId: string, opts: AttachOptions): CacheEntry {
     offData,
     offExit
   }
+  // Why: seed the gutter color from initial settings so the first paint
+  // (before the first appearance-notify) already blends with xterm.
+  applyContainerBackground(entry, opts)
+  return entry
 }
 
 /** Attach the cached terminal for `ptyId` to `host`, creating the entry
@@ -240,6 +281,10 @@ export function notifyCachedTerminalAppearance(ptyId: string, opts: AttachOption
     effectiveMacOptionAsAlt: opts.effectiveMacOptionAsAlt,
     systemPrefersDark: opts.systemPrefersDark
   })
+  // Why: keep the gutter color synced with the just-applied theme so a
+  // light/dark toggle or theme swap doesn't leave a stale background
+  // band around the freshly recolored xterm canvas.
+  applyContainerBackground(entry, opts)
 }
 
 /** Tear down the cached entry: disposes Terminal + FitAddon, releases

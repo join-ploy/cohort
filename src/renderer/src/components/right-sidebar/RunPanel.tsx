@@ -96,14 +96,10 @@ function RunTerminalArea({ ptyId }: { ptyId: string | null }): React.JSX.Element
       </div>
     )
   }
-  // Why: small inset around the xterm canvas so output isn't flush against
-  // the panel chrome. The padded area shows the panel background, framing
-  // the terminal slightly without changing the terminal's own theme.
-  return (
-    <div className="flex flex-1 min-h-0 px-2 pt-2">
-      <SidebarPtyTerminal key={ptyId} ptyId={ptyId} />
-    </div>
-  )
+  // Why: the gutter around xterm lives inside the cached container
+  // (sidebar-pty-terminal-cache#buildContainer) so it can share the
+  // terminal theme's background color. No extra wrapper needed here.
+  return <SidebarPtyTerminal key={ptyId} ptyId={ptyId} />
 }
 
 function RunEmptyState({ onOpenOrcaYaml }: { onOpenOrcaYaml: () => void }): React.JSX.Element {

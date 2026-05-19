@@ -61,6 +61,8 @@ vi.mock('@xterm/addon-fit', () => {
 
 const buildOptionsCalls: { settings: unknown; deps: unknown }[] = []
 const applyOptionsCalls: { terminal: unknown; settings: unknown; deps: unknown }[] = []
+const resolveThemeCalls: { settings: unknown; systemPrefersDark: unknown }[] = []
+let nextResolvedBackground: string | undefined = '#101820'
 vi.mock('@/lib/pane-manager/build-terminal-options', () => ({
   buildTerminalOptionsFromSettings: (settings: unknown, deps: unknown) => {
     buildOptionsCalls.push({ settings, deps })
@@ -68,6 +70,13 @@ vi.mock('@/lib/pane-manager/build-terminal-options', () => ({
   },
   applyTerminalOptionsToTerminal: (terminal: unknown, settings: unknown, deps: unknown) => {
     applyOptionsCalls.push({ terminal, settings, deps })
+  },
+  resolveTerminalThemeFromSettings: (settings: unknown, systemPrefersDark: unknown) => {
+    resolveThemeCalls.push({ settings, systemPrefersDark })
+    return {
+      theme: nextResolvedBackground ? { background: nextResolvedBackground } : null,
+      allowTransparency: false
+    }
   }
 }))
 
@@ -91,9 +100,10 @@ beforeEach(() => {
   for (const arr of [createdTerms, createdFits, inputDisposers, dataSubs, exitSubs]) {
     arr.length = 0
   }
-  for (const arr of [buildOptionsCalls, applyOptionsCalls]) {
+  for (const arr of [buildOptionsCalls, applyOptionsCalls, resolveThemeCalls]) {
     arr.length = 0
   }
+  nextResolvedBackground = '#101820'
   ptyResize.mockClear()
   ptyWrite.mockClear()
   ;(globalThis as unknown as { window: { api: unknown } }).window = {
@@ -218,7 +228,10 @@ describe('sidebar-pty-terminal-cache — first attach', () => {
     expect(entry.term).toBe(createdTerms[0])
     expect(entry.fit).toBe(createdFits[0])
     expect(host.contains(entry.container)).toBe(true)
-    expect(createdTerms[0].open).toHaveBeenCalledWith(entry.container)
+    // Why: xterm renders into the inner padded wrapper so the gutter
+    // and the canvas can share the resolved theme background. The outer
+    // container is the stable handle moved between hosts.
+    expect(createdTerms[0].open).toHaveBeenCalledWith(entry.inner)
     expect(createdTerms[0].loadAddon).toHaveBeenCalledWith(createdFits[0])
   })
 
@@ -346,5 +359,85 @@ describe('sidebar-pty-terminal-cache — settings + theme reactivity', () => {
     const m = await import('./sidebar-pty-terminal-cache')
     expect(() => m.notifyCachedTerminalAppearance('pty-missing', attachOpts())).not.toThrow()
     expect(applyOptionsCalls).toHaveLength(0)
+  })
+})
+
+describe('sidebar-pty-terminal-cache — gutter background syncing', () => {
+  it('paints both container and inner with the resolved theme background on first attach', async () => {
+    const { attachCachedTerminal } = await import('./sidebar-pty-terminal-cache')
+    nextResolvedBackground = '#101820'
+    const entry = attachCachedTerminal('pty-A', makeHost(), attachOpts())
+    // Why: the gutter (outer) and the xterm-host (inner) must share the
+    // terminal theme's background so the padding is invisible — anything
+    // else makes the terminal look framed.
+    expect(
+      (entry.container as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#101820')
+    expect(
+      (entry.inner as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#101820')
+  })
+
+  it('applies the gutter padding to the inner wrapper, not the outer container', async () => {
+    const { attachCachedTerminal } = await import('./sidebar-pty-terminal-cache')
+    const entry = attachCachedTerminal('pty-A', makeHost(), attachOpts())
+    // Why: padding lives on the inner div so xterm's measurement sees a
+    // smaller box and fits its grid inside the visible canvas area.
+    expect((entry.inner as unknown as { style: { padding: string } }).style.padding).toBe(
+      '8px 8px 0 8px'
+    )
+    expect(
+      (entry.container as unknown as { style: { padding?: string } }).style.padding
+    ).toBeUndefined()
+  })
+
+  it('notifyAppearance re-paints the gutter when the theme background changes', async () => {
+    const m = await import('./sidebar-pty-terminal-cache')
+    nextResolvedBackground = '#101820'
+    const entry = m.attachCachedTerminal('pty-A', makeHost(), attachOpts())
+    // Theme swap: subsequent resolve returns a different background.
+    nextResolvedBackground = '#fafafa'
+    m.notifyCachedTerminalAppearance('pty-A', { ...attachOpts(), systemPrefersDark: false })
+    expect(
+      (entry.container as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#fafafa')
+    expect(
+      (entry.inner as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#fafafa')
+  })
+
+  it('leaves the gutter background unset when settings have not hydrated yet', async () => {
+    const m = await import('./sidebar-pty-terminal-cache')
+    // Why: pre-hydration the resolver isn't trustworthy — let the panel
+    // chrome show through until settings arrive, then notifyAppearance
+    // paints the gutter once everything is real.
+    const entry = m.attachCachedTerminal('pty-A', makeHost(), {
+      settings: null,
+      systemPrefersDark: true,
+      effectiveMacOptionAsAlt: 'true'
+    })
+    expect(
+      (entry.container as unknown as { style: { backgroundColor?: string } }).style.backgroundColor
+    ).toBeUndefined()
+    expect(
+      (entry.inner as unknown as { style: { backgroundColor?: string } }).style.backgroundColor
+    ).toBeUndefined()
+    expect(resolveThemeCalls).toHaveLength(0)
+  })
+
+  it('skips repainting when the resolved theme has no background', async () => {
+    const m = await import('./sidebar-pty-terminal-cache')
+    nextResolvedBackground = '#101820'
+    const entry = m.attachCachedTerminal('pty-A', makeHost(), attachOpts())
+    // Resolver returns no theme — keep the prior color rather than wiping
+    // it to an empty string and exposing a transparent gutter.
+    nextResolvedBackground = undefined
+    m.notifyCachedTerminalAppearance('pty-A', attachOpts())
+    expect(
+      (entry.container as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#101820')
+    expect(
+      (entry.inner as unknown as { style: { backgroundColor: string } }).style.backgroundColor
+    ).toBe('#101820')
   })
 })
