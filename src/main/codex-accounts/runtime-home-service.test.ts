@@ -108,6 +108,7 @@ function createSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings
     terminalWindowsShell: 'powershell.exe',
     terminalWindowsPowerShellImplementation: 'powershell.exe',
     enableGitHubAttribution: true,
+    databaseConnectionTemplate: '',
     ...overrides,
     appFontFamily
   }

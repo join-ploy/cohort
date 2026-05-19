@@ -101,9 +101,34 @@ export const GENERAL_SUPPORT_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  {
+    title: 'Database Connection Template',
+    description:
+      'TablePlus/DB-client URL opened by the worktree path button when Database is the active opener.',
+    keywords: [
+      'database',
+      'tableplus',
+      'sequel ace',
+      'dbeaver',
+      'postgres',
+      'mysql',
+      'mariadb',
+      'redis',
+      'mongodb',
+      'sqlserver',
+      'connection',
+      'url',
+      'template',
+      'workspace_name'
+    ]
+  }
+]
+
 export const GENERAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   ...GENERAL_WORKSPACE_SEARCH_ENTRIES,
   ...GENERAL_EDITOR_SEARCH_ENTRIES,
+  ...GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES,
   ...GENERAL_CLI_SEARCH_ENTRIES,
   ...GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   ...GENERAL_UPDATE_SEARCH_ENTRIES,
