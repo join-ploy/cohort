@@ -21,6 +21,8 @@ import {
   ActivityBarPositionMenu,
   scriptStatusToCheckStatus
 } from './activity-bar'
+import { ReviewButton } from './ReviewButton'
+import { CreatePrButton } from './CreatePrButton'
 import type { ScriptStatus } from '@/store/slices/scripts'
 
 const MIN_WIDTH = 220
@@ -262,7 +264,15 @@ function RightSidebarInner(): React.JSX.Element {
               <div className="flex items-center justify-between border-b border-border h-[36px] min-h-[36px] pl-2 pr-1 right-sidebar-header-inset">
                 <TooltipProvider delayDuration={400}>
                   <div className="flex items-center">{activityBarIcons}</div>
-                  <div className="flex items-center">{closeButton}</div>
+                  {/* Why: right cluster mirrors VS Code's per-view actions —
+                      worktree-scoped commands (Review, Create PR) sit on the
+                      opposite end from the activity tabs so the two roles
+                      don't visually fight for the same region. */}
+                  <div className="flex items-center gap-1">
+                    <CreatePrButton layout="top" />
+                    <ReviewButton layout="top" />
+                    {closeButton}
+                  </div>
                 </TooltipProvider>
               </div>
             </ContextMenuTrigger>
@@ -283,7 +293,11 @@ function RightSidebarInner(): React.JSX.Element {
               {visibleItems.find((item) => item.id === effectiveTab)?.title ?? ''}
             </span>
             <TooltipProvider delayDuration={400}>
-              <div className="flex items-center">{closeButton}</div>
+              <div className="flex items-center gap-1">
+                <CreatePrButton layout="top" />
+                <ReviewButton layout="top" />
+                {closeButton}
+              </div>
             </TooltipProvider>
           </div>
         )}
@@ -302,7 +316,14 @@ function RightSidebarInner(): React.JSX.Element {
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="flex flex-col items-center w-10 min-w-[40px] bg-sidebar border-l border-border side-activity-bar-windows-inset">
-              <TooltipProvider delayDuration={400}>{activityBarIcons}</TooltipProvider>
+              <TooltipProvider delayDuration={400}>
+                {/* Why: in the side layout the per-worktree commands live at
+                    the top of the vertical strip so they remain reachable
+                    without the user scanning past the activity tabs. */}
+                <CreatePrButton layout="side" />
+                <ReviewButton layout="side" />
+                {activityBarIcons}
+              </TooltipProvider>
             </div>
           </ContextMenuTrigger>
           <ActivityBarPositionMenu
