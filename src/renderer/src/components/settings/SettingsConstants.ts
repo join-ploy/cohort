@@ -21,15 +21,26 @@ export function getFallbackTerminalFonts(): string[] {
   const platform = nav ? (nav.userAgentData?.platform ?? nav.platform ?? '') : ''
   const normalizedPlatform = platform.toLowerCase()
 
+  // Why: Geist Mono ships with the app as a web font, so it must appear in the
+  // picker regardless of platform when system font enumeration is empty —
+  // otherwise users on minimal Linux installs see only generics.
   if (normalizedPlatform.includes('mac')) {
-    return ['SF Mono', 'Menlo', 'Monaco', 'JetBrains Mono', 'Fira Code']
+    return ['Geist Mono', 'SF Mono', 'Menlo', 'Monaco', 'JetBrains Mono', 'Fira Code']
   }
 
   if (normalizedPlatform.includes('win')) {
-    return ['Cascadia Mono', 'Consolas', 'Lucida Console', 'JetBrains Mono', 'Fira Code']
+    return [
+      'Geist Mono',
+      'Cascadia Mono',
+      'Consolas',
+      'Lucida Console',
+      'JetBrains Mono',
+      'Fira Code'
+    ]
   }
 
   return [
+    'Geist Mono',
     'JetBrains Mono',
     'Fira Code',
     'DejaVu Sans Mono',

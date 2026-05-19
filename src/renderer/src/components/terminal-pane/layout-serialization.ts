@@ -112,6 +112,7 @@ export function collectLeafIdsInReplayCreationOrder(
 // system fonts so ASCII text still renders in the user's chosen font rather
 // than being substituted by a Nerd Font variant.
 const FALLBACK_FONTS = [
+  'Geist Mono', // ships with the app as a web font (main.css @font-face)
   'SF Mono', // macOS 10.12+
   'Menlo', // macOS (older)
   'Monaco', // macOS (legacy)

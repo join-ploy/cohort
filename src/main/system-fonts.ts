@@ -117,13 +117,24 @@ function uniqueSorted(values: (string | undefined)[]): string[] {
 }
 
 function fallbackFonts(): string[] {
+  // Why: Geist Mono ships with the app as a web font, so it must appear in the
+  // picker regardless of platform when the system font enumeration is empty —
+  // otherwise users on minimal Linux installs see only generics.
   if (process.platform === 'darwin') {
-    return ['SF Mono', 'Menlo', 'Monaco', 'JetBrains Mono', 'Fira Code']
+    return ['Geist Mono', 'SF Mono', 'Menlo', 'Monaco', 'JetBrains Mono', 'Fira Code']
   }
   if (process.platform === 'win32') {
-    return ['Cascadia Mono', 'Consolas', 'Lucida Console', 'JetBrains Mono', 'Fira Code']
+    return [
+      'Geist Mono',
+      'Cascadia Mono',
+      'Consolas',
+      'Lucida Console',
+      'JetBrains Mono',
+      'Fira Code'
+    ]
   }
   return [
+    'Geist Mono',
     'JetBrains Mono',
     'Fira Code',
     'DejaVu Sans Mono',

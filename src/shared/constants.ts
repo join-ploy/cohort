@@ -41,18 +41,12 @@ export const BROWSER_FAMILY_LABELS: Record<string, string> = {
   manual: 'File'
 }
 
-// Pick a default terminal font that is likely to exist on the current OS.
-// buildFontFamily() adds the full cross-platform fallback chain, so this only
-// affects what users see in Settings as the initial value.
+// Why: Geist Mono ships with the app as a web font (see main.css @font-face),
+// so the default terminal face is identical on macOS, Linux, and Windows
+// without depending on what monospace the user happens to have installed.
+// buildFontFamily() still adds the full cross-platform fallback chain on top.
 function defaultTerminalFontFamily(): string {
-  const platform = typeof process !== 'undefined' ? process.platform : ''
-  if (platform === 'win32') {
-    return 'Cascadia Mono'
-  }
-  if (platform === 'linux') {
-    return 'DejaVu Sans Mono'
-  }
-  return 'SF Mono' // macOS default
+  return 'Geist Mono'
 }
 /**
  * Why: ProseMirror builds an in-memory tree for the entire document, so large

@@ -14,6 +14,17 @@
   font-display: swap;
 }
 
+/* Why: ship Geist Mono as a web font so the default terminal face is
+   consistent across macOS/Linux/Windows without depending on user-installed
+   monospace. */
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./fonts/Geist-Mono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 .theme-transition-disabled *,
