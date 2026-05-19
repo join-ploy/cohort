@@ -8,9 +8,11 @@ import type {
   AutomationRun
 } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
+import type { SetupScriptEntry } from '../setup-script/registry'
 import { ChainExecutor } from './chain-executor'
 import { openPromptPane } from './open-prompt-pane'
 import { RunPromptRunner } from './runners/run-prompt-runner'
+import { WaitForSetupRunner } from './runners/wait-for-setup-runner'
 import type { StepRunner } from './step-runner'
 
 const DEFAULT_TICK_MS = 60 * 1000
@@ -21,6 +23,11 @@ export type AutomationServiceOpts = {
    *  src/main/index.ts from the singleton AgentStatusRegistry so the chain
    *  executor's RunPromptRunner can poll agent state without an IPC roundtrip. */
   getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
+  /** Reads the main-process setup-script registry by worktreeId. Wired in
+   *  src/main/index.ts from the singleton SetupScriptRegistry so the chain
+   *  executor's WaitForSetupRunner (P2.5) can poll setup state without an IPC
+   *  roundtrip. */
+  getSetupScript?: (worktreeId: string) => SetupScriptEntry | undefined
   /** Lazy accessor for the renderer process. Resolved at call-time on every
    *  runner tick because the BrowserWindow lifecycle is independent of this
    *  service — capturing a WebContents reference eagerly would let the service
@@ -35,6 +42,7 @@ export class AutomationService {
   private readonly store: Store
   private readonly tickMs: number
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
+  private readonly getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
@@ -42,12 +50,14 @@ export class AutomationService {
   private rendererReady = false
   private evaluating = false
   private readonly runPromptRunner: RunPromptRunner
+  private readonly waitForSetupRunner: WaitForSetupRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
     this.store = store
     this.tickMs = opts.tickMs ?? DEFAULT_TICK_MS
     this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
+    this.getSetupScript = opts.getSetupScript ?? (() => undefined)
     // Default getWebContents to the service's own setWebContents-tracked
     // reference so tests that don't supply a factory still get the WebContents
     // through the existing setWebContents() path.
@@ -70,6 +80,11 @@ export class AutomationService {
         })
       },
       getAgentStatus: this.getAgentStatus,
+      now: () => Date.now()
+    })
+
+    this.waitForSetupRunner = new WaitForSetupRunner({
+      getSetupScript: this.getSetupScript,
       now: () => Date.now()
     })
 
@@ -153,6 +168,9 @@ export class AutomationService {
   private resolveRunner(kind: string): StepRunner | undefined {
     if (kind === 'run-prompt') {
       return this.runPromptRunner
+    }
+    if (kind === 'wait-for-setup') {
+      return this.waitForSetupRunner
     }
     return undefined
   }

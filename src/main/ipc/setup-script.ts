@@ -1,3 +1,9 @@
+/* eslint-disable max-lines -- Why: keeps the per-worktree pty registry,
+   spawn/exit lifecycle, SSH/local provider routing, app-quit teardown, and
+   the SetupScriptRegistry write-through together in one file so the setup
+   lifecycle is reviewable as a single unit. Splitting would fragment the
+   shared `setupPtyByWorktree` map and the `setupStartLocked` flow. */
+
 // Why: per-worktree single-instance setup-script registry + IPC handlers.
 // Setup is per-worktree (not per-repo, in contrast to run) so two worktrees
 // in the same repo can each have their own live setup PTY without one killing
@@ -21,10 +27,21 @@ import type {
 } from '../../shared/script-types'
 import { parseWorktreeId } from './worktree-logic'
 import { registerPty, unregisterPty } from '../memory/pty-registry'
+import type { SetupScriptRegistry } from '../setup-script/registry'
 
 import { getLocalPtyProvider, getSshPtyProvider } from './pty'
 
 export type { SetupStartResult, SetupStopResult } from '../../shared/script-types'
+
+// Why: main-process mirror of setup-script lifecycle for chain runners
+// (WaitForSetupRunner). Wired from src/main/index.ts via setSetupScriptRegistry.
+// Optional — when undefined, all writes are no-ops and existing renderer flow
+// is unaffected.
+let registryRef: SetupScriptRegistry | null = null
+
+export function setSetupScriptRegistry(registry: SetupScriptRegistry | null): void {
+  registryRef = registry
+}
 
 type SetupPtyEntry = {
   ptyId: string
@@ -224,6 +241,17 @@ async function setupStartLocked(
     connectionId: repo.connectionId ?? null
   })
 
+  // Why: record spawn time in the main-process registry so WaitForSetupRunner
+  // can resolve `{ exitCode, durationMs }` at exit time. Additive — does not
+  // affect the renderer broadcast below.
+  const startedAt = Date.now()
+  registryRef?.set(args.worktreeId, {
+    state: 'running',
+    exitCode: null,
+    startedAt,
+    finishedAt: null
+  })
+
   // Why: attribute this PTY to its worktree in the memory collector. Without
   // this, the collector falls back to ORPHAN_WORKTREE_ID for setup scripts.
   // SSH-backed PTYs run on a remote host so their pid is meaningless locally;
@@ -253,6 +281,16 @@ async function setupStartLocked(
     clearIfMatches(args.worktreeId, spawned.id, generation)
     unregisterPty(spawned.id)
     unmarkPtyOrphanExempt(provider, spawned.id)
+    // Why: preserve startedAt from the spawn-time write so the runner can
+    // compute durationMs. Falls back to the local `startedAt` captured at
+    // spawn time in case the registry was cleared between spawn and exit.
+    const priorEntry = registryRef?.get(args.worktreeId)
+    registryRef?.set(args.worktreeId, {
+      state: payload.code === 0 ? 'exited-success' : 'exited-failure',
+      exitCode: payload.code,
+      startedAt: priorEntry?.startedAt ?? startedAt,
+      finishedAt: Date.now()
+    })
     broadcast('setup:exited', {
       repoId,
       worktreeId: args.worktreeId,

@@ -53,12 +53,13 @@ import { cursorHookService } from './cursor/hook-service'
 import { droidHookService } from './droid/hook-service'
 import { getPtyIdForPaneKey, registerPaneKeyTeardownListener, getLocalPtyProvider } from './ipc/pty'
 import { killAllRunScripts } from './ipc/run-script'
-import { killAllSetupScripts } from './ipc/setup-script'
+import { killAllSetupScripts, setSetupScriptRegistry } from './ipc/setup-script'
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { AgentStatusRegistry } from './agent-status/registry'
+import { SetupScriptRegistry } from './setup-script/registry'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -85,6 +86,12 @@ let automations: AutomationService | null = null
 // The chain executor (next Phase 1 task) reads from this so RunPromptRunner
 // can poll agent state without an IPC roundtrip.
 const agentStatusRegistry = new AgentStatusRegistry()
+// Why: main-process source of truth for setup-script lifecycle (per worktree).
+// Written by src/main/ipc/setup-script.ts at spawn + exit, read by the
+// AutomationService's WaitForSetupRunner so chain steps can wait on setup
+// without an IPC roundtrip.
+const setupScriptRegistry = new SetupScriptRegistry()
+setSetupScriptRegistry(setupScriptRegistry)
 
 installUncaughtPipeErrorGuard()
 // Why: propagate the Orca app version into `process.env` so PTY-env
@@ -542,6 +549,10 @@ app.whenReady().then(async () => {
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
     getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey),
+    // Why: hand the setup-script registry's reader to the service so the
+    // chain executor's WaitForSetupRunner (wired in P2.5) can read setup
+    // state directly. Stored now for a stable constructor surface.
+    getSetupScript: (worktreeId) => setupScriptRegistry.get(worktreeId),
     // Why: resolve the renderer + ipc lazily so the RunPromptRunner picks up
     // the current BrowserWindow on each tick (it can change across reload)
     // and so the service stays decoupled from the import-time `electron`
