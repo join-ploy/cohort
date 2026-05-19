@@ -80,9 +80,20 @@ export async function invokeSidebarPromptCommand(
       const ptyIds = store.ptyIdsByTabId[activeTab.id] ?? []
       const ptyId = ptyIds[0]
       if (ptyId) {
-        // Why: append \n so the shell executes immediately, matching the
-        // queued-startup behavior in the new-tab path.
-        window.api.pty.write(ptyId, `${launchCommand}\n`)
+        // Why: when injecting into an existing terminal we can't assume the
+        // user is at a shell prompt — they may already be inside an
+        // interactive CLI like claude/codex/gemini. Pasting `claude "$(cat …)"`
+        // there would land as literal text since the REPL doesn't perform
+        // shell expansion and `claude` doesn't nest into itself.
+        //
+        // Instead: bracketed-paste the raw resolved prompt body so the
+        // running CLI receives it as a single message, then send \r to
+        // submit. BPM (CSI 200~ … CSI 201~) is widely supported by claude,
+        // codex, bash, zsh, vim, etc. — it prevents embedded newlines in
+        // the body from being interpreted as multiple Enter presses.
+        const PASTE_START = '\x1b[200~'
+        const PASTE_END = '\x1b[201~'
+        window.api.pty.write(ptyId, `${PASTE_START}${body}${PASTE_END}\r`)
         store.setActiveTabType('terminal')
         return true
       }
