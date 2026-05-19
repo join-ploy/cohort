@@ -853,6 +853,7 @@ export type PreloadApi = {
   shell: {
     openPath: (path: string) => Promise<void>
     openVscode: (path: string) => Promise<void>
+    openDatabase: (url: string) => Promise<void>
     openUrl: (url: string) => Promise<void>
     openFilePath: (path: string) => Promise<void>
     openFileUri: (uri: string) => Promise<void>

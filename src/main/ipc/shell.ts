@@ -58,6 +58,34 @@ export function registerShellHandlers(): void {
     await shell.openExternal(`vscode://file${path}`)
   })
 
+  ipcMain.handle('shell:openDatabase', async (_event, url: string) => {
+    // Why: only allow DB-client URL schemes that TablePlus + Sequel Pro +
+    // DBeaver register. Rejects arbitrary protocols so this can't be turned
+    // into an `openExternal` proxy.
+    const ALLOWED_SCHEMES = new Set([
+      'postgresql:',
+      'postgres:',
+      'mysql:',
+      'mariadb:',
+      'redis:',
+      'mongodb:',
+      'sqlserver:',
+      'tableplus:',
+      'sequelace:',
+      'dbeaver:'
+    ])
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return
+    }
+    if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+      return
+    }
+    await shell.openExternal(url)
+  })
+
   ipcMain.handle('shell:openUrl', (_event, rawUrl: string) => {
     let parsed: URL
     try {

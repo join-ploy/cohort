@@ -1128,6 +1128,8 @@ const api = {
 
     openVscode: (path: string): Promise<void> => ipcRenderer.invoke('shell:openVscode', path),
 
+    openDatabase: (url: string): Promise<void> => ipcRenderer.invoke('shell:openDatabase', url),
+
     openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
 
     openFilePath: (path: string): Promise<void> => ipcRenderer.invoke('shell:openFilePath', path),
