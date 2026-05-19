@@ -557,7 +557,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   // upgrade users see the sidebar open on first launch).
   rightSidebarOpen: true,
   rightSidebarWidth: 280,
-  rightSidebarTab: 'explorer',
+  // Why: 'run' is the new default landing tab — the activity bar leads with
+  // run/setup so users open the workspace pre-focused on the run terminal
+  // rather than the file explorer. Hydration may still override this with the
+  // user's last-selected tab.
+  rightSidebarTab: 'run',
   activityBarPosition: 'top',
   toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
   setRightSidebarOpen: (open) => set({ rightSidebarOpen: open }),

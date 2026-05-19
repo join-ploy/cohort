@@ -28,6 +28,14 @@ const mod = isMac ? '⌘' : 'Ctrl+'
 const shift = isMac ? '⇧' : 'Shift+'
 
 export const ACTIVITY_ITEMS: ActivityBarItem[] = [
+  // Why: run/setup lead because they're the primary "do something with this
+  // worktree" actions — pinned leftmost so users land on the run terminal
+  // (the new default tab) without scrolling past file-browsing surfaces.
+  // gitOnly because per-repo run/setup scripts only make sense for git repos
+  // (folder repos have no worktrees that own a script PTY). See Phase 5 of
+  // docs/plans/2026-05-14-per-repo-run-script.md.
+  { id: 'run', icon: Play, title: 'Run', shortcut: `${mod}R`, gitOnly: true },
+  { id: 'setup', icon: Wrench, title: 'Setup', shortcut: '', gitOnly: true },
   { id: 'explorer', icon: Files, title: 'Explorer', shortcut: `${shift}${mod}E` },
   { id: 'search', icon: Search, title: 'Search', shortcut: `${shift}${mod}F` },
   {
@@ -52,12 +60,7 @@ export const ACTIVITY_ITEMS: ActivityBarItem[] = [
     // shortcut is macOS-only. On other platforms the tooltip omits it.
     shortcut: isMac ? `${shift}${mod}I` : '',
     sshOnly: true
-  },
-  // Why: per-repo run/setup scripts only make sense for git repos (folder
-  // repos have no worktrees that own a script PTY). See Phase 5 of
-  // docs/plans/2026-05-14-per-repo-run-script.md.
-  { id: 'run', icon: Play, title: 'Run', shortcut: `${mod}R`, gitOnly: true },
-  { id: 'setup', icon: Wrench, title: 'Setup', shortcut: '', gitOnly: true }
+  }
 ]
 
 // ─── Status indicator dot color mapping ──────

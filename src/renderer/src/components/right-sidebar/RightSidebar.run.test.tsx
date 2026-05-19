@@ -59,7 +59,9 @@ function baseState(overrides: Partial<StoreState> = {}): StoreState {
   return {
     rightSidebarOpen: true,
     rightSidebarWidth: 280,
-    rightSidebarTab: 'explorer',
+    // Why: 'run' is the post-reorder default tab; tests seed the same value so
+    // the activity-bar render matches the new initial state.
+    rightSidebarTab: 'run',
     activeWorktreeId: 'wt-1',
     worktreesByRepo: { 'repo-1': [ACTIVE_WORKTREE] },
     repos: [],
