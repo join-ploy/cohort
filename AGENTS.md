@@ -37,3 +37,18 @@ Be mindful of the user's `gh` CLI API rate limit — batch requests where possib
 ## Type Declarations: Prefer `.ts` Over `.d.ts`
 
 Project-owned type declarations belong in `.ts` files. `.d.ts` is reserved for ambient shims (e.g., `env.d.ts`, `vite/client.d.ts`). TypeScript's `skipLibCheck: true` setting applies globally, including to our own `.d.ts` files, which means any unresolved type reference in a `.d.ts` silently becomes `any` at its call sites. Write your types in `.ts` files so the compiler actually checks them. CI enforces this for `src/preload/` and `src/shared/` — see `docs/preload-typecheck-hole.md`.
+
+## Typechecking: Use `tsgo`, Not `tsc`
+
+This repo uses [`@typescript/native-preview`](https://www.npmjs.com/package/@typescript/native-preview) (the Go-based TypeScript compiler) for typechecking. The binary is `tsgo` — much faster than `tsc` and picks up real errors `tsc -b --noEmit` sometimes masks.
+
+Run typechecks via the existing scripts (preferred):
+
+```bash
+pnpm tc          # all three projects (node + cli + web)
+pnpm tc:node     # main process + shared
+pnpm tc:cli      # CLI
+pnpm tc:web      # renderer
+```
+
+Do **not** run `tsc -b --noEmit` or `pnpm tsc`; those use the legacy compiler and report a different (often stale) error set. When you need to verify typechecking in a commit/report, use `pnpm tc` or one of the `tc:*` variants.
