@@ -1330,7 +1330,10 @@ export type PreloadApi = {
         prompt: string
       }) => void
     ) => () => void
-    replyOpenPromptPane: (requestId: string, result: { paneKey: string }) => void
+    replyOpenPromptPane: (
+      requestId: string,
+      result: { ok: true; paneKey: string } | { ok: false; error: string }
+    ) => void
   }
   wsl: {
     isAvailable: () => Promise<boolean>

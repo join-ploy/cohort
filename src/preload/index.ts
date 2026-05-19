@@ -2476,9 +2476,14 @@ const api = {
       ipcRenderer.on('automations:openPromptPane', listener)
       return () => ipcRenderer.removeListener('automations:openPromptPane', listener)
     },
-    /** Send the paneKey back to the main-process chain executor for the
-     *  matching openPromptPane request. */
-    replyOpenPromptPane: (requestId: string, result: { paneKey: string }): void => {
+    /** Send a structured reply back to the main-process chain executor for
+     *  the matching openPromptPane request. `ok: true` carries the paneKey
+     *  on success; `ok: false` carries a renderer-side reason that the
+     *  executor surfaces as the step's `error` (fail-fast — no retry). */
+    replyOpenPromptPane: (
+      requestId: string,
+      result: { ok: true; paneKey: string } | { ok: false; error: string }
+    ): void => {
       ipcRenderer.send(`automations:openPromptPane:reply:${requestId}`, result)
     }
   },

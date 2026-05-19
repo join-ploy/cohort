@@ -9,6 +9,28 @@ export type OpenPromptPaneRequest = {
 export type OpenPromptPaneResult = { paneKey: string }
 
 /**
+ * Discriminated reply from the renderer. Success carries the paneKey;
+ * failure carries a human-readable reason that the chain executor surfaces
+ * verbatim as the step's `error`.
+ */
+export type OpenPromptPaneReply = { ok: true; paneKey: string } | { ok: false; error: string }
+
+/**
+ * Renderer-side failure that's deterministic — bad worktreeId, bad agentId,
+ * no startup plan, etc. The chain executor fails-fast on these (same as
+ * `TemplateResolutionError`); retrying can't recover. Distinct class so
+ * callers can branch on it without string-matching the error message, and
+ * distinct from the plain `Error` used for transient/infrastructure issues
+ * (destroyed webContents, timeout) which the executor retries.
+ */
+export class OpenPromptPaneError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OpenPromptPaneError'
+  }
+}
+
+/**
  * Subset of {@link IpcMain} that the helper depends on. Narrowing the surface
  * here lets tests pass a tiny fake without faking the full Electron module.
  */
@@ -47,9 +69,16 @@ export function openPromptPane(
       deps.ipc.removeAllListeners(channel)
       reject(new Error(`Renderer did not respond to openPromptPane within ${timeoutMs}ms.`))
     }, timeoutMs)
-    deps.ipc.once(channel, (_event: IpcMainEvent, payload: OpenPromptPaneResult) => {
+    deps.ipc.once(channel, (_event: IpcMainEvent, payload: OpenPromptPaneReply) => {
       clearTimeout(timer)
-      resolve(payload)
+      // Why: branch on the discriminant so deterministic renderer failures
+      // surface as OpenPromptPaneError (fail-fast) and stay distinct from
+      // transient infrastructure failures above (retry on next tick).
+      if (payload.ok) {
+        resolve({ paneKey: payload.paneKey })
+      } else {
+        reject(new OpenPromptPaneError(payload.error))
+      }
     })
     deps.webContents.send('automations:openPromptPane', { requestId: deps.requestId, ...req })
   })

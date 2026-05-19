@@ -128,6 +128,21 @@ describe('RunPromptRunner', () => {
     expect(openPromptPane).toHaveBeenCalledTimes(2)
   })
 
+  it('fails fast when openPromptPane throws OpenPromptPaneError', async () => {
+    const { OpenPromptPaneError } = await import('../open-prompt-pane')
+    const openPromptPane = vi.fn().mockRejectedValue(new OpenPromptPaneError('worktree gone'))
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      getAgentStatus: vi.fn().mockReturnValue(undefined),
+      now: () => 0
+    })
+    const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
+    const result = await runner.tick(ctx)
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toMatch(/worktree gone/)
+  })
+
   it('two different runs of the same step.id get independent trackers', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p' })
     const runner = new RunPromptRunner({

@@ -25,18 +25,23 @@ export function useAutomationOpenPromptPaneEvents(): void {
           })
           if (!result) {
             // Why: launchAgentBackgroundSession returns null when no startup
-            // plan can be built (e.g. unknown agent). Surface that as a
-            // missing reply so the main-side helper times out cleanly rather
-            // than receiving a malformed paneKey.
+            // plan can be built (e.g. unknown agent, empty prompt). Surface
+            // that as a structured failure so the chain executor fails-fast
+            // instead of waiting out the 30s timeout.
+            window.api.automations.replyOpenPromptPane(requestId, {
+              ok: false,
+              error: 'Could not build an agent startup plan for the requested prompt.'
+            })
             return
           }
           const paneKey = `${result.tabId}:${FIRST_PANE_ID}`
-          window.api.automations.replyOpenPromptPane(requestId, { paneKey })
-        } catch {
-          // Why: swallowing here lets the main-side helper hit its timeout
-          // path with a consistent error shape. A future task can add a
-          // structured error reply if the chain executor needs richer
-          // diagnostics.
+          window.api.automations.replyOpenPromptPane(requestId, { ok: true, paneKey })
+        } catch (err) {
+          // Why: surface the renderer-side reason verbatim so the chain
+          // executor can fail-fast with a meaningful step error. Empty catch
+          // here would silently degrade into a 30s timeout in main.
+          const message = err instanceof Error ? err.message : String(err)
+          window.api.automations.replyOpenPromptPane(requestId, { ok: false, error: message })
         }
       }
     )

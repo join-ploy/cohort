@@ -1,5 +1,6 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { RunPromptConfig } from '../../../shared/automations-types'
+import { OpenPromptPaneError } from '../open-prompt-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 export type AgentStatusEntry = {
@@ -45,11 +46,25 @@ export class RunPromptRunner implements StepRunner {
         }
         throw e
       }
-      const { paneKey } = await this.deps.openPromptPane({
-        worktreeId,
-        agentId: config.agentId,
-        prompt
-      })
+      let paneKey: string
+      try {
+        const result = await this.deps.openPromptPane({
+          worktreeId,
+          agentId: config.agentId,
+          prompt
+        })
+        paneKey = result.paneKey
+      } catch (e) {
+        // Why: OpenPromptPaneError signals a deterministic renderer-side
+        // failure (bad worktree/agent, empty startup plan) — same fail-fast
+        // semantics as TemplateResolutionError above. Plain Errors here are
+        // transient (destroyed webContents, timeout) so they re-throw and
+        // the executor retries on the next tick.
+        if (e instanceof OpenPromptPaneError) {
+          return { outcome: 'failed', status: 'failed', error: e.message }
+        }
+        throw e
+      }
       tracker = { paneKey, firstDoneAt: null }
       if (!runTrackers) {
         runTrackers = new Map()
