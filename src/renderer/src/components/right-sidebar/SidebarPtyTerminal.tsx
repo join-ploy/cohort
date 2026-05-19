@@ -74,7 +74,10 @@ export default function SidebarPtyTerminal({ ptyId }: SidebarPtyTerminalProps): 
 
   // Why: `min-h-0` lets this flex child shrink below its content height
   // so the parent's flex column can size the terminal area to remaining
-  // space instead of overflowing. `overflow-hidden` keeps xterm's render
-  // surface from leaking past the rounded panel container.
-  return <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden" />
+  // space instead of overflowing. `min-w-0` is the horizontal twin —
+  // without it the flex child can grow to xterm's natural canvas width
+  // (cols × cell width) and push the sidebar column wider than its
+  // allotted space. `overflow-hidden` keeps xterm's render surface from
+  // leaking past the rounded panel container.
+  return <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden" />
 }
