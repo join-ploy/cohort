@@ -82,12 +82,6 @@ export class AutomationService {
     })
   }
 
-  /** Exposed for the chain executor (next Phase 1 task) which constructs
-   *  RunPromptRunner with this getter. Tests can stub it via the constructor. */
-  getAgentStatusReader(): (paneKey: string) => AgentStatusEntry | undefined {
-    return this.getAgentStatus
-  }
-
   setWebContents(webContents: WebContents | null): void {
     this.webContents = webContents
     this.rendererReady = false
@@ -178,9 +172,24 @@ export class AutomationService {
         // Why: an unhandled runner error must not poison the tick loop for
         // every other run. Mark this run failed and persist so the operator
         // sees the error instead of an indefinite `running` row.
+        const errorMessage = e instanceof Error ? e.message : String(e)
+        const now = Date.now()
+        // Finalize any trailing non-terminal step state so the UI doesn't show
+        // an indefinitely "running" step under a failed run. Share the
+        // run-level error with steps that don't already have one so the
+        // operator can correlate the failure to the step it crashed on.
+        if (run.stepStates) {
+          for (const state of run.stepStates) {
+            if (state.status === 'running' || state.status === 'pending') {
+              state.status = 'failed'
+              state.finishedAt = now
+              state.error = state.error ?? errorMessage
+            }
+          }
+        }
         run.status = 'failed'
-        run.error = e instanceof Error ? e.message : String(e)
-        run.finishedAt = Date.now()
+        run.error = errorMessage
+        run.finishedAt = now
         this.store.replaceAutomationRun(run)
       }
     }

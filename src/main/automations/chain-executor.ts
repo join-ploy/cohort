@@ -78,7 +78,12 @@ export class ChainExecutor {
       // run them all, finalize.
       activeIdx = run.stepStates.length
       if (activeIdx >= automation.steps.length) {
-        this.finalizeIfAllDone(run)
+        // Defensive: all step slots are filled but the run wasn't finalized on
+        // the prior tick. Route through the same finalizer the normal path
+        // uses so `onFailure: 'continue'` policy is honored consistently.
+        if (run.stepStates.length > 0 && run.stepStates.every(isTerminal)) {
+          this.finalizeRun(automation, run)
+        }
         this.deps.persistRun(run)
         return
       }
@@ -89,7 +94,9 @@ export class ChainExecutor {
     const step = automation.steps[activeIdx]
     const runner = this.deps.getRunner(step.kind)
     if (!runner) {
-      throw new Error(`No runner registered for step kind: ${step.kind}`)
+      throw new Error(
+        `No runner registered for step kind: ${step.kind} (runId=${run.id} stepId=${step.id})`
+      )
     }
 
     const result = await runner.tick({
@@ -98,6 +105,25 @@ export class ChainExecutor {
       state,
       context: run.context ?? {}
     })
+
+    // Sanity-check the runner's outcome/status pair so a buggy runner that
+    // returns inconsistent values fails loudly here instead of silently
+    // corrupting downstream chain state. Pure defensive: a well-behaved
+    // runner will never trip these.
+    if (result.outcome === 'done' && !isTerminal({ ...state, status: result.status })) {
+      throw new Error(
+        `Runner for step kind '${step.kind}' returned outcome='done' with non-terminal status='${result.status}' (runId=${run.id} stepId=${step.id})`
+      )
+    }
+    if (
+      result.outcome === 'failed' &&
+      result.status !== 'failed' &&
+      result.status !== 'timed-out'
+    ) {
+      throw new Error(
+        `Runner for step kind '${step.kind}' returned outcome='failed' with status='${result.status}' (expected 'failed' or 'timed-out'; runId=${run.id} stepId=${step.id})`
+      )
+    }
 
     state.status = result.status
     if (result.outcome === 'done' || result.outcome === 'failed') {
@@ -132,16 +158,6 @@ export class ChainExecutor {
     this.deps.persistRun(run)
   }
 
-  private finalizeIfAllDone(run: AutomationRun): void {
-    if (!run.stepStates || run.stepStates.length === 0) {
-      return
-    }
-    if (!run.stepStates.every(isTerminal)) {
-      return
-    }
-    this.finalizeRunFromStates(run)
-  }
-
   /** Final pass once every step in the automation has a terminal state. A
    *  step that failed-but-was-continued is `failed` in `stepStates` but,
    *  per Phase 1 design, does NOT poison the overall run — the operator's
@@ -159,17 +175,6 @@ export class ChainExecutor {
       return !step || step.onFailure !== 'continue'
     })
     run.status = failingHaltSteps.length > 0 ? 'failed' : 'completed'
-    run.finishedAt = this.deps.now()
-  }
-
-  /** Used by the defensive "everything is terminal but run wasn't finalized"
-   *  branch, where we don't have an Automation handy. Falls back to a simple
-   *  "any non-success ⇒ failed" rule. */
-  private finalizeRunFromStates(run: AutomationRun): void {
-    const anyFailure = (run.stepStates ?? []).some(
-      (s) => s.status === 'failed' || s.status === 'timed-out'
-    )
-    run.status = anyFailure ? 'failed' : 'completed'
     run.finishedAt = this.deps.now()
   }
 }
