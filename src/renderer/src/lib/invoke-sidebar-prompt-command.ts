@@ -62,16 +62,39 @@ export async function invokeSidebarPromptCommand(
     return false
   }
 
-  // Why: reuse the same createTab + queueTabStartupCommand path that the
-  // tab-bar quick-launch and new-workspace flows use. The startup command
-  // is fired once the PTY shell is ready, which avoids the race between
-  // tab creation and shell readiness.
-  const newTab = store.createTab(activeWorktreeId)
   // Why: shell-escape the prompt path with double quotes so spaces in the
   // path are tolerated. `$(cat "...")` is the canonical bash/zsh form. The
   // outer double quotes around the `$(...)` expansion preserve the entire
   // multi-line prompt as a single argv element to the configured command.
   const launchCommand = `${cmd.command} "$(cat "${promptPath}")"`
+
+  // Why: Create PR targets the user's currently-focused terminal when one
+  // is active, so the command joins their existing shell session (e.g. a
+  // Claude session they're already chatting in) instead of fragmenting
+  // attention across a new tab. Review always opens a fresh tab — reviews
+  // are independent sessions and shouldn't intrude on whatever the user
+  // is doing. Fallback to a new tab when no terminal tab is active.
+  if (kind === 'createPr') {
+    const activeTab = store.getActiveTab(activeWorktreeId)
+    if (activeTab?.contentType === 'terminal') {
+      const ptyIds = store.ptyIdsByTabId[activeTab.id] ?? []
+      const ptyId = ptyIds[0]
+      if (ptyId) {
+        // Why: append \n so the shell executes immediately, matching the
+        // queued-startup behavior in the new-tab path.
+        window.api.pty.write(ptyId, `${launchCommand}\n`)
+        store.setActiveTabType('terminal')
+        return true
+      }
+    }
+    // No active terminal → fall through to new-tab creation below.
+  }
+
+  // Why: reuse the same createTab + queueTabStartupCommand path that the
+  // tab-bar quick-launch and new-workspace flows use. The startup command
+  // is fired once the PTY shell is ready, which avoids the race between
+  // tab creation and shell readiness.
+  const newTab = store.createTab(activeWorktreeId)
   store.queueTabStartupCommand(newTab.id, {
     command: launchCommand
   })
