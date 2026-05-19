@@ -79,8 +79,16 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         // Why: bar is a draggable window strip on macOS/Windows where the
         // OS title chrome is hidden; interactive children opt out via
         // -webkit-app-region: no-drag below. Matches how `.titlebar` works.
-        className="worktree-context-bar relative flex h-9 items-center justify-between border-b border-border bg-background pl-3 pr-1.5"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        // Background uses --titlebar-background so the breadcrumb bar
+        // shares the exact chrome color as the terminal tab strip above
+        // (the strip is portaled into `.titlebar`, which reads the same var).
+        className="worktree-context-bar relative flex h-9 items-center justify-between border-b border-border pl-3 pr-1.5"
+        style={
+          {
+            WebkitAppRegion: 'drag',
+            backgroundColor: 'var(--titlebar-background)'
+          } as React.CSSProperties
+        }
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
           {/* Why: no GitHub remote → no avatar URL available on the Repo

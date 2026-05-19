@@ -128,7 +128,7 @@
   /* Why: dedicated chrome tokens for the titlebar and left worktree sidebar so
      theme tweaks here don't bleed into the right sidebar or other panels that
      share the broader `--sidebar` token. */
-  --titlebar-background: #1b1917;
+  --titlebar-background: #201e1c;
   --left-sidebar-background: #1b1917;
 }
 
@@ -174,7 +174,7 @@
   --git-decoration-renamed: #73c991;
   --git-decoration-untracked: #73c991;
   --git-decoration-copied: #73c991;
-  --titlebar-background: #1b1917;
+  --titlebar-background: #201e1c;
   --left-sidebar-background: #1b1917;
 }
 
