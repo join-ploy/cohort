@@ -360,8 +360,8 @@ export type UISlice = {
   /** Which app opens when the user activates the worktree path button in
    *  WorktreeContextBar's split-button selector. Persisted via the
    *  PersistedUIState pipeline so the choice survives restart. */
-  pathOpenerChoice: 'finder' | 'vscode'
-  setPathOpenerChoice: (choice: 'finder' | 'vscode') => void
+  pathOpenerChoice: 'finder' | 'vscode' | 'database'
+  setPathOpenerChoice: (choice: 'finder' | 'vscode' | 'database') => void
 }
 
 export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) => ({
@@ -836,7 +836,12 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         // behavior they had before the opener dropdown landed. Unknown values
         // also collapse to 'finder' rather than letting a typo-tampered file
         // disable the path button entirely.
-        pathOpenerChoice: ui.pathOpenerChoice === 'vscode' ? 'vscode' : 'finder',
+        pathOpenerChoice:
+          ui.pathOpenerChoice === 'vscode'
+            ? 'vscode'
+            : ui.pathOpenerChoice === 'database'
+              ? 'database'
+              : 'finder',
         persistedUIReady: true
       }
     }),

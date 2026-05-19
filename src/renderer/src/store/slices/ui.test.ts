@@ -174,6 +174,35 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().pathOpenerChoice).toBe('finder')
   })
 
+  it('restores pathOpenerChoice=database from persisted UI state', () => {
+    // Why: round-trips the third opener choice so a user who picked Database
+    // in the dropdown gets it back after restart.
+    const store = createUIStore()
+
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        pathOpenerChoice: 'database'
+      })
+    )
+
+    expect(store.getState().pathOpenerChoice).toBe('database')
+  })
+
+  it("collapses an unknown pathOpenerChoice to 'finder'", () => {
+    // Why: defends against a typo-tampered disk file or a downgrade from a
+    // future build that introduces a new opener.
+    const store = createUIStore()
+
+    store.setState({ pathOpenerChoice: 'vscode' })
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        pathOpenerChoice: 'tableplus' as unknown as 'finder'
+      })
+    )
+
+    expect(store.getState().pathOpenerChoice).toBe('finder')
+  })
+
   it('hydrates a valid Kagi session link', () => {
     const store = createUIStore()
 

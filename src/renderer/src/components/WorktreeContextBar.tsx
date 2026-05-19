@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Code2,
+  Database,
   Ellipsis,
   Folder,
   FolderOpen,
@@ -38,10 +39,18 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   // renders an undefined opener choice.
   const pathOpenerChoice = useAppStore((s) => s.pathOpenerChoice ?? 'finder')
   const setPathOpenerChoice = useAppStore((s) => s.setPathOpenerChoice)
+  // Why: read the live template from settings (not just at click time) so the
+  // Database menu item enables/disables reactively when the user edits it in
+  // Settings without needing to reopen the dropdown.
+  const databaseConnectionTemplate = useAppStore(
+    (s) => s.settings?.databaseConnectionTemplate ?? ''
+  )
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
+  const workspaceName = worktree?.workspaceName ?? ''
+  const databaseTemplateConfigured = databaseConnectionTemplate.trim().length > 0
 
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
@@ -54,9 +63,27 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
       ? 'Open Containing Folder'
       : 'Reveal in File Explorer'
 
-  const primaryLabel = pathOpenerChoice === 'vscode' ? 'Open in VS Code' : finderLabel
+  const primaryLabel =
+    pathOpenerChoice === 'vscode'
+      ? 'Open in VS Code'
+      : pathOpenerChoice === 'database'
+        ? 'Open in Database'
+        : finderLabel
 
   const handleOpenPath = useCallback((): void => {
+    if (pathOpenerChoice === 'database') {
+      // Why: guard at click-time so a cleared template after the user picked
+      // Database in the dropdown silently no-ops instead of dispatching an
+      // invalid URL. Empty workspaceName is impossible for non-null worktree,
+      // but the check costs nothing and protects the URL substitution.
+      const template = databaseConnectionTemplate.trim()
+      if (!template || !workspaceName) {
+        return
+      }
+      const resolvedUrl = template.split('${WORKSPACE_NAME}').join(workspaceName)
+      void window.api.shell.openDatabase(resolvedUrl)
+      return
+    }
     if (!worktreePath) {
       return
     }
@@ -67,7 +94,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     } else {
       window.api.shell.openPath(worktreePath)
     }
-  }, [worktreePath, pathOpenerChoice])
+  }, [worktreePath, pathOpenerChoice, databaseConnectionTemplate, workspaceName])
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -156,9 +183,10 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Why: split button — left segment dispatches to the currently
-              selected opener (Finder/Explorer/Files or VS Code); right segment
-              is the DropdownMenu that picks which opener that primary click
-              uses. The chosen opener persists via PersistedUIState. */}
+              selected opener (Finder/Explorer/Files, VS Code, or the
+              configured Database client); right segment is the DropdownMenu
+              that picks which opener that primary click uses. The chosen
+              opener persists via PersistedUIState. */}
           <div className="flex max-w-[260px] items-center">
             {/* Why: backgroundColor inherits the bar's --titlebar-background
                 token so the selector visually flattens into the bar instead
@@ -176,6 +204,8 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                   glyph matches what clicking it will do. */}
               {pathOpenerChoice === 'vscode' ? (
                 <Code2 className="size-3 shrink-0" />
+              ) : pathOpenerChoice === 'database' ? (
+                <Database className="size-3 shrink-0" />
               ) : (
                 <FolderOpen className="size-3 shrink-0" />
               )}
@@ -206,6 +236,22 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                 >
                   <Code2 className="size-3.5" />
                   <span>VS Code</span>
+                </DropdownMenuItem>
+                {/* Why: disabling the item (rather than hiding it) keeps the
+                    Database affordance discoverable. The inline "Configure in
+                    Settings" hint explains why it's greyed out — a `title`
+                    tooltip would never fire because Radix sets
+                    pointer-events: none on disabled items. */}
+                <DropdownMenuItem
+                  onSelect={() => setPathOpenerChoice('database')}
+                  disabled={!databaseTemplateConfigured}
+                  className="flex items-center gap-2"
+                >
+                  <Database className="size-3.5" />
+                  <span className="flex-1">Database</span>
+                  {!databaseTemplateConfigured && (
+                    <span className="text-[10px] text-muted-foreground">Configure</span>
+                  )}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
