@@ -1,4 +1,5 @@
-import type { WebContents } from 'electron'
+import { randomUUID } from 'crypto'
+import type { IpcMain, WebContents } from 'electron'
 import type { Store } from '../persistence'
 import type {
   Automation,
@@ -7,6 +8,10 @@ import type {
   AutomationRun
 } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
+import { ChainExecutor } from './chain-executor'
+import { openPromptPane } from './open-prompt-pane'
+import { RunPromptRunner } from './runners/run-prompt-runner'
+import type { StepRunner } from './step-runner'
 
 const DEFAULT_TICK_MS = 60 * 1000
 
@@ -16,24 +21,65 @@ export type AutomationServiceOpts = {
    *  src/main/index.ts from the singleton AgentStatusRegistry so the chain
    *  executor's RunPromptRunner can poll agent state without an IPC roundtrip. */
   getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
+  /** Lazy accessor for the renderer process. Resolved at call-time on every
+   *  runner tick because the BrowserWindow lifecycle is independent of this
+   *  service — capturing a WebContents reference eagerly would let the service
+   *  hold onto a destroyed window across reload. */
+  getWebContents?: () => WebContents | null
+  /** Lazy accessor for ipcMain. Wrapped in a factory only so tests can stub
+   *  it; in production this returns the singleton from `electron`. */
+  getIpcMain?: () => IpcMain
 }
 
 export class AutomationService {
   private readonly store: Store
   private readonly tickMs: number
-  /** Captured at construction so future runner-factory wiring can hand it to
-   *  RunPromptRunner. Defaults to a stub returning `undefined` for tests and
-   *  for the initial bootstrap path where no registry is attached. */
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
+  private readonly getWebContents: () => WebContents | null
+  private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
   private webContents: WebContents | null = null
   private rendererReady = false
   private evaluating = false
+  private readonly runPromptRunner: RunPromptRunner
+  private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
     this.store = store
     this.tickMs = opts.tickMs ?? DEFAULT_TICK_MS
     this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
+    // Default getWebContents to the service's own setWebContents-tracked
+    // reference so tests that don't supply a factory still get the WebContents
+    // through the existing setWebContents() path.
+    this.getWebContents = opts.getWebContents ?? (() => this.webContents)
+    this.getIpcMain = opts.getIpcMain ?? null
+
+    this.runPromptRunner = new RunPromptRunner({
+      openPromptPane: async (params) => {
+        const webContents = this.getWebContents()
+        if (!webContents || webContents.isDestroyed()) {
+          throw new Error('No renderer available to open prompt pane.')
+        }
+        if (!this.getIpcMain) {
+          throw new Error('AutomationService missing getIpcMain wiring.')
+        }
+        return openPromptPane(params, {
+          webContents,
+          ipc: this.getIpcMain(),
+          requestId: randomUUID()
+        })
+      },
+      getAgentStatus: this.getAgentStatus,
+      now: () => Date.now()
+    })
+
+    this.chainExecutor = new ChainExecutor({
+      getRunner: (kind) => this.resolveRunner(kind),
+      persistRun: (run) => {
+        this.store.replaceAutomationRun(run)
+      },
+      now: () => Date.now()
+    })
   }
 
   /** Exposed for the chain executor (next Phase 1 task) which constructs
@@ -86,6 +132,13 @@ export class AutomationService {
     return this.store.updateAutomationRun(result)
   }
 
+  private resolveRunner(kind: string): StepRunner | undefined {
+    if (kind === 'run-prompt') {
+      return this.runPromptRunner
+    }
+    return undefined
+  }
+
   private async evaluateDueRuns(): Promise<void> {
     if (this.evaluating) {
       return
@@ -99,8 +152,37 @@ export class AutomationService {
         }
         await this.evaluateAutomation(automation, now)
       }
+      await this.tickRunningChains()
     } finally {
       this.evaluating = false
+    }
+  }
+
+  /** Drive every in-progress chain run forward by one runner tick. Runs in
+   *  series so a buggy runner can't pile up concurrent ticks against the
+   *  same registry/renderer; chain execution is inherently low-volume
+   *  (one tick per ~minute per run). */
+  private async tickRunningChains(): Promise<void> {
+    const automations = new Map(this.store.listAutomations().map((a) => [a.id, a]))
+    for (const run of this.store.listAutomationRuns()) {
+      if (run.status !== 'running') {
+        continue
+      }
+      const automation = automations.get(run.automationId)
+      if (!automation) {
+        continue
+      }
+      try {
+        await this.chainExecutor.tick(automation, run)
+      } catch (e) {
+        // Why: an unhandled runner error must not poison the tick loop for
+        // every other run. Mark this run failed and persist so the operator
+        // sees the error instead of an indefinite `running` row.
+        run.status = 'failed'
+        run.error = e instanceof Error ? e.message : String(e)
+        run.finishedAt = Date.now()
+        this.store.replaceAutomationRun(run)
+      }
     }
   }
 

@@ -3,7 +3,7 @@
    startup. Splitting by line count would fragment tightly coupled startup
    logic across files without a cleaner ownership seam. */
 import { grantDirAcl } from './win32-utils'
-import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
 import devIcon from '../../resources/icon-dev.png?asset'
 import { Store, initDataPath } from './persistence'
@@ -539,9 +539,15 @@ app.whenReady().then(async () => {
     getLocalProvider: () => getLocalPtyProvider()
   })
   automations = new AutomationService(store, {
-    // Why: hand the registry's reader to the service so the future chain
-    // executor can construct RunPromptRunner with main-process status access.
-    getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey)
+    // Why: hand the registry's reader to the service so the chain executor
+    // can construct RunPromptRunner with main-process status access.
+    getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey),
+    // Why: resolve the renderer + ipc lazily so the RunPromptRunner picks up
+    // the current BrowserWindow on each tick (it can change across reload)
+    // and so the service stays decoupled from the import-time `electron`
+    // module surface — keeps service.test.ts free of an Electron mock.
+    getWebContents: () => mainWindow?.webContents ?? null,
+    getIpcMain: () => ipcMain
   })
   runtime.setAccountServices({ claudeAccounts, codexAccounts, rateLimits })
   starNag = new StarNagService(store, stats)

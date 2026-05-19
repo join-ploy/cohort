@@ -8,6 +8,12 @@ export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'
   | 'dispatched'
+  // Chain executor states (Phase 1). `running` covers any in-progress chain
+  // tick; `failed` is the terminal halt state when a step's onFailure='halt'
+  // triggers, distinct from `dispatch_failed` which is the pre-tick dispatch
+  // error from the legacy path.
+  | 'running'
+  | 'failed'
   | 'completed'
   | 'skipped_missed'
   | 'skipped_unavailable'
@@ -61,6 +67,10 @@ export type AutomationRun = {
   startedAt: number | null
   dispatchedAt: number | null
   createdAt: number
+  /** Set by the chain executor when the run reaches a terminal status
+   *  (`completed` or `failed`). Optional for backwards compat with rows
+   *  written before Phase 1. */
+  finishedAt?: number
   stepStates?: StepRunState[]
   context?: Record<string, unknown>
 }

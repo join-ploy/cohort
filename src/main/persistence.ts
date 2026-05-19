@@ -973,6 +973,21 @@ export class Store {
     return updated
   }
 
+  /** Full-record replace for an existing AutomationRun. Used by the chain
+   *  executor, which mutates the run object in place (stepStates, context,
+   *  finishedAt, status) and then asks the store to persist the whole row.
+   *  `updateAutomationRun` above only covers the legacy dispatch path's
+   *  dispatch-result fields, so it can't carry chain state. */
+  replaceAutomationRun(run: AutomationRun): AutomationRun {
+    const index = (this.state.automationRuns ?? []).findIndex((entry) => entry.id === run.id)
+    if (index === -1) {
+      throw new Error('Automation run not found.')
+    }
+    this.state.automationRuns[index] = run
+    this.flush()
+    return run
+  }
+
   advanceAutomationNextRun(id: string, now = Date.now()): Automation {
     const index = (this.state.automations ?? []).findIndex((entry) => entry.id === id)
     if (index === -1) {
