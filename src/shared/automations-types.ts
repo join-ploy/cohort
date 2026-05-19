@@ -39,7 +39,6 @@ export type Automation = {
   missedRunGraceMinutes: number
   createdAt: number
   updatedAt: number
-  // ── Phase 1 additions (optional during migration) ──
   trigger?: TriggerConfig
   steps?: Step[]
   haltOnFailure?: boolean
@@ -62,7 +61,6 @@ export type AutomationRun = {
   startedAt: number | null
   dispatchedAt: number | null
   createdAt: number
-  // ── Phase 1 additions (optional during migration) ──
   stepStates?: StepRunState[]
   context?: Record<string, unknown>
 }
@@ -113,24 +111,20 @@ export type AutomationDispatchResult = {
   error?: string | null
 }
 
-// ── Chain engine (Phase 1) ───────────────────────────────────────────
+// Phase 1 chain types. Coexist with the legacy fields above during migration.
 
 export type TriggerConfig = { kind: 'manual' }
-// Phase 3 adds: | { kind: 'schedule'; rrule, dtstart, timezone, missedRunGraceMinutes }
-// Phase 4 adds: | { kind: 'linear'; teamId, eventTypes, filters }
 
 export type StepKind = 'run-prompt'
-// Phase 2 adds: 'create-worktree' | 'wait-for-setup' | 'run-command'
 
 export type RunPromptConfig = {
-  worktreeRef: string // template, e.g. '{{automation.workspaceId}}'
+  worktreeRef: string
   agentId: TuiAgent
-  prompt: string // template
-  doneDebounceSeconds: number // default 15
+  prompt: string
+  doneDebounceSeconds: number
 }
 
 export type StepConfig = RunPromptConfig
-// Future kinds union additional configs here.
 
 export type Step = {
   id: string
