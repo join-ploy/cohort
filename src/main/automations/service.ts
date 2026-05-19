@@ -6,7 +6,7 @@ import type {
   AutomationDispatchResult,
   AutomationRun
 } from '../../shared/automations-types'
-import type { AgentStatusEntry } from './runners/run-prompt-runner'
+import type { AgentStatusEntry } from '../agent-status/registry'
 
 const DEFAULT_TICK_MS = 60 * 1000
 

@@ -299,6 +299,15 @@ function openMainWindow(): BrowserWindow {
   mainWindow = window
   agentHookServer.setListener(
     ({ paneKey, tabId, worktreeId, connectionId, payload, receivedAt, stateStartedAt }) => {
+      // Why: registry writes are an independent main-process side effect — the
+      // chain executor polls this map regardless of window lifecycle. Hoist
+      // above the isDestroyed() guard so a hidden/closing window (macOS dock-
+      // hide, background-running) can't drop events and leave the runner
+      // reading stale agent state. receivedAt is the hook server's
+      // authoritative timestamp; using it (instead of Date.now()) keeps
+      // registry ordering consistent with the renderer slice, which also keys
+      // monotonic updates off updatedAt.
+      agentStatusRegistry.set(paneKey, { state: payload.state, updatedAt: receivedAt })
       if (mainWindow?.isDestroyed()) {
         return
       }
@@ -311,12 +320,6 @@ function openMainWindow(): BrowserWindow {
         receivedAt,
         stateStartedAt
       })
-      // Why: feed the same event into the main-process registry so the chain
-      // executor can poll agent state without an IPC roundtrip. receivedAt is
-      // the hook server's authoritative timestamp for this event — using it
-      // (instead of Date.now()) keeps registry ordering consistent with the
-      // renderer slice, which also keys monotonic updates off updatedAt.
-      agentStatusRegistry.set(paneKey, { state: payload.state, updatedAt: receivedAt })
       // Why: cursor-agent's OSC title stays "Cursor Agent" for the whole turn,
       // and opencode's stays bare "OpenCode" — neither carries a working/idle
       // signal the title heuristic can read. Synthesize an OSC title update

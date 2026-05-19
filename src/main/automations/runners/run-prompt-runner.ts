@@ -1,12 +1,8 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { RunPromptConfig } from '../../../shared/automations-types'
+import type { AgentStatusEntry } from '../../agent-status/registry'
 import { OpenPromptPaneError } from '../open-prompt-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
-
-export type AgentStatusEntry = {
-  state: 'done' | 'working' | 'blocked' | 'waiting'
-  updatedAt: number
-}
 
 export type RunPromptDeps = {
   openPromptPane: (params: {
@@ -35,6 +31,9 @@ export class RunPromptRunner implements StepRunner {
   // Nested map keyed by (runId, stepId) so a step.id containing ':' can't
   // collide with another run's tracker, and so a future run-level cleanup
   // can drop every tracker for a run with a single `trackers.delete(runId)`.
+  // Why: tracker cleanup is deferred — the chain executor (Task 7) will call
+  // a release hook on run completion, since runner instances are singletons
+  // per AutomationService and outlive any individual run.
   private readonly trackers = new Map<string, Map<string, Tracker>>()
 
   constructor(private readonly deps: RunPromptDeps) {}
