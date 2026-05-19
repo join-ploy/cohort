@@ -22,10 +22,12 @@ import {
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
   GENERAL_PANE_SEARCH_ENTRIES,
+  GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES,
   GENERAL_SUPPORT_SEARCH_ENTRIES,
   GENERAL_UPDATE_SEARCH_ENTRIES,
   GENERAL_WORKSPACE_SEARCH_ENTRIES
 } from './general-search'
+import { SidebarPromptCommandsSection } from './SidebarPromptCommandsSection'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
@@ -530,6 +532,15 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
           </SearchableSetting>
         )}
       </section>
+    ) : null,
+    matchesSettingsSearch(searchQuery, GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES) ? (
+      <SidebarPromptCommandsSection
+        key="sidebar-prompt-commands"
+        reviewCommands={settings.reviewCommands ?? []}
+        createPrCommands={settings.createPrCommands ?? []}
+        onChangeReviewCommands={(next) => updateSettings({ reviewCommands: next })}
+        onChangeCreatePrCommands={(next) => updateSettings({ createPrCommands: next })}
+      />
     ) : null,
     matchesSettingsSearch(searchQuery, GENERAL_UPDATE_SEARCH_ENTRIES) ? (
       <section key="updates" className="space-y-4">

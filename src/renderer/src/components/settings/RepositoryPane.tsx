@@ -162,7 +162,12 @@ export function RepositoryPane({
   }
 
   const updateSelectedRepoHookSettings = (
-    updates: Partial<Pick<RepoHookSettings, 'setupRunPolicy' | 'databaseUrl'>>
+    updates: Partial<
+      Pick<
+        RepoHookSettings,
+        'setupRunPolicy' | 'databaseUrl' | 'reviewPreferences' | 'createPrPreferences'
+      >
+    >
   ) => {
     // Why: persisted repos may still carry legacy UI hook fields from the old dual-source
     // design. We preserve them when saving so existing local state stays loadable, but the
@@ -343,6 +348,12 @@ export function RepositoryPane({
           updateSelectedRepoHookSettings({ setupRunPolicy: policy as SetupRunPolicy })
         }
         onUpdateDatabaseUrl={(databaseUrl) => updateSelectedRepoHookSettings({ databaseUrl })}
+        onUpdateReviewPreferences={(reviewPreferences) =>
+          updateSelectedRepoHookSettings({ reviewPreferences })
+        }
+        onUpdateCreatePrPreferences={(createPrPreferences) =>
+          updateSelectedRepoHookSettings({ createPrPreferences })
+        }
       />
     ) : null
   ].filter(Boolean)

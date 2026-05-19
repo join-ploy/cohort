@@ -16,6 +16,8 @@ type RepositoryHooksSectionProps = {
   onClearLegacyHooks: () => void
   onUpdateSetupRunPolicy: (policy: SetupRunPolicy) => void
   onUpdateDatabaseUrl: (databaseUrl: string) => void
+  onUpdateReviewPreferences: (reviewPreferences: string) => void
+  onUpdateCreatePrPreferences: (createPrPreferences: string) => void
 }
 
 type PolicyOption<P> = { policy: P; label: string; description: string }
@@ -154,7 +156,9 @@ export function RepositoryHooksSection({
   onCopyTemplate,
   onClearLegacyHooks,
   onUpdateSetupRunPolicy,
-  onUpdateDatabaseUrl
+  onUpdateDatabaseUrl,
+  onUpdateReviewPreferences,
+  onUpdateCreatePrPreferences
 }: RepositoryHooksSectionProps): React.JSX.Element {
   // Why: distinguish "file has unrecognised top-level keys" from "file is
   // genuinely malformed" so users see a helpful update prompt instead of a
@@ -259,6 +263,42 @@ export function RepositoryHooksSection({
     setDatabaseUrlDraft(trimmed)
     onUpdateDatabaseUrl(trimmed)
   }, [databaseUrlDraft, persistedDatabaseUrl, onUpdateDatabaseUrl])
+
+  // Why: reviewPreferences / createPrPreferences mirror the databaseUrl
+  // editor — multiline textareas backed by a persisted override that wins
+  // over the yaml value (shown as placeholder when blank). The persisted
+  // override is `undefined` when the user hasn't authored one yet, so the
+  // textarea opens empty and the orca.yaml value (if any) appears as the
+  // placeholder. Saving on blur keeps the flow identical to databaseUrl.
+  const persistedReviewPrefs = hs?.reviewPreferences ?? ''
+  const yamlReviewPrefs = yamlHooks?.reviewPreferences?.trim() ?? ''
+  const [reviewPrefsDraft, setReviewPrefsDraft] = useState(persistedReviewPrefs)
+  useEffect(() => {
+    setReviewPrefsDraft(persistedReviewPrefs)
+  }, [persistedReviewPrefs, repo.id])
+  const commitReviewPrefs = useCallback((): void => {
+    const trimmed = reviewPrefsDraft.trim()
+    if (trimmed === persistedReviewPrefs.trim()) {
+      return
+    }
+    setReviewPrefsDraft(trimmed)
+    onUpdateReviewPreferences(trimmed)
+  }, [reviewPrefsDraft, persistedReviewPrefs, onUpdateReviewPreferences])
+
+  const persistedCreatePrPrefs = hs?.createPrPreferences ?? ''
+  const yamlCreatePrPrefs = yamlHooks?.createPrPreferences?.trim() ?? ''
+  const [createPrPrefsDraft, setCreatePrPrefsDraft] = useState(persistedCreatePrPrefs)
+  useEffect(() => {
+    setCreatePrPrefsDraft(persistedCreatePrPrefs)
+  }, [persistedCreatePrPrefs, repo.id])
+  const commitCreatePrPrefs = useCallback((): void => {
+    const trimmed = createPrPrefsDraft.trim()
+    if (trimmed === persistedCreatePrPrefs.trim()) {
+      return
+    }
+    setCreatePrPrefsDraft(trimmed)
+    onUpdateCreatePrPreferences(trimmed)
+  }, [createPrPrefsDraft, persistedCreatePrPrefs, onUpdateCreatePrPreferences])
 
   return (
     <section className="space-y-6">
@@ -486,6 +526,76 @@ export function RepositoryHooksSection({
               {yamlDatabaseUrl
                 ? 'Leave blank to fall back to the shared `orca.yaml` value shown above.'
                 : 'Leave blank to disable the Open in Database action when no `orca.yaml` value is set.'}
+            </p>
+          </div>
+        </div>
+      </SearchableSetting>
+
+      <SearchableSetting
+        title="Review Prompt Preferences"
+        description="Per-repo guidance appended to the global Review prompt before it runs."
+        keywords={['review', 'review preferences', 'right-sidebar', 'prompt', 'code review']}
+      >
+        <div className="space-y-3 rounded-2xl border border-border/50 bg-background/80 p-4 shadow-sm">
+          <div className="space-y-1">
+            <h5 className="text-sm font-semibold">Review Prompt Preferences</h5>
+            <p className="text-xs text-muted-foreground">
+              Appended to the user&apos;s global Review prompt when the right-sidebar Review button
+              runs. This per-repo override is stored locally and takes precedence over the shared
+              value in <code className="rounded bg-muted px-1 py-0.5">orca.yaml</code>.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <textarea
+              value={reviewPrefsDraft}
+              onChange={(e) => setReviewPrefsDraft(e.target.value)}
+              onBlur={commitReviewPrefs}
+              placeholder={
+                yamlReviewPrefs ||
+                'e.g. Be strict about Windows path handling and SSH-only failure modes.'
+              }
+              rows={4}
+              className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            />
+            <p className="text-xs text-muted-foreground">
+              {yamlReviewPrefs
+                ? 'Leave blank to fall back to the shared `orca.yaml` value shown above.'
+                : 'Leave blank to use only the user-level Review prompt without per-repo additions.'}
+            </p>
+          </div>
+        </div>
+      </SearchableSetting>
+
+      <SearchableSetting
+        title="Create PR Prompt Preferences"
+        description="Per-repo guidance appended to the global Create PR prompt before it runs."
+        keywords={['create pr', 'pull request', 'prompt', 'right-sidebar']}
+      >
+        <div className="space-y-3 rounded-2xl border border-border/50 bg-background/80 p-4 shadow-sm">
+          <div className="space-y-1">
+            <h5 className="text-sm font-semibold">Create PR Prompt Preferences</h5>
+            <p className="text-xs text-muted-foreground">
+              Appended to the user&apos;s global Create PR prompt when the right-sidebar Create PR
+              button runs. Persisted locally; overrides{' '}
+              <code className="rounded bg-muted px-1 py-0.5">orca.yaml</code>.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <textarea
+              value={createPrPrefsDraft}
+              onChange={(e) => setCreatePrPrefsDraft(e.target.value)}
+              onBlur={commitCreatePrPrefs}
+              placeholder={
+                yamlCreatePrPrefs ||
+                'e.g. Use Conventional Commits for the PR title and include a Test plan section.'
+              }
+              rows={4}
+              className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            />
+            <p className="text-xs text-muted-foreground">
+              {yamlCreatePrPrefs
+                ? 'Leave blank to fall back to the shared `orca.yaml` value shown above.'
+                : 'Leave blank to use only the user-level Create PR prompt without per-repo additions.'}
             </p>
           </div>
         </div>

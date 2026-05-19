@@ -101,11 +101,27 @@ export const GENERAL_SUPPORT_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  {
+    title: 'Review Commands',
+    description:
+      'Right-sidebar Review dropdown — pair a CLI command with a prompt; clicking writes the prompt to ~/.orca/prompts and runs the command.',
+    keywords: ['review', 'right-sidebar', 'prompt', 'command', 'code review', 'agent']
+  },
+  {
+    title: 'Create PR Commands',
+    description:
+      'Right-sidebar Create PR dropdown — only visible when the active worktree has no open PR.',
+    keywords: ['pr', 'pull request', 'right-sidebar', 'prompt', 'command', 'agent']
+  }
+]
+
 export const GENERAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   ...GENERAL_WORKSPACE_SEARCH_ENTRIES,
   ...GENERAL_EDITOR_SEARCH_ENTRIES,
   ...GENERAL_CLI_SEARCH_ENTRIES,
   ...GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
+  ...GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES,
   ...GENERAL_UPDATE_SEARCH_ENTRIES,
   ...GENERAL_SUPPORT_SEARCH_ENTRIES
 ]
