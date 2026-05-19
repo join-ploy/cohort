@@ -12,7 +12,7 @@ import type { GlobalSettings } from '../../../../shared/types'
 // Why: the gutter around xterm replaces the prior `px-2 pt-2` Tailwind
 // wrapper. Top + side padding only — no bottom — so the cursor row sits
 // flush with the panel base, matching how the regular pane is framed.
-const TERMINAL_GUTTER_CSS = '24px 24px 0 24px'
+const TERMINAL_GUTTER_CSS = '12px 12px 0 12px'
 
 // Why: the right-sidebar Run/Setup terminals live inside the React tree
 // (RunPanel / SetupPanel), which unmounts whenever the user navigates to
