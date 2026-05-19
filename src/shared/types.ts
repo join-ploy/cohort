@@ -502,6 +502,11 @@ export type PRInfo = {
   // correct commit without re-querying GitHub or guessing from local branch refs.
   headSha?: string
   conflictSummary?: PRConflictSummary
+  // Why: GitHub-style diff stats (additions/deletions vs the PR base) so the
+  // sidebar card can show "+N −M" without a separate IPC. Both come for free
+  // from `gh pr list/view`; absent when no PR exists yet for the branch.
+  additions?: number
+  deletions?: number
 }
 
 export type PRCheckDetail = {

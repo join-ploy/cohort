@@ -944,6 +944,12 @@ export async function getWorkItemByOwnerRepo(
  * the branch-keyed lookup misses, but the user still expects the linked PR
  * to surface on the worktree card.
  */
+// Why: hoisted constant so the field list stays in sync across the three
+// gh invocations (branch list, branch view, linked-PR view fallback). Adding a
+// field like `additions` here flows into all paths without drifting strings.
+const PR_JSON_FIELDS =
+  'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid,additions,deletions'
+
 export async function getPRForBranch(
   repoPath: string,
   branch: string,
@@ -968,6 +974,8 @@ export async function getPRForBranch(
       headRefName?: string
       baseRefOid?: string
       headRefOid?: string
+      additions?: number
+      deletions?: number
     } | null = null
 
     // During a rebase the worktree is in detached HEAD and branch is empty.
@@ -988,7 +996,7 @@ export async function getPRForBranch(
             '--limit',
             '1',
             '--json',
-            'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
+            PR_JSON_FIELDS
           ],
           { cwd: repoPath }
         )
@@ -996,13 +1004,7 @@ export async function getPRForBranch(
         data = list[0] ?? null
       } else {
         const { stdout } = await ghExecFileAsync(
-          [
-            'pr',
-            'view',
-            branchName,
-            '--json',
-            'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
-          ],
+          ['pr', 'view', branchName, '--json', PR_JSON_FIELDS],
           { cwd: repoPath }
         )
         data = JSON.parse(stdout)
@@ -1018,15 +1020,9 @@ export async function getPRForBranch(
             '--repo',
             `${ownerRepo.owner}/${ownerRepo.repo}`,
             '--json',
-            'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
+            PR_JSON_FIELDS
           ]
-        : [
-            'pr',
-            'view',
-            String(linkedPRNumber),
-            '--json',
-            'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
-          ]
+        : ['pr', 'view', String(linkedPRNumber), '--json', PR_JSON_FIELDS]
       try {
         const { stdout } = await ghExecFileAsync(args, { cwd: repoPath })
         data = JSON.parse(stdout)
@@ -1057,7 +1053,9 @@ export async function getPRForBranch(
       updatedAt: data.updatedAt,
       mergeable: (data.mergeable as PRMergeableState) ?? 'UNKNOWN',
       headSha: data.headRefOid,
-      conflictSummary
+      conflictSummary,
+      additions: data.additions,
+      deletions: data.deletions
     }
   } catch {
     return null

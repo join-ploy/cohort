@@ -526,17 +526,33 @@ const WorktreeCard = React.memo(function WorktreeCard({
                  hierarchy against the muted workspaceName/repo chip below
                  (muting the title as well flattened the card). */}
             <div className="flex flex-col min-w-0">
-              <div
-                className={cn(
-                  'text-[12px] truncate leading-tight text-foreground',
-                  showUnreadEmphasis ? 'font-semibold' : 'font-normal'
-                )}
-              >
-                {/* Why: the card root is a non-interactive <div>, so aria-label
-                     on it is announced inconsistently across screen readers.
-                     A visible-text prefix inside the accessible name is reliable. */}
-                {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
-                {worktree.displayName}
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span
+                  className={cn(
+                    'text-[12px] truncate leading-tight text-foreground',
+                    showUnreadEmphasis ? 'font-semibold' : 'font-normal'
+                  )}
+                >
+                  {/* Why: the card root is a non-interactive <div>, so aria-label
+                       on it is announced inconsistently across screen readers.
+                       A visible-text prefix inside the accessible name is reliable. */}
+                  {showUnreadEmphasis && <span className="sr-only">Unread: </span>}
+                  {worktree.displayName}
+                </span>
+                {/* Why: GitHub-style diff stats vs the PR base read straight off
+                     the cached PR (no separate IPC). Hidden when both totals are
+                     0 so unchanged worktrees stay uncluttered. */}
+                {pr &&
+                  (typeof pr.additions === 'number' || typeof pr.deletions === 'number') &&
+                  ((pr.additions ?? 0) > 0 || (pr.deletions ?? 0) > 0) && (
+                    <span
+                      className="text-[10px] tabular-nums leading-none shrink-0"
+                      aria-label={`+${pr.additions ?? 0} additions, -${pr.deletions ?? 0} deletions`}
+                    >
+                      <span className="text-emerald-500">+{pr.additions ?? 0}</span>{' '}
+                      <span className="text-rose-500">−{pr.deletions ?? 0}</span>
+                    </span>
+                  )}
               </div>
               {/* Why: workspaceName is the immutable, DB-safe handle injected
                    into setup/run/archive scripts as CONDUCTOR_WORKSPACE_NAME.

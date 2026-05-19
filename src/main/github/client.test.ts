@@ -93,7 +93,7 @@ describe('getPRForBranch', () => {
         '--limit',
         '1',
         '--json',
-        'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
+        'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid,additions,deletions'
       ],
       { cwd: '/repo-root' }
     )
@@ -129,7 +129,7 @@ describe('getPRForBranch', () => {
         'view',
         'feature/test',
         '--json',
-        'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid'
+        'number,title,state,url,statusCheckRollup,updatedAt,isDraft,mergeable,baseRefName,headRefName,baseRefOid,headRefOid,additions,deletions'
       ],
       { cwd: '/non-github-repo' }
     )
