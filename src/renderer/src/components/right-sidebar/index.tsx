@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { PanelRight } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { getRepoMapFromState, useActiveWorktree, useRepoById } from '@/store/selectors'
 import { cn } from '@/lib/utils'
@@ -7,7 +6,7 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import type { CheckStatus } from '../../../../shared/types'
 import { isFolderRepo } from '../../../../shared/repo-kind'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import FileExplorer from './FileExplorer'
 import SourceControl from './SourceControl'
@@ -34,8 +33,6 @@ const MIN_NON_SIDEBAR_AREA = 320
 const ABSOLUTE_FALLBACK_MAX_WIDTH = 2000
 
 const ACTIVITY_BAR_SIDE_WIDTH = 40
-
-const isMac = navigator.userAgent.includes('Mac')
 
 function branchDisplayName(branch: string): string {
   return branch.replace(/^refs\/heads\//, '')
@@ -81,7 +78,6 @@ function RightSidebarInner(): React.JSX.Element {
   const setRightSidebarWidth = useAppStore((s) => s.setRightSidebarWidth)
   const rightSidebarTab = useAppStore((s) => s.rightSidebarTab)
   const setRightSidebarTab = useAppStore((s) => s.setRightSidebarTab)
-  const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
   const checksStatus = useAppStore(getActiveChecksStatus)
   // Why: Run/Setup dots mirror the per-worktree script slice. The selectors
   // return 'idle' (not null) when no entry exists so the button renders no dot.
@@ -234,23 +230,10 @@ function RightSidebarInner(): React.JSX.Element {
     )
   })
 
-  const closeButton = rightSidebarOpen ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className="sidebar-toggle mr-1"
-          onClick={toggleRightSidebar}
-          aria-label="Toggle right sidebar"
-        >
-          <PanelRight size={16} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6}>
-        {`Toggle right sidebar (${isMac ? '⌘L' : 'Ctrl+L'})`}
-      </TooltipContent>
-    </Tooltip>
-  ) : null
+  // Why: the right-sidebar toggle now lives in WorktreeContextBar's right
+  // cluster — keeping a duplicate close button in this header was redundant.
+  // The titlebar still hosts a toggle for non-workspace views (Settings etc.).
+  const closeButton = null
 
   return (
     <div

@@ -1,5 +1,5 @@
 import React, { useCallback, useRef } from 'react'
-import { ChevronRight, Ellipsis, PanelRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Ellipsis, FolderOpen, PanelRight } from 'lucide-react'
 import { useAppStore } from '../store'
 import { useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
@@ -22,9 +22,25 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const worktreePath = worktree?.path ?? ''
 
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
+
+  // Why: macOS opens Finder, Windows opens File Explorer, Linux opens Files —
+  // the label matches what the underlying shell.openPath actually invokes.
+  const openExternalLabel = isMac
+    ? 'Reveal in Finder'
+    : navigator.userAgent.includes('Linux')
+      ? 'Open Containing Folder'
+      : 'Reveal in File Explorer'
+
+  const handleOpenExternal = useCallback((): void => {
+    if (!worktreePath) {
+      return
+    }
+    window.api.shell.openPath(worktreePath)
+  }, [worktreePath])
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -104,11 +120,37 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: hosts the right-sidebar toggle inside the bar so it lives
-              in a no-drag region (the absolutely-positioned floating toggle
-              that previously sat on top of the bar fought the OS drag region
-              and couldn't reliably receive clicks). App.tsx removes its
-              floating copy when this bar is mounted. */}
+          {/* Why: split button — left segment is the primary "reveal in
+              OS file manager" action; right segment will host an
+              editor-picker dropdown once Orca grows a defaultEditor setting.
+              For now the dropdown is a disabled stub. */}
+          <div className="flex max-w-[260px] items-center">
+            <button
+              type="button"
+              onClick={handleOpenExternal}
+              aria-label={openExternalLabel}
+              title={openExternalLabel}
+              className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border bg-background px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
+            >
+              <FolderOpen className="size-3 shrink-0" />
+              <span className="min-w-0 truncate">{worktreePath}</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Choose editor"
+              // Why: no editor-picker UI exists yet. Disabled-styling makes
+              // the stub state obvious; wire a DropdownMenu when an
+              // external-editor concept lands.
+              className="flex h-6 cursor-default items-center rounded-sm rounded-l-none border border-border bg-background px-1.5 text-muted-foreground hover:bg-accent"
+              disabled
+            >
+              <ChevronDown className="size-3" />
+            </button>
+          </div>
+          {/* Why: hosts the right-sidebar toggle inside the bar's no-drag
+              region. App.tsx removes its workspace-view floating copy when
+              this bar is mounted; the right-sidebar header no longer hosts
+              a duplicate either. */}
           <button
             type="button"
             onClick={toggleRightSidebar}
