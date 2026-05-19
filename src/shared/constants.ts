@@ -224,9 +224,6 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     opencodeWorkspaceId: '',
     geminiCliOAuthEnabled: false,
     agentCmdOverrides: {},
-    // Why: empty by default disables the Database option in the path-opener
-    // dropdown until the user pastes a TablePlus connection URL into Settings.
-    databaseConnectionTemplate: '',
     // Why: 'auto' runs a layout-aware probe at boot (see
     // src/renderer/src/lib/keyboard-layout/*) that picks 'true' for US and
     // US-International and 'false' for every other layout. This mirrors

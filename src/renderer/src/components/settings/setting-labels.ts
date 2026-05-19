@@ -18,6 +18,5 @@ export const SETTING_LABELS: Partial<Record<keyof GlobalSettings, string>> = {
   terminalDividerColorDark: 'Divider Color (Dark)',
   terminalDividerColorLight: 'Divider Color (Light)',
   terminalInactivePaneOpacity: 'Inactive Pane Opacity',
-  windowBackgroundBlur: 'Window Background Blur',
-  databaseConnectionTemplate: 'Database Connection Template'
+  windowBackgroundBlur: 'Window Background Blur'
 }

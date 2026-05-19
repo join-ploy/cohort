@@ -164,9 +164,6 @@ describe('Store', () => {
     expect(settings.floatingTerminalEnabled).toBe(true)
     expect(settings.floatingTerminalDefaultedForAllUsers).toBe(true)
     expect(settings.notifications.customSoundPath).toBeNull()
-    // Why: defaults to empty so the Database opener stays disabled until the
-    // user pastes a TablePlus URL in Settings → General → External Tools.
-    expect(settings.databaseConnectionTemplate).toBe('')
   })
 
   it('returns default UI state when no data file exists', async () => {

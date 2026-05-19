@@ -1299,12 +1299,6 @@ export type GlobalSettings = {
   geminiCliOAuthEnabled: boolean
   /** Per-agent CLI command overrides. A missing key means use the catalog default binary name. */
   agentCmdOverrides: Partial<Record<TuiAgent, string>>
-  /** TablePlus/DB-client connection URL template. ${WORKSPACE_NAME} is replaced
-   *  with the active worktree's workspaceName when the user clicks the
-   *  Database opener in the context bar. Empty means the Database option is
-   *  disabled in the opener dropdown. Example:
-   *    postgresql://postgres:postgres@127.0.0.1/${WORKSPACE_NAME}_server_dev?statusColor=... */
-  databaseConnectionTemplate: string
   /** Why: macOS terminals must choose between letting Option compose layout
    *  characters (@ on German, € on French) or treating Option as Meta/Esc for
    *  readline shortcuts. Mirrors Ghostty's macos-option-as-alt setting — and
@@ -1633,9 +1627,9 @@ export type PersistedUIState = {
   taskResumeState?: TaskResumeState
   /** Which app opens when the user clicks the worktree path button in the
    *  context bar. 'finder' reveals in OS file manager (default). 'vscode'
-   *  opens via vscode://file/. 'database' opens the user-configured DB-client
-   *  URL with ${WORKSPACE_NAME} substituted; falls back to a no-op click
-   *  when GlobalSettings.databaseConnectionTemplate is empty. */
+   *  opens via vscode://file/. 'database' opens the active repo's
+   *  OrcaHooks.databaseUrl with ${WORKSPACE_NAME} substituted; falls back to
+   *  a no-op click when the active repo's databaseUrl is empty/missing. */
   pathOpenerChoice?: 'finder' | 'vscode' | 'database'
 }
 

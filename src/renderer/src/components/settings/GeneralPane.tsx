@@ -21,7 +21,6 @@ import {
   GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
-  GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES,
   GENERAL_PANE_SEARCH_ENTRIES,
   GENERAL_SUPPORT_SEARCH_ENTRIES,
   GENERAL_UPDATE_SEARCH_ENTRIES,
@@ -434,43 +433,6 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
               }`}
             />
           </button>
-        </SearchableSetting>
-      </section>
-    ) : null,
-    matchesSettingsSearch(searchQuery, GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES) ? (
-      <section key="external-tools" className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold">External Tools</h3>
-          <p className="text-xs text-muted-foreground">
-            Configure third-party apps Orca can hand off to from the workspace context bar.
-          </p>
-        </div>
-
-        <SearchableSetting
-          title="Database Connection Template"
-          description="TablePlus/DB-client URL opened by the worktree path button when Database is the active opener."
-          keywords={GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES.flatMap((entry) => [
-            entry.title,
-            entry.description ?? '',
-            ...(entry.keywords ?? [])
-          ])}
-          className="space-y-2"
-        >
-          <Label>Database Connection Template</Label>
-          <textarea
-            value={settings.databaseConnectionTemplate}
-            onChange={(e) => updateSettings({ databaseConnectionTemplate: e.target.value })}
-            placeholder="postgresql://postgres:postgres@127.0.0.1/${WORKSPACE_NAME}_server_dev?statusColor=F8F8F8&env=local&name=Dev"
-            rows={4}
-            spellCheck={false}
-            className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          />
-          <p className="text-xs text-muted-foreground">
-            Paste a TablePlus &ldquo;Copy Connection URL&rdquo; and replace the database name with{' '}
-            <code className="rounded bg-muted px-1 py-0.5">{'${WORKSPACE_NAME}'}</code> so each
-            worktree opens its own database. Leave empty to disable the Database option in the
-            opener dropdown.
-          </p>
         </SearchableSetting>
       </section>
     ) : null,
