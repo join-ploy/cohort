@@ -10,6 +10,15 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { invokeSidebarPromptCommand } from '@/lib/invoke-sidebar-prompt-command'
+import type { SidebarPromptCommand } from '../../../../shared/types'
+
+// Why: module-scoped stable reference for the empty-array fallback. An
+// inline `?? []` returns a fresh literal each render, which Zustand sees
+// as a state change and triggers "getSnapshot should be cached" plus the
+// React infinite-loop guard. The shared empty array is referentially
+// stable so the selector subscription stays a no-op when settings are
+// undefined.
+const EMPTY_COMMANDS: SidebarPromptCommand[] = []
 
 type ReviewButtonProps = {
   layout: 'top' | 'side'
@@ -24,7 +33,7 @@ type ReviewButtonProps = {
  * header doesn't show an empty trigger.
  */
 export function ReviewButton({ layout }: ReviewButtonProps): React.JSX.Element | null {
-  const reviewCommands = useAppStore((s) => s.settings?.reviewCommands ?? [])
+  const reviewCommands = useAppStore((s) => s.settings?.reviewCommands ?? EMPTY_COMMANDS)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   // Why: without an active worktree there is no terminal surface to spawn the
   // command into. Hide the trigger entirely rather than render a disabled

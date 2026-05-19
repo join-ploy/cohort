@@ -2,7 +2,7 @@ import React from 'react'
 import { GitPullRequest } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
-import { findWorktreeById } from '@/store/slices/worktree-helpers'
+import { useActiveWorktree, useRepoById } from '@/store/selectors'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,13 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { invokeSidebarPromptCommand } from '@/lib/invoke-sidebar-prompt-command'
+import type { SidebarPromptCommand } from '../../../../shared/types'
+
+// Why: module-scoped stable reference for the empty-array fallback. See
+// the matching comment in ReviewButton — an inline `?? []` returns a
+// fresh literal each render and triggers Zustand's getSnapshot infinite
+// loop guard.
+const EMPTY_COMMANDS: SidebarPromptCommand[] = []
 
 type CreatePrButtonProps = {
   layout: 'top' | 'side'
@@ -31,14 +38,13 @@ function branchDisplayName(branch: string): string {
  * from a regular terminal.
  */
 export function CreatePrButton({ layout }: CreatePrButtonProps): React.JSX.Element | null {
-  const createPrCommands = useAppStore((s) => s.settings?.createPrCommands ?? [])
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
-  const activeWorktree = useAppStore((s) =>
-    s.activeWorktreeId ? findWorktreeById(s.worktreesByRepo, s.activeWorktreeId) : null
-  )
-  const activeRepo = useAppStore((s) =>
-    activeWorktree ? s.repos.find((r) => r.id === activeWorktree.repoId) : null
-  )
+  const createPrCommands = useAppStore((s) => s.settings?.createPrCommands ?? EMPTY_COMMANDS)
+  // Why: the existing useActiveWorktree / useRepoById hooks are memoized
+  // against the slice's stable references — inline selectors that called
+  // findWorktreeById or `s.repos.find(...)` returned freshly-derived
+  // results each render, which fed Zustand's getSnapshot infinite loop.
+  const activeWorktree = useActiveWorktree()
+  const activeRepo = useRepoById(activeWorktree?.repoId ?? null)
   // Why: read only the specific cache entry rather than the whole prCache
   // map so the button does not re-render on unrelated PR cache updates.
   const prCacheKey =
@@ -47,7 +53,7 @@ export function CreatePrButton({ layout }: CreatePrButtonProps): React.JSX.Eleme
       : ''
   const prEntry = useAppStore((s) => (prCacheKey ? s.prCache[prCacheKey] : undefined))
 
-  if (createPrCommands.length === 0 || !activeWorktreeId) {
+  if (createPrCommands.length === 0 || !activeWorktree) {
     return null
   }
   // Why: a non-null `data` field means GitHub returned a PR for this branch.
