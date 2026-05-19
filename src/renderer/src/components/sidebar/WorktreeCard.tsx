@@ -501,6 +501,27 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
       {/* Content area */}
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        {/* Why: the primary worktree badge previously sat inline with the
+             title, which left it vertically floating because the title
+             column has two rows (displayName + workspaceName). Lifting it
+             above the title row anchors it to the top of the card and keeps
+             the title row clean for diff stats. */}
+        {worktree.isMainWorktree && !isFolder && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge
+                variant="outline"
+                className="h-[16px] w-fit px-1.5 text-[10px] font-medium rounded leading-none text-foreground/70 border-foreground/20 bg-foreground/[0.06]"
+              >
+                primary
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              Primary worktree (original clone directory)
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {/* Header row: Title and Checks */}
         <div className="flex items-center justify-between min-w-0 gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -569,25 +590,6 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </span>
               )}
             </div>
-
-            {/* Why: the primary worktree (the original clone directory) cannot be
-                 deleted via `git worktree remove`. Placing this badge next to the
-                 name makes it immediately visible. */}
-            {worktree.isMainWorktree && !isFolder && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="outline"
-                    className="h-[16px] px-1.5 text-[10px] font-medium rounded shrink-0 leading-none text-foreground/70 border-foreground/20 bg-foreground/[0.06]"
-                  >
-                    primary
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  Primary worktree (original clone directory)
-                </TooltipContent>
-              </Tooltip>
-            )}
 
             {worktree.isSparse && (
               <Tooltip>
