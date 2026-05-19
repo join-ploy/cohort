@@ -38,7 +38,7 @@ vi.mock('../memory/pty-registry', () => ({
   unregisterPty: unregisterPtyMock
 }))
 
-import { _testing as registry, killRunForWorktree } from './run-script'
+import { _testing as registry, killAllRunScripts, killRunForWorktree } from './run-script'
 import {
   type FakeProvider,
   makeProvider,
@@ -159,5 +159,111 @@ describe('killRunForWorktree (worktree-delete cleanup)', () => {
       worktreeId,
       code: 130
     })
+  })
+})
+
+describe('killAllRunScripts (app-quit cleanup)', () => {
+  let provider: FakeProvider
+
+  beforeEach(() => {
+    registry.clear()
+    provider = makeProvider()
+    getLocalPtyProviderMock.mockReset().mockReturnValue(provider)
+    getSshPtyProviderMock.mockReset().mockReturnValue(undefined)
+    getAllWindowsMock.mockReset().mockReturnValue([makeWindow()])
+    registerPtyMock.mockReset()
+    unregisterPtyMock.mockReset()
+  })
+
+  it('shuts down every registered pty and empties the registry', async () => {
+    // Why: app-quit needs to terminate every live run PTY across all repos,
+    // not just the current one. The renderer broadcasts must fire before
+    // will-quit so the dot UI flips before the window tears down.
+    registry.set('repo-a', {
+      ptyId: 'pty-A',
+      worktreeId: 'repo-a::/a',
+      generation: 1,
+      connectionId: null
+    })
+    registry.set('repo-b', {
+      ptyId: 'pty-B',
+      worktreeId: 'repo-b::/b',
+      generation: 1,
+      connectionId: null
+    })
+
+    await killAllRunScripts()
+
+    expect(provider.shutdown).toHaveBeenCalledWith(
+      'pty-A',
+      expect.objectContaining({ immediate: true })
+    )
+    expect(provider.shutdown).toHaveBeenCalledWith(
+      'pty-B',
+      expect.objectContaining({ immediate: true })
+    )
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-A')
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-B')
+    expect(registry.get('repo-a')).toBeNull()
+    expect(registry.get('repo-b')).toBeNull()
+  })
+
+  it('routes SSH entries to their SSH provider using the stored connectionId', async () => {
+    // Why: SSH entries store connectionId at spawn time so quit-time cleanup
+    // can route shutdown without needing the store (which may be torn down).
+    const sshProvider = makeProvider()
+    getSshPtyProviderMock.mockImplementation((id: string) =>
+      id === 'remote-1' ? sshProvider : undefined
+    )
+    registry.set('repo-ssh', {
+      ptyId: 'ssh-pty',
+      worktreeId: 'repo-ssh::/r',
+      generation: 1,
+      connectionId: 'remote-1'
+    })
+    registry.set('repo-local', {
+      ptyId: 'local-pty',
+      worktreeId: 'repo-local::/l',
+      generation: 1,
+      connectionId: null
+    })
+
+    await killAllRunScripts()
+
+    expect(sshProvider.shutdown).toHaveBeenCalledWith(
+      'ssh-pty',
+      expect.objectContaining({ immediate: true })
+    )
+    expect(provider.shutdown).toHaveBeenCalledWith(
+      'local-pty',
+      expect.objectContaining({ immediate: true })
+    )
+    expect(registry.get('repo-ssh')).toBeNull()
+    expect(registry.get('repo-local')).toBeNull()
+  })
+
+  it('still clears the registry when shutdown throws', async () => {
+    // Why: best-effort cleanup — a failed shutdown for one entry must not
+    // leak registry state, and must not block cleanup of other entries.
+    registry.set('repo-a', {
+      ptyId: 'pty-A',
+      worktreeId: 'repo-a::/a',
+      generation: 1,
+      connectionId: null
+    })
+    provider.shutdown.mockRejectedValueOnce(new Error('already gone'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await killAllRunScripts()
+
+    warnSpy.mockRestore()
+    expect(registry.get('repo-a')).toBeNull()
+    expect(unregisterPtyMock).toHaveBeenCalledWith('pty-A')
+  })
+
+  it('is a no-op when the registry is empty', async () => {
+    await killAllRunScripts()
+    expect(provider.shutdown).not.toHaveBeenCalled()
+    expect(unregisterPtyMock).not.toHaveBeenCalled()
   })
 })

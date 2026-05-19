@@ -52,6 +52,8 @@ import { geminiHookService } from './gemini/hook-service'
 import { cursorHookService } from './cursor/hook-service'
 import { droidHookService } from './droid/hook-service'
 import { getPtyIdForPaneKey, registerPaneKeyTeardownListener, getLocalPtyProvider } from './ipc/pty'
+import { killAllRunScripts } from './ipc/run-script'
+import { killAllSetupScripts } from './ipc/setup-script'
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
@@ -679,6 +681,13 @@ app.on('before-quit', () => {
   // The window close handler passes isQuitting to the renderer so it skips the
   // child-process confirmation dialog and proceeds directly to buffer capture.
   rateLimits?.stop()
+  // Why: run/setup script PTYs need an explicit teardown here (not in will-quit)
+  // so their run:exited / setup:exited broadcasts reach the renderer while the
+  // BrowserWindow is still alive — by the time killAllPty runs in will-quit
+  // the renderer is likely already torn down. Best-effort; cleanup races are
+  // tolerated and we don't await so quit isn't blocked.
+  void killAllRunScripts()
+  void killAllSetupScripts()
 })
 
 // Why: will-quit fires twice when daemon disconnect needs an async flush.

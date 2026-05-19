@@ -338,6 +338,38 @@ export async function killSetupForWorktree(
   })
 }
 
+// Why: app-quit cleanup. The renderer broadcasts (setup:exited) must fire while
+// BrowserWindow is still alive, which means we have to run before will-quit's
+// killAllPty bulk teardown. provider.shutdown(..., {immediate:true}) is more
+// deterministic than killAllPty's bare proc.kill() — it disposes node-pty
+// listeners and clears the local provider's PTY map atomically.
+//
+// SSH-backed entries route to their stored sshProvider; if the SSH transport
+// is already torn down by quit time, the shutdown call is best-effort and the
+// catch keeps cleanup of the remaining entries moving.
+export async function killAllSetupScripts(): Promise<void> {
+  // Why: snapshot first because provider.shutdown's onExit handler clears
+  // entries from setupPtyByWorktree concurrently — iterating the live map
+  // would skip entries that disappeared mid-loop.
+  const snapshot = [...setupPtyByWorktree.entries()]
+  await Promise.all(
+    snapshot.map(async ([worktreeId, entry]) => {
+      const provider = getProviderForConnection(entry.connectionId)
+      if (provider) {
+        try {
+          await provider.shutdown(entry.ptyId, { immediate: true })
+        } catch (err) {
+          console.warn(
+            `[setup-script] shutdown of ${entry.ptyId} during app-quit failed: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      }
+      unregisterPty(entry.ptyId)
+      setupPtyByWorktree.delete(worktreeId)
+    })
+  )
+}
+
 export function registerSetupScriptIpc(deps: SetupIpcDeps): void {
   ipcMain.removeHandler('setup:start')
   ipcMain.removeHandler('setup:stop')
