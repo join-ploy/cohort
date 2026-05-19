@@ -39,4 +39,40 @@ describe('resolveTemplate', () => {
     expect(() => resolveTemplate('{{x}}', { x: null })).toThrow(TemplateResolutionError)
     expect(() => resolveTemplate('{{x}}', { x: undefined })).toThrow(TemplateResolutionError)
   })
+
+  it('rejects plain objects as non-primitive', () => {
+    expect(() => resolveTemplate('{{x}}', { x: { a: 1 } })).toThrow(TemplateResolutionError)
+    expect(() => resolveTemplate('{{x}}', { x: { a: 1 } })).toThrow(
+      /only string, number, and boolean/
+    )
+  })
+
+  it('rejects arrays as non-primitive', () => {
+    expect(() => resolveTemplate('{{x}}', { x: [1, 2, 3] })).toThrow(TemplateResolutionError)
+    expect(() => resolveTemplate('{{x}}', { x: [1, 2, 3] })).toThrow(/an array/)
+  })
+
+  it('rejects Date instances as non-primitive', () => {
+    expect(() => resolveTemplate('{{x}}', { x: new Date(0) })).toThrow(TemplateResolutionError)
+  })
+
+  it('rejects empty tokens like {{}}', () => {
+    expect(() => resolveTemplate('{{}}', {})).toThrow(TemplateResolutionError)
+    expect(() => resolveTemplate('{{}}', {})).toThrow(/empty token/)
+  })
+
+  it('rejects whitespace-only tokens like {{   }}', () => {
+    expect(() => resolveTemplate('{{   }}', {})).toThrow(TemplateResolutionError)
+    expect(() => resolveTemplate('{{   }}', {})).toThrow(/empty token/)
+  })
+
+  it('TemplateResolutionError carries the failing path', () => {
+    try {
+      resolveTemplate('{{a.b.c}}', { a: { b: {} } })
+      throw new Error('expected throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(TemplateResolutionError)
+      expect((err as TemplateResolutionError).path).toBe('a.b.c')
+    }
+  })
 })
