@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Why: this page owns the automations list/detail
- * orchestration while the form and detail presentation live in sibling files. */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+ * orchestration alongside the delete-confirmation dialog while the chain
+ * editor + detail presentation live in sibling files. */
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarClock, Check, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -23,37 +24,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import RepoDotLabel from '@/components/repo/RepoDotLabel'
-import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import { useRepoMap, useWorktreeMap } from '@/store/selectors'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import type {
-  Automation,
-  AutomationRun,
-  AutomationUpdateInput
-} from '../../../../shared/automations-types'
-import type { Worktree } from '../../../../shared/types'
-import { buildAutomationRrule, parseAutomationRrule } from '../../../../shared/automation-schedules'
+import type { Automation, AutomationRun } from '../../../../shared/automations-types'
 import { formatAutomationDateTimeWithRelative } from './automation-page-parts'
 import { AutomationDetail } from './AutomationDetail'
-import { AutomationEditorDialog, type AutomationDraft } from './AutomationEditorDialog'
+import { ChainEditorModal } from './editor/ChainEditorModal'
 
-const AGENTS = AGENT_CATALOG.map((agent) => agent.id)
-const DEFAULT_TIME = '09:00'
 const AUTOMATIONS_CHANGED_EVENT = 'orca:automations-changed'
-
-function getDefaultWorktree(worktrees: readonly Worktree[]): Worktree | null {
-  return worktrees.find((worktree) => worktree.isMainWorktree) ?? worktrees[0] ?? null
-}
-
-function formatTimeInput(hour: number, minute: number): string {
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-}
 
 export default function AutomationsPage(): React.JSX.Element {
   const repos = useAppStore((s) => s.repos)
-  const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
-  const fetchWorktrees = useAppStore((s) => s.fetchWorktrees)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
@@ -61,70 +42,33 @@ export default function AutomationsPage(): React.JSX.Element {
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const retainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
   const settings = useAppStore((s) => s.settings)
+  // Why: derive from the already-subscribed `settings` so we keep a single
+  // store subscription and avoid creating a new empty-array reference each
+  // render via a fallback inside the selector.
+  const reviewCommands = settings?.reviewCommands ?? []
+  const createPrCommands = settings?.createPrCommands ?? []
   const selectedId = useAppStore((s) => s.selectedAutomationId)
   const setSelectedId = useAppStore((s) => s.setSelectedAutomationId)
   const repoMap = useRepoMap()
   const worktreeMap = useWorktreeMap()
-  const defaultAgent =
-    settings?.defaultTuiAgent && settings.defaultTuiAgent !== 'blank'
-      ? settings.defaultTuiAgent
-      : AGENTS[0]
 
   const [automations, setAutomations] = useState<Automation[]>([])
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editingAutomation, setEditingAutomation] = useState<Automation | null>(null)
   const [relativeNow, setRelativeNow] = useState(Date.now())
-  const [draftAtOpen, setDraftAtOpen] = useState<AutomationDraft | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null)
   const [dontAskDeleteAgain, setDontAskDeleteAgain] = useState(false)
   const editRequestRef = useRef(0)
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null)
-  const [draft, setDraft] = useState<AutomationDraft>({
-    name: '',
-    prompt: '',
-    agentId: defaultAgent,
-    projectId: '',
-    workspaceMode: 'existing',
-    workspaceId: '',
-    baseBranch: '',
-    preset: 'weekdays',
-    time: DEFAULT_TIME,
-    dayOfWeek: '1',
-    missedRunGraceMinutes: '720'
-  })
 
   const selected =
     automations.find((automation) => automation.id === selectedId) ?? automations[0] ?? null
   const selectedRuns = runs.filter((run) => run.automationId === selected?.id)
-  const worktrees = useMemo(
-    () => worktreesByRepo[draft.projectId] ?? [],
-    [draft.projectId, worktreesByRepo]
-  )
   const selectedRepo = selected ? (repoMap.get(selected.projectId) ?? null) : null
   const selectedWorktree =
     selected && selected.workspaceId ? (worktreeMap.get(selected.workspaceId) ?? null) : null
-  const canSaveDraft =
-    editingAutomationId === null ||
-    !draftAtOpen ||
-    JSON.stringify(draft) !== JSON.stringify(draftAtOpen)
-
-  const getDefaultTarget = useCallback(() => {
-    const activeWorktree = activeWorktreeId ? worktreeMap.get(activeWorktreeId) : null
-    const activeRepo = activeWorktree ? (repoMap.get(activeWorktree.repoId) ?? null) : null
-    const fallbackRepo = activeRepo ?? repos[0] ?? null
-    const fallbackWorktrees = fallbackRepo ? (worktreesByRepo[fallbackRepo.id] ?? []) : []
-    // Why: automation-created workspaces can be active; new automations should start from
-    // the repo's stable main worktree unless the user explicitly chooses otherwise.
-    const targetWorktree = getDefaultWorktree(fallbackWorktrees) ?? activeWorktree
-    const targetProjectId = fallbackRepo?.id ?? targetWorktree?.repoId ?? ''
-    return {
-      projectId: targetProjectId,
-      workspaceId: targetWorktree?.id ?? ''
-    }
-  }, [activeWorktreeId, repoMap, repos, worktreeMap, worktreesByRepo])
 
   const refresh = useCallback(async () => {
     setIsLoading(true)
@@ -198,51 +142,10 @@ export default function AutomationsPage(): React.JSX.Element {
     ).then(() => refresh())
   }, [agentStatusByPaneKey, retainedAgentsByPaneKey, refresh, runs])
 
-  useEffect(() => {
-    if (!draft.projectId) {
-      const target = getDefaultTarget()
-      if (!target.projectId) {
-        return
-      }
-      setDraft((current) => ({
-        ...current,
-        projectId: target.projectId,
-        workspaceId: target.workspaceId
-      }))
-    }
-  }, [draft.projectId, getDefaultTarget])
-
-  useEffect(() => {
-    if (!draft.projectId) {
-      return
-    }
-    const available = worktreesByRepo[draft.projectId] ?? []
-    const defaultWorktree = getDefaultWorktree(available)
-    if (!draft.workspaceId && defaultWorktree) {
-      setDraft((current) => ({ ...current, workspaceId: defaultWorktree.id }))
-    }
-  }, [draft.projectId, draft.workspaceId, worktreesByRepo])
-
   const openCreateDialog = (): void => {
     editRequestRef.current += 1
-    const target = getDefaultTarget()
-    setEditingAutomationId(null)
-    const nextDraft: AutomationDraft = {
-      name: '',
-      prompt: '',
-      agentId: defaultAgent,
-      projectId: target.projectId,
-      workspaceMode: 'existing',
-      workspaceId: target.workspaceId,
-      baseBranch: '',
-      preset: 'weekdays',
-      time: DEFAULT_TIME,
-      dayOfWeek: '1',
-      missedRunGraceMinutes: '720'
-    }
-    setDraft(nextDraft)
-    setDraftAtOpen(nextDraft)
-    setCreateOpen(true)
+    setEditingAutomation(null)
+    setEditorOpen(true)
   }
 
   const openEditDialog = async (automation: Automation): Promise<void> => {
@@ -258,148 +161,46 @@ export default function AutomationsPage(): React.JSX.Element {
     if (requestId !== editRequestRef.current) {
       return
     }
-    const schedule = parseAutomationRrule(latest.rrule)
-    setEditingAutomationId(latest.id)
-    const nextDraft: AutomationDraft = {
-      name: latest.name,
-      prompt: latest.prompt,
-      agentId: latest.agentId,
-      projectId: latest.projectId,
-      workspaceMode: latest.workspaceMode,
-      workspaceId: latest.workspaceId ?? '',
-      baseBranch: latest.baseBranch ?? '',
-      preset: schedule.preset,
-      time: formatTimeInput(schedule.hour, schedule.minute),
-      dayOfWeek: String(schedule.dayOfWeek),
-      missedRunGraceMinutes: String(latest.missedRunGraceMinutes)
-    }
-    setDraft(nextDraft)
-    setDraftAtOpen(nextDraft)
-    setCreateOpen(true)
+    setEditingAutomation(latest)
+    setEditorOpen(true)
   }
 
-  const handleProjectChange = useCallback(
-    (projectId: string): void => {
-      const currentWorktrees = worktreesByRepo[projectId] ?? []
-      const currentDefaultWorktree = getDefaultWorktree(currentWorktrees)
-      setDraft((current) => ({
-        ...current,
-        projectId,
-        workspaceId: currentDefaultWorktree?.id ?? '',
-        baseBranch: ''
-      }))
-
-      void fetchWorktrees(projectId).then(() => {
-        const latestWorktrees = useAppStore.getState().worktreesByRepo[projectId] ?? []
-        const latestWorktree = getDefaultWorktree(latestWorktrees)
-        if (!latestWorktree) {
-          return
+  const handleSaveAutomation = useCallback(
+    async (automation: Automation): Promise<void> => {
+      try {
+        // Why: ChainEditorModal hands us a complete Automation including any
+        // round-tripped legacy fields. Decide create vs. update based on
+        // whether the row already exists in the current list — a brand-new
+        // row arrives with an empty id from createBlankAutomation.
+        const existing = automation.id
+          ? (automations.find((entry) => entry.id === automation.id) ?? null)
+          : null
+        const payload = {
+          name: automation.name,
+          prompt: automation.prompt,
+          agentId: automation.agentId,
+          projectId: automation.projectId,
+          workspaceMode: automation.workspaceMode,
+          workspaceId: automation.workspaceId,
+          baseBranch: automation.baseBranch,
+          timezone: automation.timezone,
+          rrule: automation.rrule,
+          dtstart: automation.dtstart,
+          enabled: automation.enabled,
+          missedRunGraceMinutes: automation.missedRunGraceMinutes
         }
-        // Why: project worktrees may not be loaded when the repo picker changes.
-        // Select after fetching so saving does not fail on an empty workspace id.
-        setDraft((current) =>
-          current.projectId === projectId && !current.workspaceId
-            ? { ...current, workspaceId: latestWorktree.id }
-            : current
-        )
-      })
+        await (existing
+          ? window.api.automations.update({ id: existing.id, updates: payload })
+          : window.api.automations.create(payload))
+        await refresh()
+        toast.success(existing ? 'Automation updated.' : 'Automation saved.')
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to save automation.')
+        throw error
+      }
     },
-    [fetchWorktrees, worktreesByRepo]
+    [automations, refresh]
   )
-
-  const saveAutomation = async (): Promise<void> => {
-    const [hour, minute] = draft.time.split(':').map((part) => Number(part))
-    if (
-      !draft.projectId ||
-      (draft.workspaceMode === 'existing' && !draft.workspaceId) ||
-      !draft.prompt.trim()
-    ) {
-      toast.error('Choose a run location and enter a prompt before saving.')
-      return
-    }
-    setIsSaving(true)
-    try {
-      const selectedWorkspaceExists =
-        draft.workspaceMode !== 'existing' ||
-        worktrees.some((worktree) => worktree.id === draft.workspaceId)
-      if (!selectedWorkspaceExists) {
-        toast.error('Choose an available workspace before saving.')
-        return
-      }
-      const now = Date.now()
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-      const rrule = buildAutomationRrule({
-        preset: draft.preset,
-        hour: Number.isFinite(hour) ? hour : 9,
-        minute: Number.isFinite(minute) ? minute : 0,
-        dayOfWeek: Number(draft.dayOfWeek)
-      })
-      const rawMissedRunGraceMinutes = Number(draft.missedRunGraceMinutes)
-      const missedRunGraceMinutes = Number.isFinite(rawMissedRunGraceMinutes)
-        ? Math.max(0, rawMissedRunGraceMinutes)
-        : 720
-      let currentAutomation = editingAutomationId
-        ? (automations.find((automation) => automation.id === editingAutomationId) ?? null)
-        : null
-      if (editingAutomationId) {
-        try {
-          currentAutomation =
-            (await window.api.automations.list()).find(
-              (automation) => automation.id === editingAutomationId
-            ) ?? currentAutomation
-        } catch {
-          // Keep the in-memory automation as a fallback if the refresh fails.
-        }
-      }
-      const updates: AutomationUpdateInput = {
-        name: draft.name,
-        prompt: draft.prompt,
-        agentId: draft.agentId,
-        projectId: draft.projectId,
-        workspaceMode: draft.workspaceMode,
-        workspaceId: draft.workspaceId,
-        baseBranch: draft.baseBranch.trim() || null,
-        timezone,
-        missedRunGraceMinutes
-      }
-      if (!currentAutomation || currentAutomation.rrule !== rrule) {
-        // Why: non-schedule edits should not reset dtstart or move nextRunAt.
-        updates.rrule = rrule
-        updates.dtstart = now
-      }
-      const automation = editingAutomationId
-        ? await window.api.automations.update({
-            id: editingAutomationId,
-            updates
-          })
-        : await window.api.automations.create({
-            name: draft.name,
-            prompt: draft.prompt,
-            agentId: draft.agentId,
-            projectId: draft.projectId,
-            workspaceMode: draft.workspaceMode,
-            workspaceId: draft.workspaceId,
-            baseBranch: draft.baseBranch.trim() || null,
-            timezone,
-            rrule,
-            dtstart: now,
-            missedRunGraceMinutes
-          })
-      setAutomations((current) => {
-        const next = current.filter((entry) => entry.id !== automation.id)
-        return [...next, automation].sort((left, right) => left.name.localeCompare(right.name))
-      })
-      setDraft((current) => ({ ...current, name: '', prompt: '' }))
-      await refresh()
-      setSelectedId(automation.id)
-      setCreateOpen(false)
-      toast.success(editingAutomationId ? 'Automation updated.' : 'Automation saved.')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save automation.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
 
   const toggleAutomation = async (automation: Automation): Promise<void> => {
     await window.api.automations.update({
@@ -522,20 +323,20 @@ export default function AutomationsPage(): React.JSX.Element {
         </div>
       </header>
 
-      <AutomationEditorDialog
-        open={createOpen}
-        isEditing={editingAutomationId !== null}
-        isSaving={isSaving}
-        canSave={canSaveDraft}
+      <ChainEditorModal
+        open={editorOpen}
+        automation={editingAutomation}
         repos={repos}
-        repoMap={repoMap}
-        worktrees={worktrees}
-        settings={settings}
-        draft={draft}
-        onProjectChange={handleProjectChange}
-        onOpenChange={setCreateOpen}
-        onDraftChange={setDraft}
-        onSave={() => void saveAutomation()}
+        reviewCommands={reviewCommands}
+        createPrCommands={createPrCommands}
+        onClose={() => setEditorOpen(false)}
+        onSave={handleSaveAutomation}
+        onRunNow={(id) => {
+          const target = automations.find((entry) => entry.id === id)
+          if (target) {
+            void runNow(target)
+          }
+        }}
       />
 
       <Dialog

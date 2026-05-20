@@ -8,7 +8,7 @@ import type {
   StepConfig,
   StepKind
 } from '../../../../../shared/automations-types'
-import type { SidebarPromptCommand } from '../../../../../shared/types'
+import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
   type ChainDraft,
   generateDefaultStepId,
@@ -31,6 +31,7 @@ import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
 export type ChainEditorModalProps = {
   open: boolean
   automation: Automation | null
+  repos: Repo[]
   reviewCommands: SidebarPromptCommand[]
   createPrCommands: SidebarPromptCommand[]
   onClose: () => void
@@ -55,7 +56,21 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [saving, setSaving] = React.useState(false)
   const [addOpen, setAddOpen] = React.useState(false)
 
-  const errors = React.useMemo<ChainEditorError[]>(() => computeAllErrors(draft), [draft])
+  const errors = React.useMemo<ChainEditorError[]>(() => {
+    const base = computeAllErrors(draft)
+    if (!draft.projectId) {
+      // Why: project is required to dispatch — surface the missing selection as
+      // a top-level error so Save is disabled until the user picks a project.
+      base.push({
+        path: 'projectId',
+        code: 'unknown-path',
+        message: 'Project is required',
+        stepId: '',
+        field: 'projectId'
+      })
+    }
+    return base
+  }, [draft])
 
   const updateDraft = React.useCallback((patch: Partial<ChainDraft>) => {
     setDraft((current) => ({ ...current, ...patch }))
@@ -183,9 +198,12 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     >
       <ChainEditorHeader
         name={draft.name}
+        projectId={draft.projectId}
+        repos={props.repos}
         enabled={draft.enabled}
         canRunNow={canRunNow}
         onNameChange={(name) => updateDraft({ name })}
+        onProjectChange={(projectId) => updateDraft({ projectId })}
         onEnabledChange={(enabled) => updateDraft({ enabled })}
         onRunNow={() => {
           if (props.automation && props.onRunNow) {
@@ -237,9 +255,12 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
 
 type ChainEditorHeaderProps = {
   name: string
+  projectId: string
+  repos: Repo[]
   enabled: boolean
   canRunNow: boolean
   onNameChange: (name: string) => void
+  onProjectChange: (projectId: string) => void
   onEnabledChange: (enabled: boolean) => void
   onRunNow: () => void
   onClose: () => void
@@ -256,6 +277,19 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
         placeholder="Untitled automation"
         className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-base font-semibold outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
       />
+      <select
+        aria-label="Project"
+        value={props.projectId}
+        onChange={(e) => props.onProjectChange(e.target.value)}
+        className="min-w-[10rem] rounded-md border border-input bg-background px-2 py-2 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
+      >
+        <option value="">Pick a project…</option>
+        {props.repos.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.displayName}
+          </option>
+        ))}
+      </select>
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           aria-label="Enabled"

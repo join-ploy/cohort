@@ -63,6 +63,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={false}
         automation={null}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -77,6 +78,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={null}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -93,6 +95,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation()}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -107,6 +110,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation()}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -123,6 +127,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation()}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -137,6 +142,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation({ enabled: true })}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -151,6 +157,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={null}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -168,6 +175,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation()}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -182,6 +190,7 @@ describe('ChainEditorModal', () => {
       <ChainEditorModal
         open={true}
         automation={makeAutomation()}
+        repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
         onClose={vi.fn()}
@@ -189,5 +198,57 @@ describe('ChainEditorModal', () => {
       />
     )
     expect(markup).toMatch(/aria-label=["']Add step["']/)
+  })
+
+  it('shows a Project select with all repos', () => {
+    const repos = [
+      {
+        id: 'proj-1',
+        path: '/tmp/proj-1',
+        displayName: 'Project One',
+        badgeColor: '#abc',
+        addedAt: 0
+      },
+      {
+        id: 'proj-2',
+        path: '/tmp/proj-2',
+        displayName: 'Project Two',
+        badgeColor: '#def',
+        addedAt: 0
+      }
+    ]
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={null}
+        repos={repos}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toMatch(/aria-label=["']Project["']/)
+    expect(markup).toContain('Project One')
+    expect(markup).toContain('Project Two')
+  })
+
+  it('disables save when projectId is empty (new automation)', () => {
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={null}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    // Save button is rendered but disabled because projectId is empty and the
+    // form is also pristine. The footer issue count surfaces the missing
+    // project as one issue.
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Save\s*<\/button>/)
+    expect(markup).toMatch(/1 issue/i)
   })
 })
