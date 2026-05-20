@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import type { PRInfo, Repo, Worktree } from '../../../../shared/types'
-import { runWorktreeDeleteWithToast } from '../sidebar/delete-worktree-flow'
+import { runWorktreeDeleteWithToast } from '../sidebar/archive-worktree-flow'
 
 const MERGE_METHODS = ['squash', 'merge', 'rebase'] as const
 

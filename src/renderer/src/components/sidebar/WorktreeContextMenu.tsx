@@ -25,7 +25,7 @@ import { useRepoById, useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import type { Worktree } from '../../../../shared/types'
 import { isFolderRepo } from '../../../../shared/repo-kind'
-import { runWorktreeBatchDelete, runWorktreeDelete } from './delete-worktree-flow'
+import { runWorktreeBatchDelete, runWorktreeDelete } from './archive-worktree-flow'
 import { runSleepWorktrees } from './sleep-worktree-flow'
 
 type Props = {

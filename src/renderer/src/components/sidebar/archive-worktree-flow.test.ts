@@ -33,7 +33,7 @@ vi.mock('sonner', () => ({
   }
 }))
 
-import { runWorktreeBatchDelete } from './delete-worktree-flow'
+import { runWorktreeBatchDelete } from './archive-worktree-flow'
 
 function setWorktrees(
   worktrees: { id: string; displayName?: string; isMainWorktree?: boolean }[]
