@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import type { Worktree } from '../../../../shared/types'
 import { ARCHIVE_TTL_MS } from '../../../../shared/archive-constants'
 
@@ -32,15 +33,16 @@ vi.mock('sonner', () => ({
 import { ArchivedSection } from './ArchivedSection'
 
 function makeWorktree(overrides: Partial<Worktree> & { id: string }): Worktree {
+  const { id, ...rest } = overrides
   return {
-    id: overrides.id,
+    id,
     repoId: 'repo1',
-    path: `/tmp/${overrides.id}`,
+    path: `/tmp/${id}`,
     head: 'abc123',
     branch: 'refs/heads/feature',
     isBare: false,
     isMainWorktree: false,
-    displayName: overrides.id,
+    displayName: id,
     workspaceName: '',
     comment: '',
     linkedIssue: null,
@@ -52,7 +54,7 @@ function makeWorktree(overrides: Partial<Worktree> & { id: string }): Worktree {
     isPinned: false,
     sortOrder: 0,
     lastActivityAt: 0,
-    ...overrides
+    ...rest
   }
 }
 
@@ -60,35 +62,49 @@ function setArchived(worktrees: Worktree[]): void {
   mocks.state.worktreesByRepo = worktrees.length === 0 ? {} : { repo1: worktrees }
 }
 
+// Why: Tooltip requires a provider, and rendering one inline keeps each test
+// hermetic without bleeding into a global setup file.
+function renderSection(): ReturnType<typeof render> {
+  return render(
+    <TooltipProvider delayDuration={0}>
+      <ArchivedSection />
+    </TooltipProvider>
+  )
+}
+
 describe('<ArchivedSection />', () => {
   beforeEach(() => {
+    // Why: vitest config doesn't include @testing-library/jest-dom (no auto
+    // cleanup); without an explicit unmount, each test inherits the previous
+    // test's DOM and getByRole('button', { name: /archived/i }) finds two.
+    cleanup()
     setArchived([])
     mocks.state.restoreWorktree.mockClear().mockResolvedValue(undefined)
     mocks.state.openModal.mockClear()
   })
 
   it('renders nothing when there are no archived worktrees', () => {
-    const { container } = render(<ArchivedSection />)
-    expect(container).toBeEmptyDOMElement()
+    const { container } = renderSection()
+    expect(container.childElementCount).toBe(0)
   })
 
   it('lists archived worktrees with days remaining', async () => {
     const archivedAt = Date.now() - 3 * 24 * 60 * 60 * 1000
     setArchived([makeWorktree({ id: 'wt-a', displayName: 'My WT', archivedAt })])
 
-    render(<ArchivedSection />)
+    renderSection()
 
     // Why: the disclosure is collapsed by default; expand it to assert on row
     // contents.
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
 
-    expect(screen.getByText('My WT')).toBeInTheDocument()
-    expect(screen.getByText(/27 days left/i)).toBeInTheDocument()
+    expect(screen.getByText('My WT')).toBeTruthy()
+    expect(screen.getByText(/27 days left/i)).toBeTruthy()
   })
 
   it('Restore button calls restoreWorktree with the worktree id', async () => {
     setArchived([makeWorktree({ id: 'wt-a', displayName: 'My WT' })])
-    render(<ArchivedSection />)
+    renderSection()
 
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
     await userEvent.click(screen.getByRole('button', { name: /restore/i }))
@@ -98,7 +114,7 @@ describe('<ArchivedSection />', () => {
 
   it('Delete now opens the delete-worktree modal for that worktree', async () => {
     setArchived([makeWorktree({ id: 'wt-a', displayName: 'My WT' })])
-    render(<ArchivedSection />)
+    renderSection()
 
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
     await userEvent.click(screen.getByRole('button', { name: /delete now/i }))
@@ -117,11 +133,11 @@ describe('<ArchivedSection />', () => {
         archiveCleanupError: 'uncommitted changes'
       })
     ])
-    render(<ArchivedSection />)
+    renderSection()
 
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
 
-    expect(screen.getByText(/cleanup blocked/i)).toBeInTheDocument()
+    expect(screen.getByText(/cleanup blocked/i)).toBeTruthy()
     // Days-left text is suppressed when the badge is visible.
     expect(screen.queryByText(/days left/i)).toBeNull()
   })
@@ -132,7 +148,7 @@ describe('<ArchivedSection />', () => {
       makeWorktree({ id: 'older', displayName: 'Older WT', archivedAt: now - 5000 }),
       makeWorktree({ id: 'newer', displayName: 'Newer WT', archivedAt: now - 1000 })
     ])
-    render(<ArchivedSection />)
+    renderSection()
 
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
 

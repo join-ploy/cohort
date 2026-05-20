@@ -12,6 +12,7 @@ import NonGitFolderDialog from './NonGitFolderDialog'
 import RemoveFolderDialog from './RemoveFolderDialog'
 import AddRepoDialog from './AddRepoDialog'
 import OrcaYamlTrustDialog from './OrcaYamlTrustDialog'
+import { ArchivedSection } from './ArchivedSection'
 
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
@@ -55,6 +56,11 @@ function Sidebar(): React.JSX.Element {
         <SidebarHeader />
 
         <WorktreeList />
+
+        {/* Why: sits between the worktree list and the bottom toolbar so it
+            self-hides (returns null) when the list is empty without leaving a
+            gap above the toolbar. */}
+        <ArchivedSection />
 
         {/* Fixed bottom toolbar */}
         <SidebarToolbar />
