@@ -160,6 +160,7 @@ vi.mock('./pty', () => ({
 }))
 
 import { registerWorktreeHandlers } from './worktrees'
+import type { WorktreeMeta } from '../../shared/types'
 
 type HandlerMap = Record<string, (_event: unknown, args: unknown) => unknown>
 
@@ -1864,5 +1865,80 @@ describe('registerWorktreeHandlers', () => {
     expect(store.setWorktreeMeta).not.toHaveBeenCalled()
     expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
     expect(runSetupMock).not.toHaveBeenCalled()
+  })
+
+  describe('worktrees:archive + worktrees:restore', () => {
+    // Why: archive/restore flip persisted meta, so the test mock store needs
+    // to actually accumulate state between calls instead of returning fixed
+    // values like the create-flow tests do.
+    function wireInMemoryMeta(): Map<string, Partial<WorktreeMeta>> {
+      const metaById = new Map<string, Partial<WorktreeMeta>>()
+      store.getWorktreeMeta.mockImplementation((id: string) => metaById.get(id))
+      store.setWorktreeMeta.mockImplementation((id: string, updates: Partial<WorktreeMeta>) => {
+        const merged = { ...metaById.get(id), ...updates }
+        metaById.set(id, merged)
+        return merged
+      })
+      return metaById
+    }
+
+    it('archive sets isArchived=true, archivedAt=now, and clears archiveCleanupError', async () => {
+      const metaById = wireInMemoryMeta()
+      const worktreeId = 'repo-1::/workspace/feature-wt'
+      metaById.set(worktreeId, { archiveCleanupError: 'previous error' })
+
+      const before = Date.now()
+      await handlers['worktrees:archive'](null, { worktreeId })
+      const after = Date.now()
+
+      const meta = metaById.get(worktreeId)
+      expect(meta?.isArchived).toBe(true)
+      expect(meta?.archivedAt).toBeGreaterThanOrEqual(before)
+      expect(meta?.archivedAt).toBeLessThanOrEqual(after)
+      expect(meta?.archiveCleanupError).toBeNull()
+      expect(mainWindow.webContents.send).toHaveBeenCalledWith('worktrees:changed', {
+        repoId: 'repo-1'
+      })
+    })
+
+    it('restore clears isArchived, archivedAt, and archiveCleanupError', async () => {
+      const metaById = wireInMemoryMeta()
+      const worktreeId = 'repo-1::/workspace/feature-wt'
+      metaById.set(worktreeId, {
+        isArchived: true,
+        archivedAt: 123,
+        archiveCleanupError: 'boom'
+      })
+
+      await handlers['worktrees:restore'](null, { worktreeId })
+
+      const meta = metaById.get(worktreeId)
+      expect(meta?.isArchived).toBe(false)
+      expect(meta?.archivedAt).toBeNull()
+      expect(meta?.archiveCleanupError).toBeNull()
+      expect(mainWindow.webContents.send).toHaveBeenCalledWith('worktrees:changed', {
+        repoId: 'repo-1'
+      })
+    })
+
+    it('archive refuses to archive the main worktree', async () => {
+      wireInMemoryMeta()
+      // Why: `git worktree list` always emits the main worktree at the repo
+      // root, so the worktreeId for the main worktree is `${repoId}::${repo.path}`.
+      const mainId = 'repo-1::/workspace/repo'
+      listWorktreesMock.mockResolvedValue([
+        {
+          path: '/workspace/repo',
+          head: 'abc123',
+          branch: 'main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+
+      await expect(handlers['worktrees:archive'](null, { worktreeId: mainId })).rejects.toThrow(
+        /main worktree/i
+      )
+    })
   })
 })
