@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronDown, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +20,7 @@ function daysRemaining(archivedAt: number, now: number): number {
 }
 
 export function ArchivedSection(): React.JSX.Element | null {
-  const archived = useAppStore((s) => getArchivedWorktrees(s))
+  const archived = useAppStore(useShallow(getArchivedWorktrees))
   const restoreWorktree = useAppStore((s) => s.restoreWorktree)
   const openModal = useAppStore((s) => s.openModal)
   const [open, setOpen] = useState(false)
@@ -82,7 +83,6 @@ export function ArchivedSection(): React.JSX.Element | null {
                         <Badge
                           variant="destructive"
                           className="w-fit text-[10px] uppercase tracking-wider"
-                          title={wt.archiveCleanupError ?? undefined}
                         >
                           Cleanup blocked
                         </Badge>
