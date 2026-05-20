@@ -12,6 +12,7 @@ import type { SetupScriptEntry } from '../setup-script/registry'
 import type { PtyExitEntry } from '../pty/exit-registry'
 import { ChainExecutor } from './chain-executor'
 import { openPromptPane } from './open-prompt-pane'
+import { sendPromptToPane } from './send-prompt-to-pane'
 import { openCommandPane } from './open-command-pane'
 import { RunPromptRunner } from './runners/run-prompt-runner'
 import { WaitForSetupRunner } from './runners/wait-for-setup-runner'
@@ -93,6 +94,25 @@ export class AutomationService {
           throw new Error('AutomationService missing getIpcMain wiring.')
         }
         return openPromptPane(params, {
+          webContents,
+          ipc: this.getIpcMain(),
+          requestId: randomUUID()
+        })
+      },
+      // Why: closure mirrors openPromptPane — resolve renderer/ipc lazily so
+      // a reload swap is picked up on the next tick. A destroyed/null
+      // webContents throws a plain Error (transient) which the runner lets
+      // bubble for retry, while deterministic renderer rejections come back
+      // as SendPromptToPaneError and fail-fast inside the runner.
+      sendPromptToPane: async (params) => {
+        const webContents = this.getWebContents()
+        if (!webContents || webContents.isDestroyed()) {
+          throw new Error('No renderer available to send prompt to pane.')
+        }
+        if (!this.getIpcMain) {
+          throw new Error('AutomationService missing getIpcMain wiring.')
+        }
+        return sendPromptToPane(params, {
           webContents,
           ipc: this.getIpcMain(),
           requestId: randomUUID()
