@@ -84,6 +84,8 @@ export type WorktreeSlice = {
     worktreeId: string,
     force?: boolean
   ) => Promise<{ ok: true } | { ok: false; error: string }>
+  archiveWorktree: (worktreeId: string) => Promise<void>
+  restoreWorktree: (worktreeId: string) => Promise<void>
   clearWorktreeDeleteState: (worktreeId: string) => void
   updateWorktreeMeta: (worktreeId: string, updates: Partial<WorktreeMeta>) => Promise<void>
   markWorktreeUnread: (worktreeId: string) => void
