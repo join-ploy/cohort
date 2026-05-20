@@ -26,10 +26,11 @@ import { cn } from '@/lib/utils'
 import RepoDotLabel from '@/components/repo/RepoDotLabel'
 import { useRepoMap, useWorktreeMap } from '@/store/selectors'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import type { Automation, AutomationRun } from '../../../../shared/automations-types'
+import type { Automation, AutomationRun, RunNowPayload } from '../../../../shared/automations-types'
 import { formatAutomationDateTimeWithRelative } from './automation-page-parts'
 import { AutomationDetail } from './AutomationDetail'
 import { ChainEditorModal } from './editor/ChainEditorModal'
+import { RunNowConfirmModal } from './editor/RunNowConfirmModal'
 
 const AUTOMATIONS_CHANGED_EVENT = 'orca:automations-changed'
 
@@ -60,6 +61,7 @@ export default function AutomationsPage(): React.JSX.Element {
   const [relativeNow, setRelativeNow] = useState(Date.now())
   const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null)
   const [dontAskDeleteAgain, setDontAskDeleteAgain] = useState(false)
+  const [confirmRunFor, setConfirmRunFor] = useState<Automation | null>(null)
   const editRequestRef = useRef(0)
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -259,10 +261,22 @@ export default function AutomationsPage(): React.JSX.Element {
     await deleteAutomation(target)
   }
 
-  const runNow = async (automation: Automation): Promise<void> => {
-    await window.api.automations.runNow({ id: automation.id })
+  const runNow = async (automation: Automation, payload?: RunNowPayload): Promise<void> => {
+    await window.api.automations.runNow({ id: automation.id, payload })
     await refresh()
     toast.message('Automation run queued.')
+  }
+
+  // Why: when the automation's trigger requires extra inputs we route through
+  // the confirm modal; otherwise dispatch directly.
+  const requestRunNow = (automation: Automation): void => {
+    const needsPayload =
+      !!automation.trigger?.acceptsLinearTicket || !!automation.trigger?.acceptsWorktreeSelection
+    if (needsPayload) {
+      setConfirmRunFor(automation)
+    } else {
+      void runNow(automation)
+    }
   }
 
   const openRunWorkspace = (run: AutomationRun): void => {
@@ -331,13 +345,32 @@ export default function AutomationsPage(): React.JSX.Element {
         createPrCommands={createPrCommands}
         onClose={() => setEditorOpen(false)}
         onSave={handleSaveAutomation}
-        onRunNow={(id) => {
+        onRunNow={(id, payload) => {
           const target = automations.find((entry) => entry.id === id)
-          if (target) {
-            void runNow(target)
+          if (!target) {
+            return
+          }
+          // Why: ChainEditorModal owns its own RunNowConfirmModal — if a
+          // payload arrived, the operator has already confirmed and we should
+          // dispatch directly without re-prompting.
+          if (payload) {
+            void runNow(target, payload)
+          } else {
+            requestRunNow(target)
           }
         }}
       />
+
+      {confirmRunFor ? (
+        <RunNowConfirmModal
+          open
+          automation={confirmRunFor}
+          onClose={() => setConfirmRunFor(null)}
+          onRun={async (payload) => {
+            await runNow(confirmRunFor, payload)
+          }}
+        />
+      ) : null}
 
       <Dialog
         open={deleteTarget !== null}
@@ -464,7 +497,7 @@ export default function AutomationsPage(): React.JSX.Element {
                     </button>
                   </ContextMenuTrigger>
                   <ContextMenuContent className="w-48">
-                    <ContextMenuItem onSelect={() => void runNow(automation)}>
+                    <ContextMenuItem onSelect={() => requestRunNow(automation)}>
                       <Play className="size-3.5" />
                       Run Now
                     </ContextMenuItem>
@@ -511,7 +544,7 @@ export default function AutomationsPage(): React.JSX.Element {
             }
             worktreeMap={worktreeMap}
             now={relativeNow}
-            onRunNow={(automation) => void runNow(automation)}
+            onRunNow={(automation) => requestRunNow(automation)}
             onOpenRunWorkspace={openRunWorkspace}
             onEdit={(automation) => void openEditDialog(automation)}
             onToggle={(automation) => void toggleAutomation(automation)}

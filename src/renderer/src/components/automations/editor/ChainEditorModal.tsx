@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
+  RunNowPayload,
   Step,
   StepConfig,
   StepKind,
@@ -28,6 +29,7 @@ import {
 } from './chain-editor-modal-state'
 import { AvailableVariablesPanel } from './AvailableVariablesPanel'
 import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
+import { RunNowConfirmModal } from './RunNowConfirmModal'
 import { TriggerPill } from './TriggerPill'
 
 export type ChainEditorModalProps = {
@@ -38,7 +40,7 @@ export type ChainEditorModalProps = {
   createPrCommands: SidebarPromptCommand[]
   onClose: () => void
   onSave: (automation: Automation) => Promise<void>
-  onRunNow?: (automationId: string) => void
+  onRunNow?: (automationId: string, payload?: RunNowPayload) => void | Promise<void>
 }
 
 export function ChainEditorModal(props: ChainEditorModalProps): React.JSX.Element | null {
@@ -57,6 +59,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [dirty, setDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [addOpen, setAddOpen] = React.useState(false)
+  const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
     const base = computeAllErrors(draft)
@@ -210,12 +213,33 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         onEnabledChange={(enabled) => updateDraft({ enabled })}
         onTriggerChange={(trigger) => updateDraft({ trigger })}
         onRunNow={() => {
-          if (props.automation && props.onRunNow) {
-            props.onRunNow(props.automation.id)
+          if (!props.automation || !props.onRunNow) {
+            return
+          }
+          // Why: when the trigger requires extra inputs (Linear ticket or
+          // worktree), defer to the confirm modal so the operator can supply
+          // them. Otherwise dispatch directly.
+          const needsPayload =
+            !!draft.trigger?.acceptsLinearTicket || !!draft.trigger?.acceptsWorktreeSelection
+          if (needsPayload) {
+            setRunConfirmOpen(true)
+          } else {
+            void props.onRunNow(props.automation.id)
           }
         }}
         onClose={handleCancel}
       />
+
+      {props.automation && props.onRunNow ? (
+        <RunNowConfirmModal
+          open={runConfirmOpen}
+          automation={props.automation}
+          onClose={() => setRunConfirmOpen(false)}
+          onRun={async (payload) => {
+            await props.onRunNow?.(props.automation!.id, payload)
+          }}
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
