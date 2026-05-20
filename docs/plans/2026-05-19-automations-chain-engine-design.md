@@ -350,3 +350,32 @@ Carried into Phase 3+ polish:
 - `baseBranch ?? 'main'` migration default doesn't detect repos on `master` or other defaults. Acceptable for migration; users can edit post-migration.
 - Tracker cleanup deferred — all four runners hold per-(runId, stepId) tracker entries that never release. Pick up when run-level lifecycle hooks land.
 - `runNow` chain-shape seed previously omitted `projectId`; fixed in P2.5 commit `e8cf4964`. Mention as a Phase 1→2 hand-off correction.
+
+- 2026-05-20: Phase 5+7 (chain editor + variable picker) shipped on branch `bright_robin`. Multi-step chains can now be composed in-app.
+
+### Phase 5+7 deliverables
+
+Editor commits (`4b27e6f3..HEAD`):
+
+- Design + plan (`4b27e6f3`, `8b6ec55c`)
+- Output schemas + manual trigger schema (`dbedf51f`, `7ea0fb81`)
+- Dry-run template validator (`d1e70c88`)
+- Chain editor draft state helpers (`395aa373`)
+- TemplateInput with live validation (`82dbe2bd`)
+- VariablePickerPopover + integration (`c5bde65c`)
+- AvailableVariablesPanel + shared variable-tree util (`2d1619f7`)
+- StepCardChrome (`e03a3a61`)
+- create-worktree + wait-for-setup step card bodies (`2b00060e`)
+- run-prompt + run-command step card bodies (`7cebe4dc`)
+- ChainEditorModal composing the editor shell (`82bc0638`)
+- Mount ChainEditorModal + delete legacy editor (`c9c90e92`)
+- End-to-end editor test (`401ab468`)
+
+### Phase 5+7 known follow-ups
+
+- Caret-staleness bug: typing additional characters after `{{` but before selecting a variable causes insertion to land at a stale caret position. Mitigation: auto-close picker on further keystrokes, or update caretAt on every change while picker open. Polish.
+- Variable picker uses `unknown-step` code for projectId validation errors (TemplateErrorCode is a closed union). If the editor UI needs distinct rendering for project errors, widen the union.
+- Modal is a fixed-position div instead of shadcn Dialog (Portal incompatibility with renderToStaticMarkup tests). Trades focus-trap/Esc-to-close for testability. Revisit if accessibility audit demands.
+- Lost UI surfaces from legacy editor: schedule preset/time/dow pickers, missed-run grace, run-location toggle. New rows get default values until Phase 3 (schedule trigger UI) lands. Existing rows preserve dormant legacy fields.
+- Drag-to-reorder UI not wired to @dnd-kit yet (deps were installed in package.json but step cards don't consume them). Polish.
+- No worktree pre-fetching at the editor level (worktree refs are templates inside step configs). If/when worktree picker UX lands, may need to re-introduce.
