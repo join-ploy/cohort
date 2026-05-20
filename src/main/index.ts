@@ -584,14 +584,21 @@ app.whenReady().then(async () => {
       if (!window || window.isDestroyed()) {
         return
       }
+      // Why: skipArchive=true so we never auto-execute the repo's orca.yaml
+      // `archive` hook from unsupervised cleanup. The user wasn't around to
+      // confirm the hook-trust prompt 30 days earlier, and a collaborator
+      // could have added a malicious script in the interim.
       await runWorktreeRemoval(
-        { worktreeId, force: false },
+        { worktreeId, force: false, skipArchive: true },
         { store: storeRef, runtime: runtimeRef, mainWindow: window }
       )
     },
     ...(archiveTtlOverride !== undefined ? { ttlMs: archiveTtlOverride } : {})
   })
-  archiveCleanup.start()
+  // Why: archiveCleanup.start() is deferred until after openMainWindow() runs
+  // (below) so the immediate runOnce() inside start() sees a live mainWindow.
+  // Starting here would short-circuit every candidate via the runRemoval
+  // null-window guard, defeating the "user quit Orca for 30+ days" tick.
   // Why: E2E specs trigger the cleanup tick on demand to assert TTL behaviour
   // without waiting for the hourly setInterval. Guarded by ORCA_E2E so the
   // handler is never registered in shipping builds.
@@ -767,6 +774,12 @@ app.whenReady().then(async () => {
       console.error('[runtime] Failed to start local RPC transport:', error)
     })
   ])
+
+  // Why: start archive cleanup now that mainWindow is assigned — the
+  // immediate runOnce() inside start() needs a live window so the
+  // 30-day-quit cleanup tick actually fires on launch (not waiting an
+  // extra hour for the next setInterval pass).
+  archiveCleanup.start()
 
   // Why: the macOS notification permission dialog must fire after the window
   // is visible and focused. If it fires before the window exists, the system
