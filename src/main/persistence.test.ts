@@ -536,6 +536,22 @@ describe('Store', () => {
     expect(reloaded.getWorktreeMeta('r1::/wt1')!.workspaceName).toBe('wise_panther')
   })
 
+  it('persists archivedAt and archiveCleanupError across save/load', async () => {
+    const store = await createStore()
+    store.setWorktreeMeta('r1::/wt1', {
+      isArchived: true,
+      archivedAt: 1_700_000_000_000,
+      archiveCleanupError: 'has uncommitted changes'
+    })
+    store.flush()
+
+    const reloaded = await createStore()
+    const meta = reloaded.getWorktreeMeta('r1::/wt1')
+    expect(meta?.isArchived).toBe(true)
+    expect(meta?.archivedAt).toBe(1_700_000_000_000)
+    expect(meta?.archiveCleanupError).toBe('has uncommitted changes')
+  })
+
   it('backfills workspaceName on load when missing', async () => {
     writeDataFile({
       worktreeMeta: {
