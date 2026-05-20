@@ -1,11 +1,13 @@
 import { describe, it, expect, expectTypeOf } from 'vitest'
 import {
   getOutputSchemaForKind,
+  LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
   CREATE_WORKTREE_OUTPUT_SCHEMA,
   WAIT_FOR_SETUP_OUTPUT_SCHEMA,
   RUN_PROMPT_OUTPUT_SCHEMA,
   RUN_COMMAND_OUTPUT_SCHEMA,
+  WORKTREE_TRIGGER_OVERLAY,
   type SchemaLeafType
 } from './automation-step-schemas'
 
@@ -36,11 +38,33 @@ describe('automation step schemas', () => {
     })
   })
 
-  it('run-command produces paneKey + exitCode + durationMs', () => {
+  it('run-command schema now includes outputTail', () => {
     expect(RUN_COMMAND_OUTPUT_SCHEMA).toEqual({
       paneKey: 'string',
       exitCode: 'number',
-      durationMs: 'number'
+      durationMs: 'number',
+      outputTail: 'string'
+    })
+  })
+
+  it('LINEAR_TICKET_TRIGGER_OVERLAY is nested under linear.issue', () => {
+    expect(LINEAR_TICKET_TRIGGER_OVERLAY.linear.issue).toMatchObject({
+      id: 'string',
+      identifier: 'string',
+      title: 'string',
+      description: 'string',
+      url: 'string',
+      assigneeEmail: 'string',
+      stateName: 'string',
+      priority: 'number'
+    })
+  })
+
+  it('WORKTREE_TRIGGER_OVERLAY shape', () => {
+    expect(WORKTREE_TRIGGER_OVERLAY).toEqual({
+      worktreeId: 'string',
+      worktreeBranch: 'string',
+      worktreePath: 'string'
     })
   })
 

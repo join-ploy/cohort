@@ -1,8 +1,14 @@
-import type { OutputSchema } from '../../../shared/automation-step-schemas'
+import type {
+  NestedSchema,
+  OutputSchema,
+  SchemaLeafType
+} from '../../../shared/automation-step-schemas'
 
 export type AvailableVariables = {
   automation: OutputSchema
-  trigger: OutputSchema
+  // Trigger paths can nest (e.g. `trigger.linear.issue.title`) so this is the
+  // recursive shape; step outputs stay flat.
+  trigger: NestedSchema
   steps: Record<string, OutputSchema>
 }
 
@@ -52,7 +58,7 @@ function validatePath(path: string, available: AvailableVariables): TemplateErro
     return walkLeaf(parts.slice(1), available.automation, path)
   }
   if (head === 'trigger') {
-    return walkLeaf(parts.slice(1), available.trigger, path)
+    return walkNested(parts.slice(1), available.trigger, path)
   }
   if (head === 'steps') {
     if (parts.length < 2) {
@@ -93,4 +99,41 @@ function walkLeaf(
     }
   }
   return null
+}
+
+// Recursive variant of walkLeaf used only by the trigger namespace, which
+// supports nested shapes like `trigger.linear.issue.title`.
+function walkNested(
+  parts: string[],
+  schema: NestedSchema | SchemaLeafType,
+  originalPath: string
+): TemplateError | null {
+  if (typeof schema === 'string') {
+    // Hit a leaf — any remaining segments mean the template traverses past it.
+    if (parts.length !== 0) {
+      return {
+        path: originalPath,
+        code: 'unknown-path',
+        message: `${originalPath} traverses past a leaf.`
+      }
+    }
+    return null
+  }
+  if (parts.length === 0) {
+    return {
+      path: originalPath,
+      code: 'unknown-path',
+      message: `${originalPath} is not a leaf path.`
+    }
+  }
+  const key = parts[0]
+  const next = schema[key]
+  if (next === undefined) {
+    return {
+      path: originalPath,
+      code: 'unknown-path',
+      message: `${originalPath} is not a known field.`
+    }
+  }
+  return walkNested(parts.slice(1), next, originalPath)
 }

@@ -6,6 +6,7 @@ import type {
   Step,
   StepConfig,
   StepKind,
+  TriggerConfig,
   WaitForSetupConfig
 } from '../../../../../shared/automations-types'
 import {
@@ -20,7 +21,10 @@ import {
 } from '../../../lib/template-dry-run'
 import {
   getOutputSchemaForKind,
-  MANUAL_TRIGGER_SCHEMA
+  LINEAR_TICKET_TRIGGER_OVERLAY,
+  MANUAL_TRIGGER_SCHEMA,
+  WORKTREE_TRIGGER_OVERLAY,
+  type NestedSchema
 } from '../../../../../shared/automation-step-schemas'
 
 export type ChainEditorError = TemplateError & {
@@ -63,6 +67,20 @@ export const LEGACY_AUTOMATION_FIELDS = [
   'executionTargetId'
 ] as const
 
+// Compose the trigger namespace shape by layering optional overlays onto the
+// MANUAL_TRIGGER_SCHEMA base. Each overlay corresponds to a trigger-time input
+// the user opted into on the draft.
+export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
+  const base: NestedSchema = { ...MANUAL_TRIGGER_SCHEMA }
+  if (trigger.acceptsLinearTicket) {
+    base.linear = LINEAR_TICKET_TRIGGER_OVERLAY.linear
+  }
+  if (trigger.acceptsWorktreeSelection) {
+    Object.assign(base, WORKTREE_TRIGGER_OVERLAY)
+  }
+  return base
+}
+
 /**
  * Builds the AvailableVariables snapshot for the step at `stepIndex`. Only
  * steps strictly before `stepIndex` are visible — a step cannot reference
@@ -79,7 +97,7 @@ export function getAvailableVariablesAtStep(
   }
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
-    trigger: MANUAL_TRIGGER_SCHEMA,
+    trigger: buildTriggerSchema(draft.trigger),
     steps
   }
 }

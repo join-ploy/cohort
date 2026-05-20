@@ -1,3 +1,4 @@
+import type { NestedSchema, SchemaLeafType } from '../../../shared/automation-step-schemas'
 import type { AvailableVariables } from './template-dry-run'
 
 // A single leaf in the variable tree, flattened to a dotted path.
@@ -10,19 +11,19 @@ export type PathEntry = {
   // Full dotted path, e.g. 'automation.projectId' or 'steps.cw1.worktreeId'.
   path: string
   leaf: string
-  type: 'string' | 'number' | 'boolean'
+  type: SchemaLeafType
 }
 
 // Flatten the namespaced schema into a list of dotted paths. Order matches the
 // shape of the input: automation -> trigger -> steps (in step-id iteration order).
+// Trigger can nest (e.g. `trigger.linear.issue.*`) so we walk it recursively;
+// automation + steps remain flat.
 export function buildPaths(available: AvailableVariables): PathEntry[] {
   const out: PathEntry[] = []
   for (const [key, type] of Object.entries(available.automation)) {
     out.push({ namespace: 'automation', path: `automation.${key}`, leaf: key, type })
   }
-  for (const [key, type] of Object.entries(available.trigger)) {
-    out.push({ namespace: 'trigger', path: `trigger.${key}`, leaf: key, type })
-  }
+  walkTriggerPaths(available.trigger, '', out)
   for (const [stepId, schema] of Object.entries(available.steps)) {
     for (const [key, type] of Object.entries(schema)) {
       out.push({
@@ -35,4 +36,15 @@ export function buildPaths(available: AvailableVariables): PathEntry[] {
     }
   }
   return out
+}
+
+function walkTriggerPaths(schema: NestedSchema, prefix: string, out: PathEntry[]): void {
+  for (const [key, value] of Object.entries(schema)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (typeof value === 'string') {
+      out.push({ namespace: 'trigger', path: `trigger.${path}`, leaf: key, type: value })
+    } else {
+      walkTriggerPaths(value, path, out)
+    }
+  }
 }
