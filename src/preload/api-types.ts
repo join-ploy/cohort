@@ -190,7 +190,8 @@ import type {
   AutomationDispatchRequest,
   AutomationDispatchResult,
   AutomationRun,
-  AutomationUpdateInput
+  AutomationUpdateInput,
+  RunNowPayload
 } from '../shared/automations-types'
 
 export type BrowserApi = {
@@ -1318,7 +1319,7 @@ export type PreloadApi = {
     create: (input: AutomationCreateInput) => Promise<Automation>
     update: (args: { id: string; updates: AutomationUpdateInput }) => Promise<Automation>
     delete: (args: { id: string }) => Promise<void>
-    runNow: (args: { id: string }) => Promise<AutomationRun>
+    runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     rendererReady: () => Promise<void>
     onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void

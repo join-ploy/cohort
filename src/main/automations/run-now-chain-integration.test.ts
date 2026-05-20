@@ -250,6 +250,87 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     expect(final.stepStates?.[0].finishedAt).toBeTypeOf('number')
   })
 
+  it('seeds run.context.trigger from a Linear + worktree payload', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    // Branch lives on the optional WorktreeMeta cache; path is parsed from id.
+    store.setWorktreeMeta('r1::/x', { branch: 'main' })
+    const automation = store.createAutomation({
+      name: 'Chain auto',
+      prompt: '(ignored)',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2030-01-01T00:00:00').getTime()
+    })
+    // Templates against both trigger.linear.issue.title and trigger.worktreeId
+    // so the materialized context is exercised end-to-end via the runner.
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    stored.trigger = { kind: 'manual', acceptsLinearTicket: true, acceptsWorktreeSelection: true }
+    stored.steps = [
+      {
+        id: 's1',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: '{{trigger.worktreeId}}',
+          agentId: 'claude',
+          prompt: 'work on {{trigger.linear.issue.title}}',
+          doneDebounceSeconds: 15
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ]
+    const { ipc, listeners } = makeFakeIpc()
+    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+      const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
+      listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
+    })
+    const service = new AutomationService(store, {
+      tickMs: 60_000,
+      getAgentStatus: () => undefined,
+      getIpcMain: () => ipc as never
+    })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+    const result = await service.runNow(automation.id, {
+      linear: {
+        issue: {
+          id: 'lin-1',
+          identifier: 'ORC-42',
+          title: 'My ticket',
+          description: 'desc',
+          url: 'https://linear.app/x/ORC-42',
+          assigneeEmail: 'a@b',
+          stateName: 'Todo',
+          priority: 2
+        }
+      },
+      worktreeId: 'r1::/x'
+    })
+    expect(send).toHaveBeenCalledWith(
+      'automations:openPromptPane',
+      expect.objectContaining({
+        worktreeId: 'r1::/x',
+        agentId: 'claude',
+        prompt: 'work on My ticket'
+      })
+    )
+    expect(result.context?.trigger).toMatchObject({
+      linear: { issue: expect.objectContaining({ id: 'lin-1', title: 'My ticket' }) },
+      worktreeId: 'r1::/x',
+      worktreeBranch: 'main',
+      worktreePath: '/x'
+    })
+    // Unknown worktreeId fails fast on the same code path.
+    await expect(service.runNow(automation.id, { worktreeId: 'wt-missing' })).rejects.toThrow(
+      /Worktree wt-missing not found/
+    )
+  })
+
   it('uses the legacy dispatch path for automations without trigger+steps', async () => {
     const store = await createStore()
     store.addRepo(makeRepo())

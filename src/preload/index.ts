@@ -99,7 +99,8 @@ import type {
   AutomationDispatchRequest,
   AutomationDispatchResult,
   AutomationRun,
-  AutomationUpdateInput
+  AutomationUpdateInput,
+  RunNowPayload
 } from '../shared/automations-types'
 import {
   ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT,
@@ -2447,7 +2448,7 @@ const api = {
     update: (args: { id: string; updates: AutomationUpdateInput }): Promise<Automation> =>
       ipcRenderer.invoke('automations:update', args),
     delete: (args: { id: string }): Promise<void> => ipcRenderer.invoke('automations:delete', args),
-    runNow: (args: { id: string }): Promise<AutomationRun> =>
+    runNow: (args: { id: string; payload?: RunNowPayload }): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:runNow', args),
     markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:markDispatchResult', result),

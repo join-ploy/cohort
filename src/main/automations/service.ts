@@ -5,7 +5,8 @@ import type {
   Automation,
   AutomationDispatchRequest,
   AutomationDispatchResult,
-  AutomationRun
+  AutomationRun,
+  RunNowPayload
 } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
 import type { SetupScriptEntry } from '../setup-script/registry'
@@ -95,40 +96,26 @@ export class AutomationService {
     this.getWebContents = opts.getWebContents ?? (() => this.webContents)
     this.getIpcMain = opts.getIpcMain ?? null
 
+    // Why: resolve renderer/ipc lazily so a reload swap is picked up on the
+    // next tick. A destroyed/null webContents throws a plain Error (transient)
+    // which runners let bubble for retry; deterministic renderer rejections
+    // come back as typed errors and fail-fast inside the runner.
+    const requirePaneCtx = (
+      what: 'prompt' | 'command'
+    ): { webContents: WebContents; ipc: IpcMain; requestId: string } => {
+      const webContents = this.getWebContents()
+      if (!webContents || webContents.isDestroyed()) {
+        throw new Error(`No renderer available to open ${what} pane.`)
+      }
+      if (!this.getIpcMain) {
+        throw new Error('AutomationService missing getIpcMain wiring.')
+      }
+      return { webContents, ipc: this.getIpcMain(), requestId: randomUUID() }
+    }
+
     this.runPromptRunner = new RunPromptRunner({
-      openPromptPane: async (params) => {
-        const webContents = this.getWebContents()
-        if (!webContents || webContents.isDestroyed()) {
-          throw new Error('No renderer available to open prompt pane.')
-        }
-        if (!this.getIpcMain) {
-          throw new Error('AutomationService missing getIpcMain wiring.')
-        }
-        return openPromptPane(params, {
-          webContents,
-          ipc: this.getIpcMain(),
-          requestId: randomUUID()
-        })
-      },
-      // Why: closure mirrors openPromptPane — resolve renderer/ipc lazily so
-      // a reload swap is picked up on the next tick. A destroyed/null
-      // webContents throws a plain Error (transient) which the runner lets
-      // bubble for retry, while deterministic renderer rejections come back
-      // as SendPromptToPaneError and fail-fast inside the runner.
-      sendPromptToPane: async (params) => {
-        const webContents = this.getWebContents()
-        if (!webContents || webContents.isDestroyed()) {
-          throw new Error('No renderer available to send prompt to pane.')
-        }
-        if (!this.getIpcMain) {
-          throw new Error('AutomationService missing getIpcMain wiring.')
-        }
-        return sendPromptToPane(params, {
-          webContents,
-          ipc: this.getIpcMain(),
-          requestId: randomUUID()
-        })
-      },
+      openPromptPane: async (params) => openPromptPane(params, requirePaneCtx('prompt')),
+      sendPromptToPane: async (params) => sendPromptToPane(params, requirePaneCtx('prompt')),
       getAgentStatus: this.getAgentStatus,
       now: () => Date.now()
     })
@@ -139,20 +126,7 @@ export class AutomationService {
     })
 
     this.runCommandRunner = new RunCommandRunner({
-      openCommandPane: async (params) => {
-        const webContents = this.getWebContents()
-        if (!webContents || webContents.isDestroyed()) {
-          throw new Error('No renderer available to open command pane.')
-        }
-        if (!this.getIpcMain) {
-          throw new Error('AutomationService missing getIpcMain wiring.')
-        }
-        return openCommandPane(params, {
-          webContents,
-          ipc: this.getIpcMain(),
-          requestId: randomUUID()
-        })
-      },
+      openCommandPane: async (params) => openCommandPane(params, requirePaneCtx('command')),
       getPtyExit: this.getPtyExit,
       subscribePtyData: this.subscribePtyData,
       now: () => Date.now()
@@ -213,7 +187,7 @@ export class AutomationService {
     this.timer = null
   }
 
-  async runNow(automationId: string): Promise<AutomationRun> {
+  async runNow(automationId: string, payload?: RunNowPayload): Promise<AutomationRun> {
     const automation = this.store.listAutomations().find((entry) => entry.id === automationId)
     if (!automation) {
       throw new Error('Automation not found.')
@@ -223,6 +197,10 @@ export class AutomationService {
     // progress without waiting a full tick cadence. Subsequent ticks fall
     // through the normal 60s evaluateDueRuns() loop.
     if (automation.trigger && automation.steps && automation.steps.length > 0) {
+      // Why: build the trigger context up-front (before persisting the run) so
+      // a missing worktree fails fast — operators see a clear error instead of
+      // a phantom `running` row with an unresolved template downstream.
+      const triggerContext = this.buildTriggerContext(payload)
       const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
       run.status = 'running'
       // Seed the chain context with automation metadata so templates like
@@ -233,7 +211,8 @@ export class AutomationService {
         automation: {
           workspaceId: automation.workspaceId,
           projectId: automation.projectId
-        }
+        },
+        trigger: triggerContext
       }
       run.stepStates = []
       this.store.replaceAutomationRun(run)
@@ -252,6 +231,23 @@ export class AutomationService {
     const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
     await this.requestDispatch(automation, run)
     return run
+  }
+
+  private buildTriggerContext(payload?: RunNowPayload): Record<string, unknown> {
+    const triggerContext: Record<string, unknown> = {}
+    if (payload?.linear) {
+      triggerContext.linear = payload.linear
+    }
+    if (payload?.worktreeId) {
+      const wt = this.store.listWorktrees().find((w) => w.id === payload.worktreeId)
+      if (!wt) {
+        throw new Error(`Worktree ${payload.worktreeId} not found.`)
+      }
+      triggerContext.worktreeId = wt.id
+      triggerContext.worktreeBranch = wt.branch
+      triggerContext.worktreePath = wt.path
+    }
+    return triggerContext
   }
 
   markDispatchResult(result: AutomationDispatchResult): AutomationRun {

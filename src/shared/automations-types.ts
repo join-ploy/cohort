@@ -113,6 +113,15 @@ export type AutomationDispatchRequest = {
   run: AutomationRun
 }
 
+// Why: optional payload supplied by the renderer when an operator manually
+// triggers a chain-shape automation. Linear issue + worktree selection are
+// materialized into `run.context.trigger` so steps can template against
+// `{{trigger.linear.issue.title}}` and `{{trigger.worktreeBranch}}` etc.
+export type RunNowPayload = {
+  linear?: { issue: LinearIssuePayload }
+  worktreeId?: string
+}
+
 export type AutomationDispatchResult = {
   runId: string
   status: AutomationRunStatus
