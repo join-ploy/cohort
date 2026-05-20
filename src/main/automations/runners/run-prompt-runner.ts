@@ -189,10 +189,15 @@ export class RunPromptRunner implements StepRunner {
     }
     const debounceMs = config.doneDebounceSeconds * 1000
     if (now - tracker.firstDoneAt >= debounceMs) {
+      // Why: also publish paneKey into context.steps so a downstream step can
+      // template `paneRef: '{{steps.<this-step-id>.paneKey}}'` and chain its
+      // prompt into the same pane (the MP.10 paneRef use case).
+      const output = { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
       return {
         outcome: 'done',
         status: 'succeeded',
-        output: { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
+        output,
+        contextPatch: { steps: { [ctx.step.id]: output } }
       }
     }
     return { outcome: 'needs-more-time', status: 'running' }

@@ -137,8 +137,21 @@ export class ChainExecutor {
       // Why: only merge contextPatch on a deterministic outcome. A
       // `needs-more-time` tick is mid-step; applying a patch then would
       // expose half-built context to subsequent ticks.
+      // Why: deep-merge the `steps` sub-object so step N's `steps.<idN>`
+      // patch does not clobber step N-1's `steps.<idN-1>`. Other top-level
+      // keys still use shallow replace, matching the per-key semantics each
+      // runner expects.
       if (result.contextPatch) {
-        run.context = { ...run.context, ...result.contextPatch }
+        const prevSteps = (run.context?.steps as Record<string, unknown> | undefined) ?? {}
+        const patchSteps = (result.contextPatch.steps as Record<string, unknown> | undefined) ?? {}
+        const merged: Record<string, unknown> = {
+          ...run.context,
+          ...result.contextPatch
+        }
+        if (result.contextPatch.steps !== undefined) {
+          merged.steps = { ...prevSteps, ...patchSteps }
+        }
+        run.context = merged
       }
     }
 
