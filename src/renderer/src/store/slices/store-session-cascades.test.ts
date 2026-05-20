@@ -155,6 +155,7 @@ function makeWorktree(overrides: Partial<Worktree> & { id: string; repoId: strin
     linkedPR: null,
     linkedLinearIssue: null,
     isArchived: false,
+    archivedAt: null,
     isUnread: false,
     isPinned: false,
     sortOrder: 0,

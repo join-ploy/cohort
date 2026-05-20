@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computeClearFilterActions,
   computeVisibleWorktreeIds,
+  getArchivedWorktrees,
   isDefaultBranchWorkspace,
   sidebarHasActiveFilters
 } from './visible-worktrees'
@@ -37,6 +38,7 @@ function makeWorktree(id: string, repoId = 'repo1'): Worktree {
     linkedPR: null,
     linkedLinearIssue: null,
     isArchived: false,
+    archivedAt: null,
     isUnread: false,
     isPinned: false,
     sortOrder: 0,
@@ -264,6 +266,24 @@ describe('sidebarHasActiveFilters', () => {
 
   it('returns true when only filterRepoIds is non-empty', () => {
     expect(sidebarHasActiveFilters(filterState({ filterRepoIds: ['repo1'] }))).toBe(true)
+  })
+})
+
+describe('getArchivedWorktrees', () => {
+  it('returns only archived worktrees', () => {
+    const archived = makeWorktree('archived-a')
+    archived.isArchived = true
+    archived.archivedAt = 1_700_000_000_000
+    const live = makeWorktree('live-b')
+
+    const result = getArchivedWorktrees({ worktreesByRepo: { repo1: [archived, live] } })
+
+    expect(result.map((w) => w.id)).toEqual([archived.id])
+  })
+
+  it('returns an empty array when no worktrees are archived', () => {
+    const live = makeWorktree('live')
+    expect(getArchivedWorktrees({ worktreesByRepo: { repo1: [live] } })).toEqual([])
   })
 })
 

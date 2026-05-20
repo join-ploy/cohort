@@ -485,6 +485,12 @@ export type PreloadApi = {
       isCrossRepository?: boolean
     }) => Promise<{ baseBranch: string; pushTarget?: GitPushTarget } | { error: string }>
     remove: (args: { worktreeId: string; force?: boolean; skipArchive?: boolean }) => Promise<void>
+    archive: (args: { worktreeId: string }) => Promise<void>
+    restore: (args: { worktreeId: string }) => Promise<void>
+    /** E2E-only: present only when ORCA_E2E_* env vars are set. Triggers the
+     *  archive cleanup tick synchronously so specs can assert TTL behaviour
+     *  without waiting for the hourly setInterval. */
+    _archiveCleanupNow?: () => Promise<void>
     updateMeta: (args: { worktreeId: string; updates: Partial<WorktreeMeta> }) => Promise<Worktree>
     persistSortOrder: (args: { orderedIds: string[] }) => Promise<void>
     onChanged: (callback: (data: { repoId: string }) => void) => () => void

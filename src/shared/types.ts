@@ -117,6 +117,10 @@ export type Worktree = {
   linkedPR: number | null
   linkedLinearIssue: string | null
   isArchived: boolean
+  /** ms epoch when archive was set; null when not archived. */
+  archivedAt: number | null
+  /** Last cleanup attempt failure message; null/absent when never blocked. */
+  archiveCleanupError?: string | null
   isUnread: boolean
   isPinned: boolean
   sortOrder: number
@@ -160,6 +164,10 @@ export type WorktreeMeta = {
   linkedPR: number | null
   linkedLinearIssue: string | null
   isArchived: boolean
+  /** ms epoch when archive was set; null when not archived. */
+  archivedAt: number | null
+  /** Last cleanup attempt failure message; null/absent when never blocked. */
+  archiveCleanupError?: string | null
   isUnread: boolean
   isPinned: boolean
   sortOrder: number

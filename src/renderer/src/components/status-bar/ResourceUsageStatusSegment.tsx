@@ -33,7 +33,7 @@ import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { useAppStore } from '../../store'
 import { useWorktreeMap } from '../../store/selectors'
-import { runWorktreeDelete } from '../sidebar/delete-worktree-flow'
+import { runWorktreeArchive } from '../sidebar/archive-worktree-flow'
 import { runSleepWorktree } from '../sidebar/sleep-worktree-flow'
 import { useDaemonActions, DaemonActionDialog } from '../shared/useDaemonActions'
 import type { AppMemory, UsageValues, Worktree } from '../../../../shared/types'
@@ -383,7 +383,7 @@ function WorktreeRow({
   onToggle,
   onNavigate,
   onSleep,
-  onDelete,
+  onArchive,
   onKillSession,
   navigateToTab
 }: {
@@ -393,7 +393,7 @@ function WorktreeRow({
   onToggle: () => void
   onNavigate: () => void
   onSleep: () => void
-  onDelete: () => void
+  onArchive: () => void
   onKillSession: (session: UnifiedSessionRow) => void
   navigateToTab: (tabId: string, paneKey: string | null) => void
 }): React.JSX.Element {
@@ -489,9 +489,9 @@ function WorktreeRow({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      onClick={onDelete}
+                      onClick={onArchive}
                       disabled={isMainWorktree}
-                      aria-label={`Delete workspace ${rowLabel}`}
+                      aria-label={`Archive workspace ${rowLabel}`}
                       className={cn(
                         'p-0.5 rounded text-muted-foreground transition-colors',
                         isMainWorktree
@@ -507,7 +507,9 @@ function WorktreeRow({
                     sideOffset={4}
                     className="z-[70] max-w-[200px] text-pretty"
                   >
-                    {isMainWorktree ? 'The main workspace cannot be deleted.' : 'Delete workspace.'}
+                    {isMainWorktree
+                      ? 'The main workspace cannot be archived.'
+                      : 'Archive workspace.'}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -544,7 +546,7 @@ function ResourceTree({
   navigateToWorktree,
   navigateToTab,
   onSleep,
-  onDelete,
+  onArchive,
   onKillSession
 }: {
   repos: UnifiedRepoGroup[]
@@ -556,7 +558,7 @@ function ResourceTree({
   navigateToWorktree: (worktreeId: string) => void
   navigateToTab: (tabId: string, paneKey: string | null) => void
   onSleep: (worktreeId: string) => void
-  onDelete: (worktreeId: string) => void
+  onArchive: (worktreeId: string) => void
   onKillSession: (session: UnifiedSessionRow) => void
 }): React.JSX.Element {
   const worktreeById = useWorktreeMap()
@@ -580,7 +582,7 @@ function ResourceTree({
         onToggle={() => toggleWorktree(wt.worktreeId)}
         onNavigate={() => navigateToWorktree(wt.worktreeId)}
         onSleep={() => onSleep(wt.worktreeId)}
-        onDelete={() => onDelete(wt.worktreeId)}
+        onArchive={() => onArchive(wt.worktreeId)}
         onKillSession={onKillSession}
         navigateToTab={navigateToTab}
       />
@@ -915,9 +917,9 @@ export function ResourceUsageStatusSegment({
     [tabsByWorktree, setActiveView]
   )
 
-  const deleteWorktree = useCallback((worktreeId: string): void => {
+  const handleArchiveWorktree = useCallback((worktreeId: string): void => {
     setOpen(false)
-    runWorktreeDelete(worktreeId)
+    runWorktreeArchive(worktreeId)
   }, [])
 
   const handleSleep = useCallback((id: string): void => {
@@ -1272,7 +1274,7 @@ export function ResourceUsageStatusSegment({
                 navigateToWorktree={navigateToWorktree}
                 navigateToTab={navigateToTab}
                 onSleep={handleSleep}
-                onDelete={deleteWorktree}
+                onArchive={handleArchiveWorktree}
                 onKillSession={handleKillSession}
               />
             )}

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { AlertTriangle, Check, LoaderCircle, Trash2 } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { toast } from 'sonner'
-import { runWorktreeDeleteWithToast } from './delete-worktree-flow'
+import { runWorktreeDeleteWithToast } from './archive-worktree-flow'
 
 const DeleteWorktreeDialog = React.memo(function DeleteWorktreeDialog() {
   const activeModal = useAppStore((s) => s.activeModal)

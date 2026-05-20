@@ -12,6 +12,8 @@ const mockApi = {
     create: vi.fn(),
     list: vi.fn().mockResolvedValue([]),
     remove: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
+    restore: vi.fn().mockResolvedValue(undefined),
     updateMeta: vi.fn().mockResolvedValue(undefined)
   },
   pty: {
@@ -86,6 +88,7 @@ function makeWorktree(overrides: Partial<Worktree> & { id: string; repoId: strin
     linkedPR: null,
     linkedLinearIssue: null,
     isArchived: false,
+    archivedAt: null,
     isUnread: false,
     isPinned: false,
     sortOrder: 0,
@@ -605,6 +608,28 @@ describe('removeWorktree state cleanup', () => {
 
     // The same reference should be returned (no unnecessary shallow copy)
     expect(store.getState().editorDrafts).toBe(drafts)
+  })
+})
+
+describe('archiveWorktree + restoreWorktree', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('archiveWorktree calls the IPC with the worktree id', async () => {
+    const store = createTestStore()
+
+    await store.getState().archiveWorktree('repo1::/path/wt1')
+
+    expect(mockApi.worktrees.archive).toHaveBeenCalledWith({ worktreeId: 'repo1::/path/wt1' })
+  })
+
+  it('restoreWorktree calls the IPC with the worktree id', async () => {
+    const store = createTestStore()
+
+    await store.getState().restoreWorktree('repo1::/path/wt1')
+
+    expect(mockApi.worktrees.restore).toHaveBeenCalledWith({ worktreeId: 'repo1::/path/wt1' })
   })
 })
 

@@ -25,7 +25,7 @@ import { useRepoById, useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import type { Worktree } from '../../../../shared/types'
 import { isFolderRepo } from '../../../../shared/repo-kind'
-import { runWorktreeBatchDelete, runWorktreeDelete } from './delete-worktree-flow'
+import { runWorktreeArchive, runWorktreeBatchArchive } from './archive-worktree-flow'
 import { runSleepWorktrees } from './sleep-worktree-flow'
 
 type Props = {
@@ -76,7 +76,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
     () => activeContextWorktrees.some((item) => deleteStateByWorktreeId[item.id]?.isDeleting),
     [activeContextWorktrees, deleteStateByWorktreeId]
   )
-  const batchDeleteWorktrees = useMemo(
+  const batchArchiveWorktrees = useMemo(
     () =>
       activeContextWorktrees.filter((item) => {
         const itemRepo = repoMap.get(item.repoId)
@@ -88,10 +88,10 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
     isMultiContext && sleepableWorktrees.length > 0
       ? `Sleep ${sleepableWorktrees.length} Workspace${sleepableWorktrees.length === 1 ? '' : 's'}`
       : 'Sleep'
-  const deleteLabel =
-    isMultiContext && batchDeleteWorktrees.length > 0
-      ? `Delete ${batchDeleteWorktrees.length} Workspace${batchDeleteWorktrees.length === 1 ? '' : 's'}`
-      : 'Delete Selected'
+  const archiveLabel =
+    isMultiContext && batchArchiveWorktrees.length > 0
+      ? `Archive ${batchArchiveWorktrees.length} Workspace${batchArchiveWorktrees.length === 1 ? '' : 's'}`
+      : 'Archive Selected'
 
   useEffect(() => {
     const closeMenu = (): void => setMenuOpen(false)
@@ -173,31 +173,26 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
     await runSleepWorktrees(sleepableWorktrees.map((item) => item.id))
   }, [sleepableWorktrees])
 
-  const handleDelete = useCallback(() => {
-    // Folder mode handled inline because it routes to a different modal;
-    // standard delete delegates to the shared runWorktreeDelete helper.
+  const handleArchive = useCallback(() => {
+    // Why: folder mode reuses the worktree row UI for a synthetic root entry,
+    // but archive only makes sense for git worktrees — folders route to the
+    // existing remove-folder modal so the user disconnects the folder rather
+    // than archiving a synthetic entry.
     setMenuOpen(false)
     if (isMultiContext) {
-      runWorktreeBatchDelete(batchDeleteWorktrees.map((item) => item.id))
+      runWorktreeBatchArchive(batchArchiveWorktrees.map((item) => item.id))
       return
     }
     if (isFolder) {
-      // Why: folder mode reuses the worktree row UI for a synthetic root entry,
-      // but users still expect "remove" to disconnect the folder from Orca,
-      // not to run git-style delete semantics against the real folder on disk.
       openModal('confirm-remove-folder', {
         repoId: worktree.repoId,
         displayName: worktree.displayName
       })
       return
     }
-    // Why delegate to runWorktreeDelete: keeps the skip-confirm vs. modal
-    // decision tree (and its rationale) in one place shared with the memory
-    // popover's inline Delete action. Folder mode short-circuits above
-    // because the confirm-remove-folder modal is unique to this caller.
-    runWorktreeDelete(worktree.id)
+    runWorktreeArchive(worktree.id)
   }, [
-    batchDeleteWorktrees,
+    batchArchiveWorktrees,
     isFolder,
     isMultiContext,
     openModal,
@@ -293,32 +288,33 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
                 : 'Close all active panels in this workspace to free up memory and CPU.'}
             </TooltipContent>
           </Tooltip>
-          {/* Why: `git worktree remove` always rejects the main worktree, so we
-             disable the item upfront. Radix forwards unknown props to the DOM
-             element, so `title` works directly without a wrapper span — this
-             preserves Radix's flat roving-tabindex keyboard navigation. */}
+          {/* Why: the main worktree backs the repo entry itself; archiving it
+             would hide the repo. Disable upfront. Radix forwards unknown props
+             to the DOM element, so `title` works directly without a wrapper
+             span — this preserves Radix's flat roving-tabindex keyboard
+             navigation. */}
           <DropdownMenuItem
             variant="destructive"
-            onSelect={handleDelete}
+            onSelect={handleArchive}
             disabled={
               deletingContext ||
               (!isMultiContext && !isFolder && worktree.isMainWorktree) ||
-              (isMultiContext && batchDeleteWorktrees.length === 0)
+              (isMultiContext && batchArchiveWorktrees.length === 0)
             }
             title={
               !isMultiContext && !isFolder && worktree.isMainWorktree
-                ? 'The main worktree cannot be deleted'
+                ? 'The main worktree cannot be archived'
                 : undefined
             }
           >
             <Trash2 className="size-3.5" />
             {deletingContext
-              ? 'Deleting…'
+              ? 'Archiving…'
               : isMultiContext
-                ? deleteLabel
+                ? archiveLabel
                 : isFolder
                   ? 'Remove Folder from Orca'
-                  : 'Delete'}
+                  : 'Archive'}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

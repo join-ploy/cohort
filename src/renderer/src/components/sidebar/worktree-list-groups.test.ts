@@ -24,6 +24,7 @@ const worktree: Worktree = {
   linkedPR: null,
   linkedLinearIssue: null,
   isArchived: false,
+  archivedAt: null,
   comment: '',
   isUnread: false,
   isPinned: false,

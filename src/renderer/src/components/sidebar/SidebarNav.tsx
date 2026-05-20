@@ -54,8 +54,13 @@ const SidebarNav = React.memo(function SidebarNav() {
   const activityActive = activeView === 'activity'
   const activityUnreadCount = useAppStore((s) => {
     let count = 0
+    // Why: archived worktrees are hidden from every selectable surface, so
+    // their unread state must not contribute to the Activity badge.
     for (const worktrees of Object.values(s.worktreesByRepo)) {
       for (const worktree of worktrees) {
+        if (worktree.isArchived) {
+          continue
+        }
         if (worktree.createdAt && worktree.isUnread) {
           count += 1
         }

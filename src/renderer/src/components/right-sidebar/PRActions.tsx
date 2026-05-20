@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle, GitMerge, ChevronDown, Trash2 } from 'lucide-react'
-import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import type { PRInfo, Repo, Worktree } from '../../../../shared/types'
-import { runWorktreeDeleteWithToast } from '../sidebar/delete-worktree-flow'
+import { runWorktreeArchive } from '../sidebar/archive-worktree-flow'
 
 const MERGE_METHODS = ['squash', 'merge', 'rebase'] as const
 
@@ -26,8 +25,6 @@ export default function PRActions({
   worktree: Worktree
   onRefreshPR: () => Promise<void>
 }): React.JSX.Element | null {
-  const openModal = useAppStore((s) => s.openModal)
-  const skipDeleteConfirm = useAppStore((s) => s.settings?.skipDeleteWorktreeConfirm ?? false)
   const [merging, setMerging] = useState(false)
   const [mergeError, setMergeError] = useState<string | null>(null)
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false)
@@ -71,18 +68,12 @@ export default function PRActions({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [mergeMenuOpen])
 
-  const handleDeleteWorktree = useCallback(() => {
-    // Why: honor the user's "don't ask again" preference from the main
-    // worktree-delete dialog here too; otherwise the merged-PR shortcut would
-    // still prompt after the user opted out everywhere else. Main worktrees
-    // can't reach this action — PRs are opened from non-main worktrees — so
-    // we don't need the main-worktree guard the context menu uses.
-    if (skipDeleteConfirm) {
-      runWorktreeDeleteWithToast(worktree.id, worktree.displayName)
-      return
-    }
-    openModal('delete-worktree', { worktreeId: worktree.id })
-  }, [worktree.id, worktree.displayName, openModal, skipDeleteConfirm])
+  const handleArchiveWorktree = useCallback(() => {
+    // Why: archive is a soft-delete with a 10s undo toast — no confirm step
+    // needed. Main worktrees can't reach this action (PRs are opened from
+    // non-main worktrees) so the runWorktreeArchive guard is defense-in-depth.
+    runWorktreeArchive(worktree.id)
+  }, [worktree.id])
 
   // Why: merging a PR with unresolved conflicts would fail on GitHub anyway;
   // disabling the button prevents a confusing error and signals the user must
@@ -174,10 +165,10 @@ export default function PRActions({
         variant="secondary"
         size="xs"
         className="w-full text-[11px]"
-        onClick={handleDeleteWorktree}
+        onClick={handleArchiveWorktree}
       >
         <Trash2 className="size-3.5" />
-        Delete Worktree
+        Archive Worktree
       </Button>
     )
   }

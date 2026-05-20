@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { TerminalTab, Worktree } from '../../../shared/types'
 import { getUnreadBadgeCount } from './unread-badge-count'
 
-function worktree(id: string, isUnread: boolean): Worktree {
-  return { id, isUnread } as Worktree
+function worktree(id: string, isUnread: boolean, isArchived = false): Worktree {
+  return { id, isUnread, isArchived } as Worktree
 }
 
 function tab(id: string): TerminalTab {
@@ -39,5 +39,17 @@ describe('getUnreadBadgeCount', () => {
         unreadTerminalTabs: { 'tab-1': true, 'tab-2': true }
       })
     ).toBe(2)
+  })
+
+  it('ignores unread worktrees and tabs from archived worktrees', () => {
+    expect(
+      getUnreadBadgeCount({
+        worktreesByRepo: {
+          repo: [worktree('wt-archived', true, true), worktree('wt-live', true)]
+        },
+        tabsByWorktree: { 'wt-archived': [tab('tab-archived')], 'wt-live': [tab('tab-live')] },
+        unreadTerminalTabs: { 'tab-archived': true, 'tab-live': true }
+      })
+    ).toBe(1)
   })
 })

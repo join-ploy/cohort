@@ -44,6 +44,7 @@ function makeWorktree(): Worktree {
     linkedPR: null,
     linkedLinearIssue: null,
     isArchived: false,
+    archivedAt: null,
     isUnread: false,
     isPinned: false,
     sortOrder: 0,

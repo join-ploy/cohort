@@ -527,6 +527,17 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     }
   },
 
+  // Why: archive flips persisted meta; the main process broadcasts
+  // worktrees:changed which triggers a list refresh, and visible-worktrees
+  // already filters isArchived out of the sidebar.
+  archiveWorktree: async (worktreeId) => {
+    await window.api.worktrees.archive({ worktreeId })
+  },
+
+  restoreWorktree: async (worktreeId) => {
+    await window.api.worktrees.restore({ worktreeId })
+  },
+
   clearWorktreeDeleteState: (worktreeId) => {
     set((s) => {
       if (!s.deleteStateByWorktreeId[worktreeId]) {

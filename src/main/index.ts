@@ -67,6 +67,8 @@ import { AutomationService } from './automations/service'
 import { AgentStatusRegistry } from './agent-status/registry'
 import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
+import { createCleanupService, type CleanupService } from './archive/cleanup-service'
+import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -88,6 +90,7 @@ let starNag: StarNagService | null = null
 let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
 let automations: AutomationService | null = null
+let archiveCleanup: CleanupService | null = null
 // Why: main-process mirror of the renderer's agent-status map, written from
 // the same hook-event callback that fans events out via `agentStatus:set`.
 // The chain executor (next Phase 1 task) reads from this so RunPromptRunner
@@ -559,6 +562,53 @@ app.whenReady().then(async () => {
     getLocalProvider: () => getLocalPtyProvider()
   })
   const runtimeRef = runtime
+  const storeRef = store
+  // Why: cleanup-service runs from the main process at startup and on a timer;
+  // mainWindow can be in any state (null during bootstrap, destroyed during
+  // shutdown). Read it through the module-level binding and skip when missing —
+  // meta cleanup that the runWorktreeRemoval path performs is the load-bearing
+  // work; the changed-notify is just a UI hint that the next list refresh
+  // picks up anyway.
+  // Why: E2E specs need a way to make a freshly-archived worktree immediately
+  // past TTL without waiting 30 days or mutating persisted state by hand. The
+  // override is a positive number (not 0) so the gt-threshold comparison still
+  // captures the just-archived row deterministically.
+  const archiveTtlOverrideRaw = process.env.ORCA_ARCHIVE_TTL_MS_OVERRIDE
+  const archiveTtlOverride =
+    archiveTtlOverrideRaw !== undefined && Number.isFinite(Number(archiveTtlOverrideRaw))
+      ? Math.max(0, Number(archiveTtlOverrideRaw))
+      : undefined
+  archiveCleanup = createCleanupService({
+    store: storeRef,
+    runRemoval: async (worktreeId) => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) {
+        return
+      }
+      // Why: skipArchive=true so we never auto-execute the repo's orca.yaml
+      // `archive` hook from unsupervised cleanup. The user wasn't around to
+      // confirm the hook-trust prompt 30 days earlier, and a collaborator
+      // could have added a malicious script in the interim.
+      await runWorktreeRemoval(
+        { worktreeId, force: false, skipArchive: true },
+        { store: storeRef, runtime: runtimeRef, mainWindow: window }
+      )
+    },
+    ...(archiveTtlOverride !== undefined ? { ttlMs: archiveTtlOverride } : {})
+  })
+  // Why: archiveCleanup.start() is deferred until after openMainWindow() runs
+  // (below) so the immediate runOnce() inside start() sees a live mainWindow.
+  // Starting here would short-circuit every candidate via the runRemoval
+  // null-window guard, defeating the "user quit Orca for 30+ days" tick.
+  // Why: E2E specs trigger the cleanup tick on demand to assert TTL behaviour
+  // without waiting for the hourly setInterval. Guarded by ORCA_E2E so the
+  // handler is never registered in shipping builds.
+  if (process.env.ORCA_E2E_USER_DATA_DIR) {
+    ipcMain.removeHandler('worktrees:_archiveCleanupNow')
+    ipcMain.handle('worktrees:_archiveCleanupNow', async () => {
+      await archiveCleanup?.runOnce()
+    })
+  }
   automations = new AutomationService(store, {
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
@@ -730,6 +780,12 @@ app.whenReady().then(async () => {
     })
   ])
 
+  // Why: start archive cleanup now that mainWindow is assigned — the
+  // immediate runOnce() inside start() needs a live window so the
+  // 30-day-quit cleanup tick actually fires on launch (not waiting an
+  // extra hour for the next setInterval pass).
+  archiveCleanup.start()
+
   // Why: the macOS notification permission dialog must fire after the window
   // is visible and focused. If it fires before the window exists, the system
   // dialog either doesn't appear or gets immediately covered by the maximized
@@ -763,6 +819,7 @@ app.on('before-quit', () => {
   // unmount TerminalPane components (removing their capture callbacks).
   // The window close handler passes isQuitting to the renderer so it skips the
   // child-process confirmation dialog and proceeds directly to buffer capture.
+  archiveCleanup?.stop()
   rateLimits?.stop()
   // Why: run/setup script PTYs need an explicit teardown here (not in will-quit)
   // so their run:exited / setup:exited broadcasts reach the renderer while the

@@ -16,6 +16,7 @@ function wt(overrides: Partial<Worktree> & { id: string; displayName: string }):
     linkedPR: null,
     linkedLinearIssue: null,
     isArchived: false,
+    archivedAt: null,
     isUnread: false,
     isPinned: false,
     sortOrder: 0,

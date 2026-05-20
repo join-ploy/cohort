@@ -239,6 +239,8 @@ export function mergeWorktree(
     linkedPR: meta?.linkedPR ?? null,
     linkedLinearIssue: meta?.linkedLinearIssue ?? null,
     isArchived: meta?.isArchived ?? false,
+    archivedAt: meta?.archivedAt ?? null,
+    ...(meta?.archiveCleanupError != null ? { archiveCleanupError: meta.archiveCleanupError } : {}),
     isUnread: meta?.isUnread ?? false,
     isPinned: meta?.isPinned ?? false,
     sortOrder: meta?.sortOrder ?? 0,

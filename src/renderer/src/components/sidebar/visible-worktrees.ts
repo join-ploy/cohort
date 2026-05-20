@@ -1,8 +1,21 @@
 import type { Worktree, Repo, TerminalTab } from '../../../../shared/types'
+import type { AppState } from '@/store/types'
 import { buildWorktreeComparator, sortWorktreesSmart } from './smart-sort'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { useAppStore } from '@/store'
 import { getAllWorktreesFromState, getRepoMapFromState } from '@/store/selectors'
+
+/**
+ * Archived worktrees only — used by the Archived sidebar disclosure.
+ *
+ * Why a separate selector: `getAllWorktreesFromState` already returns every
+ * worktree including archived ones, but every visible-surface consumer filters
+ * archived out. Centralising the inverse predicate here keeps the Archived
+ * view's source-of-truth aligned with the rest of the sidebar pipeline.
+ */
+export function getArchivedWorktrees(state: Pick<AppState, 'worktreesByRepo'>): Worktree[] {
+  return getAllWorktreesFromState(state).filter((w) => w.isArchived)
+}
 
 /**
  * Whether a worktree represents the repo's default-branch row that the
