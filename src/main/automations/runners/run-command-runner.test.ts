@@ -1,3 +1,8 @@
+/* eslint-disable max-lines -- Why: lifecycle + template + outputTail capture
+   coverage lives here as one suite so test helpers and fixtures (baseStep,
+   baseState, baseCtx, noopSubscribePtyData) stay single-source. Splitting
+   would force fixture duplication and is the same call run-prompt-runner
+   makes for its sibling suite. */
 import { describe, it, expect, vi } from 'vitest'
 import type { RunCommandConfig, Step, StepRunState } from '../../../shared/automations-types'
 import { RunCommandRunner } from './run-command-runner'
@@ -36,12 +41,18 @@ const baseCtx = (overrides: Partial<StepRunnerCtx> = {}): StepRunnerCtx => ({
   ...overrides
 })
 
+/** A no-op PTY data subscription that never fires. The default for tests that
+ *  don't care about output capture — they should still construct the runner
+ *  with this dep so the contract stays exercised. */
+const noopSubscribePtyData = (): (() => void) => () => {}
+
 describe('RunCommandRunner', () => {
   it('opens a command pane on the first tick and returns needs-more-time', async () => {
     const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: vi.fn().mockReturnValue(undefined),
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     const next = await runner.tick(baseCtx())
@@ -60,6 +71,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: vi.fn().mockReturnValue(undefined),
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     const step: Step = {
@@ -94,6 +106,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => now
     })
     const ctx = baseCtx()
@@ -111,6 +124,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: (ptyId: string) => (ptyId === 'pty-1' ? exit : undefined),
+      subscribePtyData: noopSubscribePtyData,
       now: () => now
     })
     const ctx = baseCtx()
@@ -119,7 +133,12 @@ describe('RunCommandRunner', () => {
     const result = await runner.tick(ctx)
     expect(result.outcome).toBe('done')
     expect(result.status).toBe('succeeded')
-    expect(result.output).toEqual({ exitCode: 0, paneKey: 'tab-1:1', durationMs: 5_000 })
+    expect(result.output).toEqual({
+      exitCode: 0,
+      paneKey: 'tab-1:1',
+      durationMs: 5_000,
+      outputTail: ''
+    })
   })
 
   it('still returns done (not failed) when the PTY exits non-zero — operators decide via onFailure', async () => {
@@ -129,6 +148,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => exit,
+      subscribePtyData: noopSubscribePtyData,
       now: () => now
     })
     const ctx = baseCtx()
@@ -137,7 +157,12 @@ describe('RunCommandRunner', () => {
     const result = await runner.tick(ctx)
     expect(result.outcome).toBe('done')
     expect(result.status).toBe('succeeded')
-    expect(result.output).toEqual({ exitCode: 1, paneKey: 'tab-1:1', durationMs: 3_000 })
+    expect(result.output).toEqual({
+      exitCode: 1,
+      paneKey: 'tab-1:1',
+      durationMs: 3_000,
+      outputTail: ''
+    })
   })
 
   it('times out per step.timeoutSeconds', async () => {
@@ -146,6 +171,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => now
     })
     const step: Step = { ...baseStep, timeoutSeconds: 30 }
@@ -166,6 +192,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     const step: Step = {
@@ -192,6 +219,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     const result = await runner.tick(baseCtx())
@@ -208,6 +236,7 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     const ctx = baseCtx()
@@ -222,10 +251,179 @@ describe('RunCommandRunner', () => {
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
       now: () => 0
     })
     await runner.tick(baseCtx({ runId: 'runA' }))
     await runner.tick(baseCtx({ runId: 'runB' }))
     expect(openCommandPane).toHaveBeenCalledTimes(2)
+  })
+
+  it('captures PTY output in outputTail and exposes it in step output', async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+    let now = 0
+    const exit: PtyExitEntry = { exitCode: 0, finishedAt: 100 }
+    // Capture the listener so the test can drive data into the tail
+    // between ticks (mirrors the real flush-window cadence — data lands
+    // between ticks, not synchronously inside one).
+    let captured: ((ptyId: string, data: string) => void) | null = null
+    const subscribePtyData = vi.fn().mockImplementation((listener) => {
+      captured = listener
+      return () => {}
+    })
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      // First tick: still running. Second tick: exited.
+      getPtyExit: () => (now > 0 ? exit : undefined),
+      subscribePtyData,
+      now: () => now
+    })
+    const ctx = baseCtx()
+    await runner.tick(ctx)
+    // Simulate PTY data arriving between ticks, including data for a
+    // different ptyId that must NOT appear in this step's tail.
+    captured!('pty-1', 'hello\n')
+    captured!('pty-other', 'should-not-appear')
+    captured!('pty-1', 'world\n')
+    now = 100
+    const result = await runner.tick(ctx)
+    expect(result.outcome).toBe('done')
+    const output = result.output as {
+      exitCode: number
+      paneKey: string
+      durationMs: number
+      outputTail: string
+    }
+    expect(output.outputTail).toBe('hello\nworld\n')
+    expect(result.contextPatch).toEqual({
+      steps: {
+        'run-review': {
+          exitCode: 0,
+          paneKey: 'tab-1:1',
+          durationMs: 100,
+          outputTail: 'hello\nworld\n'
+        }
+      }
+    })
+  })
+
+  it('truncates outputTail to 32KiB when output exceeds the cap', async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+    let now = 0
+    const exit: PtyExitEntry = { exitCode: 0, finishedAt: 200 }
+    let captured: ((ptyId: string, data: string) => void) | null = null
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => (now > 0 ? exit : undefined),
+      subscribePtyData: (listener) => {
+        captured = listener
+        return () => {}
+      },
+      now: () => now
+    })
+    const ctx = baseCtx()
+    await runner.tick(ctx)
+    // Fire 100 KiB as a single chunk that overshoots the 32 KiB cap. This
+    // exercises the OutputTail "single-chunk left-truncate" branch and is a
+    // representative case for high-throughput PTY bursts where node-pty
+    // flushes a large buffer in one event.
+    captured!('pty-1', 'x'.repeat(100 * 1024))
+    now = 200
+    const result = await runner.tick(ctx)
+    const output = result.output as { outputTail: string }
+    expect(output.outputTail.length).toBe(32 * 1024)
+  })
+
+  it('caps multi-chunk output to at most 32KiB and keeps the latest bytes', async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+    let now = 0
+    const exit: PtyExitEntry = { exitCode: 0, finishedAt: 200 }
+    let captured: ((ptyId: string, data: string) => void) | null = null
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => (now > 0 ? exit : undefined),
+      subscribePtyData: (listener) => {
+        captured = listener
+        return () => {}
+      },
+      now: () => now
+    })
+    const ctx = baseCtx()
+    await runner.tick(ctx)
+    // Many small chunks past the cap; verify size invariant + that the
+    // very-latest sentinel byte survives at the tail.
+    for (let i = 0; i < 40; i++) {
+      captured!('pty-1', 'a'.repeat(1024))
+    }
+    captured!('pty-1', 'TAIL_SENTINEL')
+    now = 200
+    const result = await runner.tick(ctx)
+    const output = result.output as { outputTail: string }
+    expect(output.outputTail.length).toBeLessThanOrEqual(32 * 1024)
+    expect(output.outputTail.endsWith('TAIL_SENTINEL')).toBe(true)
+  })
+
+  it('tears down the subscription on every terminal outcome', async () => {
+    // Three terminal paths: done (PTY exit), timed-out, openCommandPaneError.
+    // The first two go through cleanup(); the third never opens a tracker
+    // (and so never subscribes), so we only assert unsubscribe for the
+    // ones that DID subscribe.
+
+    // Path 1: PTY exits → done.
+    {
+      const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+      const unsubscribe = vi.fn()
+      let now = 0
+      const exit: PtyExitEntry = { exitCode: 0, finishedAt: 100 }
+      const runner = new RunCommandRunner({
+        openCommandPane,
+        getPtyExit: () => (now > 0 ? exit : undefined),
+        subscribePtyData: () => unsubscribe,
+        now: () => now
+      })
+      const ctx = baseCtx()
+      await runner.tick(ctx)
+      expect(unsubscribe).not.toHaveBeenCalled() // still running between ticks
+      now = 100
+      await runner.tick(ctx)
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    }
+
+    // Path 2: step times out → failed.
+    {
+      const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+      const unsubscribe = vi.fn()
+      let now = 0
+      const runner = new RunCommandRunner({
+        openCommandPane,
+        getPtyExit: () => undefined,
+        subscribePtyData: () => unsubscribe,
+        now: () => now
+      })
+      const step: Step = { ...baseStep, timeoutSeconds: 30 }
+      const ctx = baseCtx({ step })
+      await runner.tick(ctx)
+      expect(unsubscribe).not.toHaveBeenCalled()
+      now = 30_000
+      const result = await runner.tick(ctx)
+      expect(result.status).toBe('timed-out')
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('keeps the subscription alive across needs-more-time ticks', async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-1', paneKey: 'tab-1:1' })
+    const unsubscribe = vi.fn()
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => undefined,
+      subscribePtyData: () => unsubscribe,
+      now: () => 0
+    })
+    const ctx = baseCtx()
+    await runner.tick(ctx)
+    await runner.tick(ctx)
+    await runner.tick(ctx)
+    expect(unsubscribe).not.toHaveBeenCalled()
   })
 })

@@ -82,6 +82,21 @@ export function setPtyExitRegistry(registry: PtyExitRegistry | null): void {
   ptyExitRegistryRef = registry
 }
 
+// Why: main-process consumers (currently the chain-engine RunCommandRunner)
+// need to tap PTY data without going through the renderer round-trip. The
+// subscriber list is invoked from the same flush window that broadcasts to
+// the renderer, so subscribers see the same batched data the UI does.
+// Intra-process only — no new IPC channel.
+type PtyDataSubscriber = (ptyId: string, data: string) => void
+const ptyDataSubscribers = new Set<PtyDataSubscriber>()
+
+export function subscribePtyData(listener: PtyDataSubscriber): () => void {
+  ptyDataSubscribers.add(listener)
+  return () => {
+    ptyDataSubscribers.delete(listener)
+  }
+}
+
 // Why: consumers (currently the cursor-agent synthesized-spinner loop in
 // main/index.ts) need to tear down paneKey-scoped state when a PTY exits so
 // intervals / timers cannot leak for the process lifetime. A callback
@@ -611,6 +626,17 @@ export function registerPtyHandlers(
     }
     for (const [id, data] of pendingData) {
       mainWindow.webContents.send('pty:data', { id, data })
+      // Why: fan out to in-process subscribers (chain-engine RunCommandRunner)
+      // on the same flush window the renderer sees. Each subscriber is
+      // isolated by try/catch so one throwing tap can't break the broadcast
+      // for the renderer or for other subscribers.
+      for (const sub of ptyDataSubscribers) {
+        try {
+          sub(id, data)
+        } catch (err) {
+          console.error('[pty] subscriber threw:', err)
+        }
+      }
     }
     pendingData.clear()
   }

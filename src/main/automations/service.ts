@@ -38,6 +38,12 @@ export type AutomationServiceOpts = {
    *  executor's RunCommandRunner can detect command completion without an
    *  IPC roundtrip. */
   getPtyExit?: (ptyId: string) => PtyExitEntry | undefined
+  /** Subscribe to the main-process PTY data stream. Wired in
+   *  src/main/index.ts from `subscribePtyData` in `./ipc/pty` so the chain
+   *  executor's RunCommandRunner can capture command `outputTail` directly,
+   *  without going through the renderer round-trip. Returns an unsubscribe
+   *  function the runner calls on terminal outcomes. */
+  subscribePtyData?: (listener: (ptyId: string, data: string) => void) => () => void
   /** Bridge from the chain executor's `create-worktree` step to the OrcaRuntime
    *  managed-worktree create flow. Wired in src/main/index.ts to translate
    *  the runner's narrow shape onto OrcaRuntimeService.createManagedWorktree.
@@ -60,6 +66,7 @@ export class AutomationService {
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
   private readonly getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
   private readonly getPtyExit: (ptyId: string) => PtyExitEntry | undefined
+  private readonly subscribePtyData: (listener: (ptyId: string, data: string) => void) => () => void
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
@@ -78,6 +85,10 @@ export class AutomationService {
     this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
     this.getSetupScript = opts.getSetupScript ?? (() => undefined)
     this.getPtyExit = opts.getPtyExit ?? (() => undefined)
+    // Why: default subscribePtyData to a no-op subscription so service.test.ts
+    // harnesses that never exercise run-command steps don't need to wire it.
+    // The returned unsubscribe must still be a fn so cleanup() doesn't throw.
+    this.subscribePtyData = opts.subscribePtyData ?? (() => () => {})
     // Default getWebContents to the service's own setWebContents-tracked
     // reference so tests that don't supply a factory still get the WebContents
     // through the existing setWebContents() path.
@@ -143,6 +154,7 @@ export class AutomationService {
         })
       },
       getPtyExit: this.getPtyExit,
+      subscribePtyData: this.subscribePtyData,
       now: () => Date.now()
     })
 

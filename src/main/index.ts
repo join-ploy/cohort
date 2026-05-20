@@ -55,7 +55,8 @@ import {
   getPtyIdForPaneKey,
   registerPaneKeyTeardownListener,
   getLocalPtyProvider,
-  setPtyExitRegistry
+  setPtyExitRegistry,
+  subscribePtyData
 } from './ipc/pty'
 import { killAllRunScripts } from './ipc/run-script'
 import { killAllSetupScripts, setSetupScriptRegistry } from './ipc/setup-script'
@@ -569,6 +570,10 @@ app.whenReady().then(async () => {
     // Why: hand the PTY exit registry's reader to the service so the chain
     // executor's RunCommandRunner can detect command completion directly.
     getPtyExit: (ptyId) => ptyExitRegistry.get(ptyId),
+    // Why: hand the PTY data subscription bridge to the service so the chain
+    // executor's RunCommandRunner can capture the command `outputTail`
+    // intra-process — same flush window as the renderer broadcast.
+    subscribePtyData: (listener) => subscribePtyData(listener),
     // Why: bridge the chain's narrow create-worktree dep onto the runtime's
     // wider managed-worktree create API. `runHooks: true` launches the repo's
     // setup script (which the next `wait-for-setup` step is built to observe);
