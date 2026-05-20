@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
+import { buildPaths, type PathEntry } from '../../../lib/available-variables-tree'
 
 export type VariablePickerPopoverProps = {
   open: boolean
@@ -8,15 +9,6 @@ export type VariablePickerPopoverProps = {
   // Receives the full dotted path without braces, e.g. 'steps.cw1.worktreeId'.
   onSelect: (fullPath: string) => void
   onClose: () => void
-}
-
-type PathEntry = {
-  namespace: 'automation' | 'trigger' | 'steps'
-  stepId?: string
-  // Full dotted path, e.g. 'automation.projectId' or 'steps.cw1.worktreeId'.
-  path: string
-  leaf: string
-  type: 'string' | 'number' | 'boolean'
 }
 
 // Popover that lists every variable available in scope as a flat dotted path.
@@ -94,28 +86,6 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
       {renderSection('Steps', steps, paths, highlightedIdx, onSelect, onClose, true)}
     </div>
   )
-}
-
-function buildPaths(available: AvailableVariables): PathEntry[] {
-  const out: PathEntry[] = []
-  for (const [key, type] of Object.entries(available.automation)) {
-    out.push({ namespace: 'automation', path: `automation.${key}`, leaf: key, type })
-  }
-  for (const [key, type] of Object.entries(available.trigger)) {
-    out.push({ namespace: 'trigger', path: `trigger.${key}`, leaf: key, type })
-  }
-  for (const [stepId, schema] of Object.entries(available.steps)) {
-    for (const [key, type] of Object.entries(schema)) {
-      out.push({
-        namespace: 'steps',
-        stepId,
-        path: `steps.${stepId}.${key}`,
-        leaf: key,
-        type
-      })
-    }
-  }
-  return out
 }
 
 function renderSection(
