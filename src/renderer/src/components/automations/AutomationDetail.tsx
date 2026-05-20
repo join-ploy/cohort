@@ -4,9 +4,11 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AGENT_CATALOG, AgentIcon } from '@/lib/agent-catalog'
+import { LinearIcon } from '@/components/icons/LinearIcon'
 import type {
   Automation,
   AutomationRun,
+  LinearIssuePayload,
   StepRunState,
   StepRunStatus
 } from '../../../../shared/automations-types'
@@ -92,6 +94,76 @@ const STEP_STATUS_BADGE_CLASS: Record<StepRunStatus, string> = {
   failed: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
   skipped: 'bg-muted text-muted-foreground italic',
   'timed-out': 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+}
+
+// Why: run.context.trigger.linear.issue is materialized from RunNowPayload
+// when an operator fires a Linear-attached run. The shape is untyped at the
+// AutomationRun boundary (Record<string, unknown>), so we narrow it here
+// instead of leaking `unknown` casts into the JSX below.
+function extractLinearIssue(
+  context: AutomationRun['context']
+): Pick<LinearIssuePayload, 'identifier' | 'title' | 'url'> | null {
+  if (!context || typeof context !== 'object') {
+    return null
+  }
+  const trigger = (context as Record<string, unknown>).trigger
+  if (!trigger || typeof trigger !== 'object') {
+    return null
+  }
+  const linear = (trigger as Record<string, unknown>).linear
+  if (!linear || typeof linear !== 'object') {
+    return null
+  }
+  const issue = (linear as Record<string, unknown>).issue
+  if (!issue || typeof issue !== 'object') {
+    return null
+  }
+  const { identifier, title, url } = issue as Record<string, unknown>
+  if (typeof identifier !== 'string' || typeof title !== 'string') {
+    return null
+  }
+  return {
+    identifier,
+    title,
+    url: typeof url === 'string' ? url : ''
+  }
+}
+
+function LinearIssuePill({
+  issue
+}: {
+  issue: Pick<LinearIssuePayload, 'identifier' | 'title' | 'url'>
+}): React.JSX.Element {
+  const label = (
+    <>
+      <LinearIcon className="size-3 shrink-0" />
+      <span className="max-w-48 truncate">
+        {issue.identifier} — {issue.title}
+      </span>
+    </>
+  )
+  // Why: empty url means the trigger source skipped the URL (older Linear
+  // payloads), so render a non-interactive span rather than a dead anchor.
+  const pillClass =
+    'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/10 text-blue-700 dark:text-blue-300'
+  if (!issue.url) {
+    return <span className={pillClass}>{label}</span>
+  }
+  return (
+    <a
+      href={issue.url}
+      onClick={(e) => {
+        e.preventDefault()
+        // Why: stop the parent run row's onClick (open-workspace button) from
+        // firing when the operator just wants to jump to the Linear issue.
+        e.stopPropagation()
+        window.api.shell.openPath(issue.url)
+      }}
+      className={`${pillClass} hover:bg-blue-500/20`}
+    >
+      {label}
+    </a>
+  )
 }
 
 function StepRunRow({ step }: { step: StepRunState }): React.JSX.Element {
@@ -273,12 +345,16 @@ export function AutomationDetail({
             const workspaceLabel = run.workspaceId
               ? (runWorktree?.displayName ?? 'Missing workspace')
               : 'Not launched'
+            const linearIssue = extractLinearIssue(run.context)
             const rowClassName =
               'grid grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.4fr)_minmax(6rem,auto)] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
               <>
                 <div className="min-w-0">
-                  <div>{formatAutomationDateTime(run.scheduledFor)}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{formatAutomationDateTime(run.scheduledFor)}</span>
+                    {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
+                  </div>
                   {run.error ? (
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
                   ) : null}

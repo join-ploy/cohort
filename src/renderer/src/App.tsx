@@ -36,6 +36,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useIpcEvents } from './hooks/useIpcEvents'
 import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents'
 import { useAutomationOpenPromptPaneEvents } from './hooks/useAutomationOpenPromptPaneEvents'
+import { useAutomationSendPromptToPaneEvents } from './hooks/useAutomationSendPromptToPaneEvents'
 import { useAutomationOpenCommandPaneEvents } from './hooks/useAutomationOpenCommandPaneEvents'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
 import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
@@ -300,6 +301,7 @@ function App(): React.JSX.Element {
   useIpcEvents()
   useAutomationDispatchEvents()
   useAutomationOpenPromptPaneEvents()
+  useAutomationSendPromptToPaneEvents()
   useAutomationOpenCommandPaneEvents()
   // Why: retention must run at App level so the inline per-card agents list
   // always sees retained entries. If retention ran inside the sidebar-card

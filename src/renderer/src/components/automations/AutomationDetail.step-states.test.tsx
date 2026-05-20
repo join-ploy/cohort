@@ -18,6 +18,10 @@ vi.mock('@/lib/agent-catalog', () => ({
   AgentIcon: () => null
 }))
 
+vi.mock('@/components/icons/LinearIcon', () => ({
+  LinearIcon: () => null
+}))
+
 const baseAutomation: Automation = {
   id: 'a1',
   name: 'Nightly sweep',
@@ -173,5 +177,70 @@ describe('AutomationDetail step states', () => {
     // workspace label, proving the original single-row summary is intact.
     expect(markup).toContain('something exploded')
     expect(markup).toContain('feature-x')
+  })
+
+  it('renders a Linear pill when run.context.trigger.linear.issue is present', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const runWithLinear: AutomationRun = {
+      ...chainRun,
+      id: 'r-linear',
+      context: {
+        trigger: {
+          linear: {
+            issue: {
+              id: 'lin-1',
+              identifier: 'ORC-42',
+              title: 'Fix the thing',
+              description: '',
+              url: 'https://linear.app/foo',
+              assigneeEmail: '',
+              stateName: '',
+              priority: 0
+            }
+          }
+        }
+      }
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[runWithLinear]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+      />
+    )
+    expect(markup).toContain('ORC-42')
+    expect(markup).toContain('Fix the thing')
+    expect(markup).toContain('https://linear.app/foo')
+  })
+
+  it('does not render the Linear pill when no Linear context is attached', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[chainRun]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+      />
+    )
+    expect(markup).not.toContain('ORC-')
+    expect(markup).not.toContain('linear.app')
   })
 })

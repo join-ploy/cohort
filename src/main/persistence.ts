@@ -45,7 +45,7 @@ import {
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
 import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
-import { getRepoIdFromWorktreeId } from '../shared/worktree-id'
+import { getRepoIdFromWorktreeId, splitWorktreeId } from '../shared/worktree-id'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 import { upgradeLegacyAutomation } from './persistence-automation-migration'
 
@@ -1020,6 +1020,23 @@ export class Store {
 
   getAllWorktreeMeta(): Record<string, WorktreeMeta> {
     return this.state.worktreeMeta
+  }
+
+  /** Synchronous view of known worktrees as a flat list. Branch comes from the
+   *  optional cache on WorktreeMeta (set by the create-worktree flow); path is
+   *  parsed from the worktreeId encoding (`${repoId}::${path}`) and falls back
+   *  to the raw id for folder-repo or test fixtures that don't follow that
+   *  format. Used by automations.runNow to seed `run.context.trigger` without
+   *  an async `git worktree list` round-trip. */
+  listWorktrees(): { id: string; branch: string; path: string }[] {
+    return Object.entries(this.state.worktreeMeta).map(([id, meta]) => {
+      const parsed = splitWorktreeId(id)
+      return {
+        id,
+        branch: meta.branch ?? '',
+        path: parsed?.worktreePath ?? id
+      }
+    })
   }
 
   setWorktreeMeta(worktreeId: string, meta: Partial<WorktreeMeta>): WorktreeMeta {

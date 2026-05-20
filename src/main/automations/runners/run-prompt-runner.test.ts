@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: lifecycle + paneRef branch coverage lives
+   here as one suite so test helpers and fixtures (baseStep, baseState) stay
+   single-source. Splitting would force fixture duplication. */
 import { describe, it, expect, vi } from 'vitest'
 import type { Step, StepRunState } from '../../../shared/automations-types'
 import { RunPromptRunner } from './run-prompt-runner'
@@ -323,5 +326,93 @@ describe('RunPromptRunner', () => {
     now = 5_000
     const tick3 = await runner.tick(ctx)
     expect(tick3).toEqual({ outcome: 'needs-more-time', status: 'running' })
+  })
+
+  // ─── paneRef: reuse existing pane ────────────────────────────────────────
+
+  it('with paneRef set: calls sendPromptToPane and records the resolved paneKey', async () => {
+    const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
+    const openPromptPane = vi.fn() // should NOT be called
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      sendPromptToPane,
+      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: { ...baseStep.config, paneRef: 'tab-9:1' }
+    }
+    const ctx: StepRunnerCtx = { runId: 'r', step, state: baseState, context: {} }
+    const result = await runner.tick(ctx)
+    expect(sendPromptToPane).toHaveBeenCalledWith({ paneKey: 'tab-9:1', prompt: 'Hello' })
+    expect(openPromptPane).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('needs-more-time')
+    expect(result.status).toBe('running')
+  })
+
+  it('with paneRef set + agent working: returns needs-more-time WITHOUT sending', async () => {
+    const sendPromptToPane = vi.fn()
+    const runner = new RunPromptRunner({
+      openPromptPane: vi.fn(),
+      sendPromptToPane,
+      getAgentStatus: vi.fn().mockReturnValue({ state: 'working', updatedAt: 0 }),
+      now: () => 0
+    })
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
+    expect(sendPromptToPane).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('needs-more-time')
+  })
+
+  it('with paneRef set + agent blocked: fails immediately', async () => {
+    const sendPromptToPane = vi.fn()
+    const runner = new RunPromptRunner({
+      openPromptPane: vi.fn(),
+      sendPromptToPane,
+      getAgentStatus: vi.fn().mockReturnValue({ state: 'blocked', updatedAt: 0 }),
+      now: () => 0
+    })
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
+    expect(result.outcome).toBe('failed')
+    expect(sendPromptToPane).not.toHaveBeenCalled()
+  })
+
+  it('with paneRef set + SendPromptToPaneError: fails fast', async () => {
+    const { SendPromptToPaneError } = await import('../send-prompt-to-pane')
+    const sendPromptToPane = vi.fn().mockRejectedValue(new SendPromptToPaneError('pane gone'))
+    const runner = new RunPromptRunner({
+      openPromptPane: vi.fn(),
+      sendPromptToPane,
+      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+      now: () => 0
+    })
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toMatch(/pane gone/)
+  })
+
+  it('with paneRef template using context: resolves before sending', async () => {
+    const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
+    const runner = new RunPromptRunner({
+      openPromptPane: vi.fn(),
+      sendPromptToPane,
+      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: { ...baseStep.config, paneRef: '{{steps.prior.paneKey}}' }
+    }
+    const ctx: StepRunnerCtx = {
+      runId: 'r',
+      step,
+      state: baseState,
+      context: { steps: { prior: { paneKey: 'tab-9:1' } } }
+    }
+    await runner.tick(ctx)
+    expect(sendPromptToPane).toHaveBeenCalledWith({ paneKey: 'tab-9:1', prompt: 'Hello' })
   })
 })

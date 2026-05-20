@@ -176,6 +176,12 @@ export type WorktreeMeta = {
   /** See {@link Worktree.pushTarget}. Persisted so refreshed worktree lists keep the target. */
   pushTarget?: GitPushTarget
   diffComments?: DiffComment[]
+  /** Last-known git branch name for this worktree. Optional because
+   *  branch/path live authoritatively on disk (via `git worktree list`);
+   *  this field is a synchronous best-effort cache populated by the
+   *  worktree creation flow so callers like the automation runNow payload
+   *  can resolve `worktreeBranch` without an async disk probe. */
+  branch?: string
 }
 
 // ─── Diff line comments ──────────────────────────────────────────────

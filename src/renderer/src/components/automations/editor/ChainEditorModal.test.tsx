@@ -233,6 +233,94 @@ describe('ChainEditorModal', () => {
     expect(markup).toContain('Project Two')
   })
 
+  it('renders the trigger pill with the Manual label by default', () => {
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation()}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toMatch(/aria-label=["']Trigger["']/)
+    expect(markup).toMatch(/Trigger:\s*Manual\b(?!\s*\+)/)
+  })
+
+  it('renders the trigger pill label "Manual + Linear" when only acceptsLinearTicket is true', () => {
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation({ trigger: { kind: 'manual', acceptsLinearTicket: true } })}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toContain('Manual + Linear')
+  })
+
+  it('renders the trigger pill label "Manual + Worktree" when only acceptsWorktreeSelection is true', () => {
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation({
+          trigger: { kind: 'manual', acceptsWorktreeSelection: true }
+        })}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toContain('Manual + Worktree')
+  })
+
+  it('renders the trigger pill label "Manual (2 prompts)" when both flags are true', () => {
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation({
+          trigger: {
+            kind: 'manual',
+            acceptsLinearTicket: true,
+            acceptsWorktreeSelection: true
+          }
+        })}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toContain('Manual (2 prompts)')
+  })
+
+  it('renders the trigger pill as a button with aria-haspopup', () => {
+    // Why: the pill is clickable and opens a popover. The shadcn Popover uses
+    // Radix Portal which doesn't appear in renderToStaticMarkup, so we render
+    // the popover body inline as a conditional <div>. Either way, the trigger
+    // itself is a <button> so it's keyboard-activatable.
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation()}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toMatch(/<button[^>]*aria-label=["']Trigger["']/)
+  })
+
   it('disables save when projectId is empty (new automation)', () => {
     const markup = renderToStaticMarkup(
       <ChainEditorModal

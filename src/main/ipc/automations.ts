@@ -6,7 +6,8 @@ import type {
   AutomationCreateInput,
   AutomationDispatchResult,
   AutomationRun,
-  AutomationUpdateInput
+  AutomationUpdateInput,
+  RunNowPayload
 } from '../../shared/automations-types'
 
 export function registerAutomationHandlers(store: Store, service: AutomationService): void {
@@ -30,7 +31,8 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
   })
   ipcMain.handle(
     'automations:runNow',
-    (_event, args: { id: string }): Promise<AutomationRun> => service.runNow(args.id)
+    (_event, args: { id: string; payload?: RunNowPayload }): Promise<AutomationRun> =>
+      service.runNow(args.id, args.payload)
   )
   ipcMain.handle(
     'automations:markDispatchResult',

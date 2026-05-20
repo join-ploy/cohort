@@ -9,7 +9,8 @@ import type {
   RunPromptConfig,
   CreateWorktreeConfig,
   WaitForSetupConfig,
-  RunCommandConfig
+  RunCommandConfig,
+  LinearIssuePayload
 } from './automations-types'
 import type { TuiAgent } from './types'
 
@@ -19,8 +20,10 @@ describe('chain types', () => {
     expectTypeOf<Automation['steps']>().toEqualTypeOf<Step[] | undefined>()
   })
 
-  it('TriggerConfig has a manual variant in Phase 1', () => {
-    expectTypeOf<TriggerConfig>().toEqualTypeOf<{ kind: 'manual' }>()
+  it('TriggerConfig has a manual variant with optional accept-flags', () => {
+    expectTypeOf<TriggerConfig['kind']>().toEqualTypeOf<'manual'>()
+    expectTypeOf<TriggerConfig['acceptsLinearTicket']>().toEqualTypeOf<boolean | undefined>()
+    expectTypeOf<TriggerConfig['acceptsWorktreeSelection']>().toEqualTypeOf<boolean | undefined>()
   })
 
   it('Step carries id, kind, config, onFailure, timeoutSeconds', () => {
@@ -90,5 +93,37 @@ describe('Phase 2 step configs', () => {
     expectTypeOf(wfs).toMatchTypeOf<StepConfig>()
     expectTypeOf(rc).toMatchTypeOf<StepConfig>()
     expectTypeOf(rp).toMatchTypeOf<StepConfig>()
+  })
+})
+
+describe('manual payload types', () => {
+  it('TriggerConfig manual variant accepts the two optional booleans', () => {
+    const t1: TriggerConfig = { kind: 'manual' }
+    const t2: TriggerConfig = { kind: 'manual', acceptsLinearTicket: true }
+    const t3: TriggerConfig = { kind: 'manual', acceptsWorktreeSelection: true }
+    const t4: TriggerConfig = {
+      kind: 'manual',
+      acceptsLinearTicket: true,
+      acceptsWorktreeSelection: true
+    }
+    expectTypeOf(t1).toMatchTypeOf<TriggerConfig>()
+    expectTypeOf(t2).toMatchTypeOf<TriggerConfig>()
+    expectTypeOf(t3).toMatchTypeOf<TriggerConfig>()
+    expectTypeOf(t4).toMatchTypeOf<TriggerConfig>()
+  })
+
+  it('RunPromptConfig gains optional paneRef', () => {
+    expectTypeOf<RunPromptConfig['paneRef']>().toEqualTypeOf<string | undefined>()
+  })
+
+  it('LinearIssuePayload has the documented fields', () => {
+    expectTypeOf<LinearIssuePayload['id']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['identifier']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['title']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['description']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['url']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['assigneeEmail']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['stateName']>().toEqualTypeOf<string>()
+    expectTypeOf<LinearIssuePayload['priority']>().toEqualTypeOf<number>()
   })
 })

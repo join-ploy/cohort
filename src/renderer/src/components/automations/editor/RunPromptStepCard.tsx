@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { cn } from '@/lib/utils'
 import type { RunPromptConfig, Step, StepConfig } from '../../../../../shared/automations-types'
 import type { TuiAgent } from '../../../../../shared/types'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
@@ -33,6 +34,11 @@ export function RunPromptStepCard(props: RunPromptStepCardProps): React.JSX.Elem
   const update = (patch: Partial<RunPromptConfig>): void => {
     props.onConfigChange({ ...config, ...patch })
   }
+  // Why: when the user supplies a paneRef, the chain executor reuses the
+  // existing pane's agent rather than the configured one — surface that with
+  // a dim treatment + note so it's clear the agentId select is inert.
+  const paneRef = config.paneRef ?? ''
+  const agentDimmed = paneRef.length > 0
 
   return (
     <StepCardChrome
@@ -52,7 +58,17 @@ export function RunPromptStepCard(props: RunPromptStepCardProps): React.JSX.Elem
         available={props.available}
         ariaLabel="Worktree ref"
       />
-      <label className="flex items-center gap-2 text-xs">
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-muted-foreground">Reuse pane (optional)</span>
+        <TemplateInput
+          value={paneRef}
+          onChange={(v) => update({ paneRef: v })}
+          placeholder={`{{steps.${props.step.id}.paneKey}}`}
+          available={props.available}
+          ariaLabel="Pane ref"
+        />
+      </label>
+      <label className={cn('flex items-center gap-2 text-xs', agentDimmed && 'opacity-50')}>
         <span className="text-muted-foreground">Agent</span>
         <select
           aria-label="Agent"
@@ -66,6 +82,9 @@ export function RunPromptStepCard(props: RunPromptStepCardProps): React.JSX.Elem
             </option>
           ))}
         </select>
+        {agentDimmed ? (
+          <span className="text-muted-foreground">Pane already has an agent.</span>
+        ) : null}
       </label>
       <TemplateInput
         value={config.prompt}

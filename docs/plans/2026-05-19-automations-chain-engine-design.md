@@ -379,3 +379,27 @@ Editor commits (`4b27e6f3..HEAD`):
 - Lost UI surfaces from legacy editor: schedule preset/time/dow pickers, missed-run grace, run-location toggle. New rows get default values until Phase 3 (schedule trigger UI) lands. Existing rows preserve dormant legacy fields.
 - Drag-to-reorder UI not wired to @dnd-kit yet (deps were installed in package.json but step cards don't consume them). Polish.
 - No worktree pre-fetching at the editor level (worktree refs are templates inside step configs). If/when worktree picker UX lands, may need to re-introduce.
+
+- 2026-05-20: Manual Linear/worktree payload + paneRef + outputTail capture shipped on branch `bright_robin`.
+
+### Manual payload phase deliverables
+
+Commits (`a91f6933..HEAD`):
+
+- Types + schemas + nested trigger paths (`a91f6933`)
+- sendPromptToPane IPC (`2285d628`)
+- RunPromptRunner paneRef branch (`158a14d7`)
+- RunCommandRunner outputTail capture (`4e7dff36`)
+- runNow accepts Linear + worktree payload (`32b20ebe`)
+- LinearIssuePicker + WorktreePicker (`6d54f900`)
+- Editor UX (trigger pill popover + paneRef field) (`d1447052`)
+- RunNowConfirmModal (`d8d74568`)
+- Linear pill in run-detail (`e626fb5e`)
+- E2E + verification + this doc (NEW)
+
+### Manual payload phase known follow-ups
+
+- LinearIssue.assignee has no email field — assigneeEmail defaults to ''. Surface email through `mappers.ts` + LinearIssue type when needed.
+- WorktreeMeta.branch is best-effort (empty string default); populated only if the create-worktree flow caches it.
+- PTYs emit a SINGLE merged data stream, so the design's stdoutTail/stderrTail split became a single outputTail. Template references should use {{steps.X.outputTail}}.
+- Same Phase 5+7 follow-ups still apply: caret staleness, drag-reorder, modal accessibility.

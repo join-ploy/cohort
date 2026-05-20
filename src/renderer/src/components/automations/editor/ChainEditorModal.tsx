@@ -4,9 +4,11 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
+  RunNowPayload,
   Step,
   StepConfig,
-  StepKind
+  StepKind,
+  TriggerConfig
 } from '../../../../../shared/automations-types'
 import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
@@ -27,6 +29,8 @@ import {
 } from './chain-editor-modal-state'
 import { AvailableVariablesPanel } from './AvailableVariablesPanel'
 import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
+import { RunNowConfirmModal } from './RunNowConfirmModal'
+import { TriggerPill } from './TriggerPill'
 
 export type ChainEditorModalProps = {
   open: boolean
@@ -36,7 +40,7 @@ export type ChainEditorModalProps = {
   createPrCommands: SidebarPromptCommand[]
   onClose: () => void
   onSave: (automation: Automation) => Promise<void>
-  onRunNow?: (automationId: string) => void
+  onRunNow?: (automationId: string, payload?: RunNowPayload) => void | Promise<void>
 }
 
 export function ChainEditorModal(props: ChainEditorModalProps): React.JSX.Element | null {
@@ -55,6 +59,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [dirty, setDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [addOpen, setAddOpen] = React.useState(false)
+  const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
     const base = computeAllErrors(draft)
@@ -201,17 +206,40 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         projectId={draft.projectId}
         repos={props.repos}
         enabled={draft.enabled}
+        trigger={draft.trigger}
         canRunNow={canRunNow}
         onNameChange={(name) => updateDraft({ name })}
         onProjectChange={(projectId) => updateDraft({ projectId })}
         onEnabledChange={(enabled) => updateDraft({ enabled })}
+        onTriggerChange={(trigger) => updateDraft({ trigger })}
         onRunNow={() => {
-          if (props.automation && props.onRunNow) {
-            props.onRunNow(props.automation.id)
+          if (!props.automation || !props.onRunNow) {
+            return
+          }
+          // Why: when the trigger requires extra inputs (Linear ticket or
+          // worktree), defer to the confirm modal so the operator can supply
+          // them. Otherwise dispatch directly.
+          const needsPayload =
+            !!draft.trigger?.acceptsLinearTicket || !!draft.trigger?.acceptsWorktreeSelection
+          if (needsPayload) {
+            setRunConfirmOpen(true)
+          } else {
+            void props.onRunNow(props.automation.id)
           }
         }}
         onClose={handleCancel}
       />
+
+      {props.automation && props.onRunNow ? (
+        <RunNowConfirmModal
+          open={runConfirmOpen}
+          automation={props.automation}
+          onClose={() => setRunConfirmOpen(false)}
+          onRun={async (payload) => {
+            await props.onRunNow?.(props.automation!.id, payload)
+          }}
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
@@ -258,10 +286,12 @@ type ChainEditorHeaderProps = {
   projectId: string
   repos: Repo[]
   enabled: boolean
+  trigger: TriggerConfig
   canRunNow: boolean
   onNameChange: (name: string) => void
   onProjectChange: (projectId: string) => void
   onEnabledChange: (enabled: boolean) => void
+  onTriggerChange: (trigger: TriggerConfig) => void
   onRunNow: () => void
   onClose: () => void
 }
@@ -299,12 +329,7 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
         />
         Enabled
       </label>
-      <span
-        aria-label="Trigger"
-        className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-      >
-        Trigger: Manual
-      </span>
+      <TriggerPill trigger={props.trigger} onTriggerChange={props.onTriggerChange} />
       <Button
         variant="outline"
         size="sm"

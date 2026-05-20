@@ -74,4 +74,39 @@ describe('dryRunTemplate', () => {
   it('respects the escape sequence — \\{{ is a literal', () => {
     expect(dryRunTemplate('\\{{not-a-token}}', SCHEMA)).toEqual([])
   })
+
+  it('walks nested trigger paths correctly', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: {
+        firedAt: 'number',
+        linear: { issue: { id: 'string', title: 'string' } }
+      },
+      steps: {}
+    }
+    expect(dryRunTemplate('{{trigger.linear.issue.title}}', schema)).toEqual([])
+    expect(dryRunTemplate('{{trigger.firedAt}}', schema)).toEqual([])
+  })
+
+  it('flags traversal past a leaf in trigger', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: { firedAt: 'number' },
+      steps: {}
+    }
+    const errors = dryRunTemplate('{{trigger.firedAt.foo}}', schema)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+  })
+
+  it('flags unknown nested key in trigger', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: { linear: { issue: { id: 'string' } } },
+      steps: {}
+    }
+    const errors = dryRunTemplate('{{trigger.linear.issue.missing}}', schema)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+  })
 })

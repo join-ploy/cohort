@@ -2,6 +2,7 @@ import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner
 import type { RunPromptConfig } from '../../../shared/automations-types'
 import type { AgentStatusEntry } from '../../agent-status/registry'
 import { OpenPromptPaneError } from '../open-prompt-pane'
+import { SendPromptToPaneError } from '../send-prompt-to-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 export type RunPromptDeps = {
@@ -10,6 +11,11 @@ export type RunPromptDeps = {
     agentId: string
     prompt: string
   }) => Promise<{ paneKey: string }>
+  /** Reuses an existing pane by paneKey instead of opening a new one. Optional
+   *  so legacy `paneRef`-less chains keep working without wiring the IPC; the
+   *  default below throws if a chain ever tries to invoke it without the dep
+   *  being supplied. */
+  sendPromptToPane?: (params: { paneKey: string; prompt: string }) => Promise<void>
   getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
   now: () => number
 }
@@ -45,9 +51,13 @@ export class RunPromptRunner implements StepRunner {
     if (!tracker) {
       let worktreeId: string
       let prompt: string
+      let resolvedPaneRef: string
       try {
         worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
         prompt = resolveTemplate(config.prompt, ctx.context)
+        // Why: paneRef is optional; only resolve when present so a chain
+        // without it doesn't fail on a missing template input.
+        resolvedPaneRef = config.paneRef ? resolveTemplate(config.paneRef, ctx.context) : ''
       } catch (e) {
         // Template resolution errors can never succeed on retry (bad authoring
         // or missing context), so fail-fast instead of looping forever.
@@ -56,6 +66,50 @@ export class RunPromptRunner implements StepRunner {
         }
         throw e
       }
+
+      // paneRef branch: reuse an existing pane instead of opening a new one.
+      const paneRef = resolvedPaneRef.trim()
+      if (paneRef.length > 0) {
+        // Why: pre-send wait gate — never write into a pane mid-turn. A
+        // `working` agent is still composing/executing, so we hold off until
+        // it returns to `done`. Returning `needs-more-time` (not `failed`)
+        // lets the per-step timeout be the only escape valve.
+        const status = this.deps.getAgentStatus(paneRef)
+        if (status?.state === 'working') {
+          return { outcome: 'needs-more-time', status: 'running' }
+        }
+        if (status?.state === 'blocked' || status?.state === 'waiting') {
+          // Same halt semantics as the polling branch below: can't send into
+          // a pane whose agent is waiting on a human.
+          return {
+            outcome: 'failed',
+            status: 'failed',
+            error: `Agent needs human input (${status.state}). Chain halted.`
+          }
+        }
+        if (!this.deps.sendPromptToPane) {
+          throw new Error('RunPromptRunner: sendPromptToPane dep not wired.')
+        }
+        try {
+          await this.deps.sendPromptToPane({ paneKey: paneRef, prompt })
+        } catch (e) {
+          // Why: mirror the openPromptPane branch — deterministic renderer
+          // failures (pane gone, write rejected) fail-fast via the dedicated
+          // error class; plain Errors are transient and re-thrown for retry.
+          if (e instanceof SendPromptToPaneError) {
+            return { outcome: 'failed', status: 'failed', error: e.message }
+          }
+          throw e
+        }
+        tracker = { paneKey: paneRef, openedAt: this.deps.now(), firstDoneAt: null }
+        if (!runTrackers) {
+          runTrackers = new Map()
+          this.trackers.set(ctx.runId, runTrackers)
+        }
+        runTrackers.set(ctx.step.id, tracker)
+        return { outcome: 'needs-more-time', status: 'running' }
+      }
+
       let paneKey: string
       try {
         const result = await this.deps.openPromptPane({
@@ -135,10 +189,15 @@ export class RunPromptRunner implements StepRunner {
     }
     const debounceMs = config.doneDebounceSeconds * 1000
     if (now - tracker.firstDoneAt >= debounceMs) {
+      // Why: also publish paneKey into context.steps so a downstream step can
+      // template `paneRef: '{{steps.<this-step-id>.paneKey}}'` and chain its
+      // prompt into the same pane (the MP.10 paneRef use case).
+      const output = { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
       return {
         outcome: 'done',
         status: 'succeeded',
-        output: { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
+        output,
+        contextPatch: { steps: { [ctx.step.id]: output } }
       }
     }
     return { outcome: 'needs-more-time', status: 'running' }

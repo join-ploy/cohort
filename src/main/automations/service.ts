@@ -5,13 +5,15 @@ import type {
   Automation,
   AutomationDispatchRequest,
   AutomationDispatchResult,
-  AutomationRun
+  AutomationRun,
+  RunNowPayload
 } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
 import type { SetupScriptEntry } from '../setup-script/registry'
 import type { PtyExitEntry } from '../pty/exit-registry'
 import { ChainExecutor } from './chain-executor'
 import { openPromptPane } from './open-prompt-pane'
+import { sendPromptToPane } from './send-prompt-to-pane'
 import { openCommandPane } from './open-command-pane'
 import { RunPromptRunner } from './runners/run-prompt-runner'
 import { WaitForSetupRunner } from './runners/wait-for-setup-runner'
@@ -37,6 +39,12 @@ export type AutomationServiceOpts = {
    *  executor's RunCommandRunner can detect command completion without an
    *  IPC roundtrip. */
   getPtyExit?: (ptyId: string) => PtyExitEntry | undefined
+  /** Subscribe to the main-process PTY data stream. Wired in
+   *  src/main/index.ts from `subscribePtyData` in `./ipc/pty` so the chain
+   *  executor's RunCommandRunner can capture command `outputTail` directly,
+   *  without going through the renderer round-trip. Returns an unsubscribe
+   *  function the runner calls on terminal outcomes. */
+  subscribePtyData?: (listener: (ptyId: string, data: string) => void) => () => void
   /** Bridge from the chain executor's `create-worktree` step to the OrcaRuntime
    *  managed-worktree create flow. Wired in src/main/index.ts to translate
    *  the runner's narrow shape onto OrcaRuntimeService.createManagedWorktree.
@@ -59,6 +67,7 @@ export class AutomationService {
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
   private readonly getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
   private readonly getPtyExit: (ptyId: string) => PtyExitEntry | undefined
+  private readonly subscribePtyData: (listener: (ptyId: string, data: string) => void) => () => void
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
@@ -77,27 +86,36 @@ export class AutomationService {
     this.getAgentStatus = opts.getAgentStatus ?? (() => undefined)
     this.getSetupScript = opts.getSetupScript ?? (() => undefined)
     this.getPtyExit = opts.getPtyExit ?? (() => undefined)
+    // Why: default subscribePtyData to a no-op subscription so service.test.ts
+    // harnesses that never exercise run-command steps don't need to wire it.
+    // The returned unsubscribe must still be a fn so cleanup() doesn't throw.
+    this.subscribePtyData = opts.subscribePtyData ?? (() => () => {})
     // Default getWebContents to the service's own setWebContents-tracked
     // reference so tests that don't supply a factory still get the WebContents
     // through the existing setWebContents() path.
     this.getWebContents = opts.getWebContents ?? (() => this.webContents)
     this.getIpcMain = opts.getIpcMain ?? null
 
+    // Why: resolve renderer/ipc lazily so a reload swap is picked up on the
+    // next tick. A destroyed/null webContents throws a plain Error (transient)
+    // which runners let bubble for retry; deterministic renderer rejections
+    // come back as typed errors and fail-fast inside the runner.
+    const requirePaneCtx = (
+      what: 'prompt' | 'command'
+    ): { webContents: WebContents; ipc: IpcMain; requestId: string } => {
+      const webContents = this.getWebContents()
+      if (!webContents || webContents.isDestroyed()) {
+        throw new Error(`No renderer available to open ${what} pane.`)
+      }
+      if (!this.getIpcMain) {
+        throw new Error('AutomationService missing getIpcMain wiring.')
+      }
+      return { webContents, ipc: this.getIpcMain(), requestId: randomUUID() }
+    }
+
     this.runPromptRunner = new RunPromptRunner({
-      openPromptPane: async (params) => {
-        const webContents = this.getWebContents()
-        if (!webContents || webContents.isDestroyed()) {
-          throw new Error('No renderer available to open prompt pane.')
-        }
-        if (!this.getIpcMain) {
-          throw new Error('AutomationService missing getIpcMain wiring.')
-        }
-        return openPromptPane(params, {
-          webContents,
-          ipc: this.getIpcMain(),
-          requestId: randomUUID()
-        })
-      },
+      openPromptPane: async (params) => openPromptPane(params, requirePaneCtx('prompt')),
+      sendPromptToPane: async (params) => sendPromptToPane(params, requirePaneCtx('prompt')),
       getAgentStatus: this.getAgentStatus,
       now: () => Date.now()
     })
@@ -108,21 +126,9 @@ export class AutomationService {
     })
 
     this.runCommandRunner = new RunCommandRunner({
-      openCommandPane: async (params) => {
-        const webContents = this.getWebContents()
-        if (!webContents || webContents.isDestroyed()) {
-          throw new Error('No renderer available to open command pane.')
-        }
-        if (!this.getIpcMain) {
-          throw new Error('AutomationService missing getIpcMain wiring.')
-        }
-        return openCommandPane(params, {
-          webContents,
-          ipc: this.getIpcMain(),
-          requestId: randomUUID()
-        })
-      },
+      openCommandPane: async (params) => openCommandPane(params, requirePaneCtx('command')),
       getPtyExit: this.getPtyExit,
+      subscribePtyData: this.subscribePtyData,
       now: () => Date.now()
     })
 
@@ -181,7 +187,7 @@ export class AutomationService {
     this.timer = null
   }
 
-  async runNow(automationId: string): Promise<AutomationRun> {
+  async runNow(automationId: string, payload?: RunNowPayload): Promise<AutomationRun> {
     const automation = this.store.listAutomations().find((entry) => entry.id === automationId)
     if (!automation) {
       throw new Error('Automation not found.')
@@ -191,6 +197,10 @@ export class AutomationService {
     // progress without waiting a full tick cadence. Subsequent ticks fall
     // through the normal 60s evaluateDueRuns() loop.
     if (automation.trigger && automation.steps && automation.steps.length > 0) {
+      // Why: build the trigger context up-front (before persisting the run) so
+      // a missing worktree fails fast — operators see a clear error instead of
+      // a phantom `running` row with an unresolved template downstream.
+      const triggerContext = this.buildTriggerContext(payload)
       const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
       run.status = 'running'
       // Seed the chain context with automation metadata so templates like
@@ -201,7 +211,8 @@ export class AutomationService {
         automation: {
           workspaceId: automation.workspaceId,
           projectId: automation.projectId
-        }
+        },
+        trigger: triggerContext
       }
       run.stepStates = []
       this.store.replaceAutomationRun(run)
@@ -220,6 +231,23 @@ export class AutomationService {
     const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
     await this.requestDispatch(automation, run)
     return run
+  }
+
+  private buildTriggerContext(payload?: RunNowPayload): Record<string, unknown> {
+    const triggerContext: Record<string, unknown> = {}
+    if (payload?.linear) {
+      triggerContext.linear = payload.linear
+    }
+    if (payload?.worktreeId) {
+      const wt = this.store.listWorktrees().find((w) => w.id === payload.worktreeId)
+      if (!wt) {
+        throw new Error(`Worktree ${payload.worktreeId} not found.`)
+      }
+      triggerContext.worktreeId = wt.id
+      triggerContext.worktreeBranch = wt.branch
+      triggerContext.worktreePath = wt.path
+    }
+    return triggerContext
   }
 
   markDispatchResult(result: AutomationDispatchResult): AutomationRun {

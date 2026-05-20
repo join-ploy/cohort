@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: end-to-end runNow chain coverage lives
+   here as one suite so the makeFakeIpc helper and Electron/git mocks stay
+   single-source. Splitting would force fixture duplication. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
@@ -5,6 +8,7 @@ import { tmpdir } from 'os'
 import type { Repo } from '../../shared/types'
 import type { Step } from '../../shared/automations-types'
 import type { AgentStatusEntry } from '../agent-status/registry'
+import type { PtyExitEntry } from '../pty/exit-registry'
 import { AutomationService } from './service'
 
 // Mock the same surface service.test.ts mocks — Electron + git repo — so the
@@ -248,6 +252,277 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     expect(final.stepStates).toHaveLength(1)
     expect(final.stepStates?.[0].status).toBe('succeeded')
     expect(final.stepStates?.[0].finishedAt).toBeTypeOf('number')
+  })
+
+  it('seeds run.context.trigger from a Linear + worktree payload', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    // Branch lives on the optional WorktreeMeta cache; path is parsed from id.
+    store.setWorktreeMeta('r1::/x', { branch: 'main' })
+    const automation = store.createAutomation({
+      name: 'Chain auto',
+      prompt: '(ignored)',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2030-01-01T00:00:00').getTime()
+    })
+    // Templates against both trigger.linear.issue.title and trigger.worktreeId
+    // so the materialized context is exercised end-to-end via the runner.
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    stored.trigger = { kind: 'manual', acceptsLinearTicket: true, acceptsWorktreeSelection: true }
+    stored.steps = [
+      {
+        id: 's1',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: '{{trigger.worktreeId}}',
+          agentId: 'claude',
+          prompt: 'work on {{trigger.linear.issue.title}}',
+          doneDebounceSeconds: 15
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ]
+    const { ipc, listeners } = makeFakeIpc()
+    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+      const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
+      listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
+    })
+    const service = new AutomationService(store, {
+      tickMs: 60_000,
+      getAgentStatus: () => undefined,
+      getIpcMain: () => ipc as never
+    })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+    const result = await service.runNow(automation.id, {
+      linear: {
+        issue: {
+          id: 'lin-1',
+          identifier: 'ORC-42',
+          title: 'My ticket',
+          description: 'desc',
+          url: 'https://linear.app/x/ORC-42',
+          assigneeEmail: 'a@b',
+          stateName: 'Todo',
+          priority: 2
+        }
+      },
+      worktreeId: 'r1::/x'
+    })
+    expect(send).toHaveBeenCalledWith(
+      'automations:openPromptPane',
+      expect.objectContaining({
+        worktreeId: 'r1::/x',
+        agentId: 'claude',
+        prompt: 'work on My ticket'
+      })
+    )
+    expect(result.context?.trigger).toMatchObject({
+      linear: { issue: expect.objectContaining({ id: 'lin-1', title: 'My ticket' }) },
+      worktreeId: 'r1::/x',
+      worktreeBranch: 'main',
+      worktreePath: '/x'
+    })
+    // Unknown worktreeId fails fast on the same code path.
+    await expect(service.runNow(automation.id, { worktreeId: 'wt-missing' })).rejects.toThrow(
+      /Worktree wt-missing not found/
+    )
+  })
+
+  it('drives paneRef + outputTail through a 3-step chain (paneKey survives + prompt templates against outputTail)', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'paneRef + outputTail chain',
+      prompt: '(ignored — chain overrides)',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2030-01-01T00:00:00').getTime()
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    stored.trigger = { kind: 'manual' }
+    const steps: Step[] = [
+      {
+        id: 's1',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: 'wt1',
+          agentId: 'claude',
+          prompt: 'open a fresh session',
+          // Why: 0s debounce so a single `done` ping immediately satisfies
+          // the gate — keeps the test deterministic without juggling clocks.
+          doneDebounceSeconds: 0
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      },
+      {
+        id: 's2',
+        kind: 'run-command',
+        config: {
+          worktreeRef: 'wt1',
+          source: 'custom',
+          customCommand: 'echo "review verdict"',
+          captureStdout: true
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      },
+      {
+        id: 's3',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: 'wt1',
+          agentId: 'claude',
+          // The MP.10 wiring under test: s3 reuses s1's pane via paneRef and
+          // injects s2's captured outputTail into the prompt template.
+          paneRef: '{{steps.s1.paneKey}}',
+          prompt: 'verdict was: {{steps.s2.outputTail}}',
+          doneDebounceSeconds: 0
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ]
+    stored.steps = steps
+
+    const { ipc, listeners } = makeFakeIpc()
+    // Track the prompt argument captured by the sendPromptToPane reply path
+    // (s3's pane-reuse branch). Asserted at the end as the proxy for "templated
+    // prompt reached the pane."
+    const sendPromptToPaneCalls: { paneKey: string; prompt: string }[] = []
+    // Each channel produces its own reply on the dedicated `:reply:<reqId>`
+    // sub-channel, mirroring the production helpers (open-prompt-pane.ts /
+    // open-command-pane.ts / send-prompt-to-pane.ts). The fake `send` here
+    // routes by channel and synthesizes the appropriate reply payload.
+    const send = vi.fn(
+      (channel: string, payload: { requestId: string; paneKey?: string; prompt?: string }) => {
+        if (channel === 'automations:openPromptPane') {
+          const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
+          listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
+        } else if (channel === 'automations:openCommandPane') {
+          const replyChannel = `automations:openCommandPane:reply:${payload.requestId}`
+          listeners.get(replyChannel)?.(
+            {},
+            {
+              ok: true,
+              ptyId: 'pty-1',
+              paneKey: 'tab-2:1'
+            }
+          )
+        } else if (channel === 'automations:sendPromptToPane') {
+          sendPromptToPaneCalls.push({
+            paneKey: String(payload.paneKey ?? ''),
+            prompt: String(payload.prompt ?? '')
+          })
+          const replyChannel = `automations:sendPromptToPane:reply:${payload.requestId}`
+          listeners.get(replyChannel)?.({}, { ok: true })
+        }
+      }
+    )
+
+    // Both s1 and s3 hit the agent-status registry. s1 polls against
+    // 'tab-1:1' (returned by openPromptPane) and needs `done` to satisfy the
+    // 0s debounce. s3's pane-reuse branch ALSO consults agent status for the
+    // pre-send wait gate — it must not be `working`, so `done` is fine.
+    const getAgentStatus = (_paneKey: string): AgentStatusEntry | undefined => ({
+      state: 'done',
+      updatedAt: Date.now()
+    })
+
+    // Step 2's PTY exits with code 0; getPtyExit must return `undefined` on
+    // the first tick (subscribe happens first), then the exit on subsequent
+    // ticks so the runner captures the output before exit.
+    const exit: PtyExitEntry = { exitCode: 0, finishedAt: 100 }
+    let s2OpenedAt = 0
+    const getPtyExit = (ptyId: string): PtyExitEntry | undefined => {
+      if (ptyId !== 'pty-1') {
+        return undefined
+      }
+      // Withhold the exit on the very first poll so the subscribePtyData
+      // listener has a tick to receive the 'review verdict\n' fragment.
+      if (s2OpenedAt === 0) {
+        s2OpenedAt = Date.now()
+        return undefined
+      }
+      return exit
+    }
+
+    // subscribePtyData fires the 'review verdict\n' fragment immediately on
+    // subscribe so the runner's outputTail buffer fills before the next tick
+    // reads the exit. The runner subscribes BEFORE recording its tracker, so
+    // this lands in the OutputTail buffer for step s2 regardless of how soon
+    // the next tick fires.
+    const subscribePtyData = vi.fn().mockImplementation((listener) => {
+      listener('pty-1', 'review verdict\n')
+      return () => {}
+    })
+
+    const service = new AutomationService(store, {
+      tickMs: 10,
+      getAgentStatus,
+      getPtyExit,
+      subscribePtyData,
+      getIpcMain: () => ipc as never
+    })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+
+    const initial = await service.runNow(automation.id)
+    expect(initial.status).toBe('running')
+
+    service.start()
+    try {
+      await vi.waitFor(
+        () => {
+          const persisted = store.getAutomationRun(initial.id)
+          expect(persisted?.status === 'completed' || persisted?.status === 'failed').toBe(true)
+        },
+        { timeout: 5_000, interval: 25 }
+      )
+    } finally {
+      service.stop()
+    }
+
+    const final = store.getAutomationRun(initial.id)
+    expect(final?.status).toBe('completed')
+    expect(final?.stepStates).toHaveLength(3)
+    expect(final?.stepStates?.[0]).toMatchObject({ stepId: 's1', status: 'succeeded' })
+    expect(final?.stepStates?.[1]).toMatchObject({ stepId: 's2', status: 'succeeded' })
+    expect(final?.stepStates?.[2]).toMatchObject({ stepId: 's3', status: 'succeeded' })
+
+    // s1 published paneKey into context.steps.s1 (the MP.10 contextPatch
+    // addition); s2 published outputTail into context.steps.s2. Both must
+    // survive the chain executor's merge so s3 could template against them.
+    const ctxSteps = (
+      final?.context as { steps?: Record<string, Record<string, unknown>> } | undefined
+    )?.steps
+    expect(ctxSteps?.s1).toMatchObject({ paneKey: 'tab-1:1' })
+    expect(ctxSteps?.s2).toMatchObject({ outputTail: 'review verdict\n', exitCode: 0 })
+
+    // openPromptPane fired EXACTLY once (s1 only); s3 reused via sendPromptToPane.
+    const openPromptCalls = send.mock.calls.filter((c) => c[0] === 'automations:openPromptPane')
+    expect(openPromptCalls).toHaveLength(1)
+    // openCommandPane fired exactly once (s2).
+    const openCommandCalls = send.mock.calls.filter((c) => c[0] === 'automations:openCommandPane')
+    expect(openCommandCalls).toHaveLength(1)
+    // sendPromptToPane fired exactly once (s3), with the templated prompt
+    // containing the captured outputTail.
+    expect(sendPromptToPaneCalls).toHaveLength(1)
+    expect(sendPromptToPaneCalls[0]).toMatchObject({
+      paneKey: 'tab-1:1',
+      prompt: 'verdict was: review verdict\n'
+    })
   })
 
   it('uses the legacy dispatch path for automations without trigger+steps', async () => {

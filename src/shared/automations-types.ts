@@ -113,6 +113,15 @@ export type AutomationDispatchRequest = {
   run: AutomationRun
 }
 
+// Why: optional payload supplied by the renderer when an operator manually
+// triggers a chain-shape automation. Linear issue + worktree selection are
+// materialized into `run.context.trigger` so steps can template against
+// `{{trigger.linear.issue.title}}` and `{{trigger.worktreeBranch}}` etc.
+export type RunNowPayload = {
+  linear?: { issue: LinearIssuePayload }
+  worktreeId?: string
+}
+
 export type AutomationDispatchResult = {
   runId: string
   status: AutomationRunStatus
@@ -123,7 +132,14 @@ export type AutomationDispatchResult = {
 
 // Phase 1 chain types. Coexist with the legacy fields above during migration.
 
-export type TriggerConfig = { kind: 'manual' }
+export type TriggerConfig = {
+  kind: 'manual'
+  // Both flags are optional so legacy persisted rows still parse without
+  // migration. When set, the editor surfaces extra trigger-time inputs and the
+  // dry-run validator exposes the matching overlay paths.
+  acceptsLinearTicket?: boolean
+  acceptsWorktreeSelection?: boolean
+}
 
 export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
 
@@ -132,6 +148,21 @@ export type RunPromptConfig = {
   agentId: TuiAgent
   prompt: string
   doneDebounceSeconds: number
+  // Optional handle for reusing an existing pane instead of opening a new one.
+  paneRef?: string
+}
+
+// Snapshot of the Linear issue selected at manual-trigger time. Materialized
+// into the run context so steps can template against the fields below.
+export type LinearIssuePayload = {
+  id: string
+  identifier: string
+  title: string
+  description: string
+  url: string
+  assigneeEmail: string
+  stateName: string
+  priority: number
 }
 
 export type CreateWorktreeConfig = {
