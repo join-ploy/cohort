@@ -66,6 +66,8 @@ import { AutomationService } from './automations/service'
 import { AgentStatusRegistry } from './agent-status/registry'
 import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
+import { createCleanupService, type CleanupService } from './archive/cleanup-service'
+import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -87,6 +89,7 @@ let starNag: StarNagService | null = null
 let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
 let automations: AutomationService | null = null
+let archiveCleanup: CleanupService | null = null
 // Why: main-process mirror of the renderer's agent-status map, written from
 // the same hook-event callback that fans events out via `agentStatus:set`.
 // The chain executor (next Phase 1 task) reads from this so RunPromptRunner
@@ -558,6 +561,27 @@ app.whenReady().then(async () => {
     getLocalProvider: () => getLocalPtyProvider()
   })
   const runtimeRef = runtime
+  const storeRef = store
+  // Why: cleanup-service runs from the main process at startup and on a timer;
+  // mainWindow can be in any state (null during bootstrap, destroyed during
+  // shutdown). Read it through the module-level binding and skip when missing —
+  // meta cleanup that the runWorktreeRemoval path performs is the load-bearing
+  // work; the changed-notify is just a UI hint that the next list refresh
+  // picks up anyway.
+  archiveCleanup = createCleanupService({
+    store: storeRef,
+    runRemoval: async (worktreeId) => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) {
+        return
+      }
+      await runWorktreeRemoval(
+        { worktreeId, force: false },
+        { store: storeRef, runtime: runtimeRef, mainWindow: window }
+      )
+    }
+  })
+  archiveCleanup.start()
   automations = new AutomationService(store, {
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
@@ -758,6 +782,7 @@ app.on('before-quit', () => {
   // unmount TerminalPane components (removing their capture callbacks).
   // The window close handler passes isQuitting to the renderer so it skips the
   // child-process confirmation dialog and proceeds directly to buffer capture.
+  archiveCleanup?.stop()
   rateLimits?.stop()
   // Why: run/setup script PTYs need an explicit teardown here (not in will-quit)
   // so their run:exited / setup:exited broadcasts reach the renderer while the
