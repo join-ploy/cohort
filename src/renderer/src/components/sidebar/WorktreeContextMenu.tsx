@@ -309,7 +309,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
           >
             <Trash2 className="size-3.5" />
             {deletingContext
-              ? 'Deleting…'
+              ? 'Archiving…'
               : isMultiContext
                 ? archiveLabel
                 : isFolder

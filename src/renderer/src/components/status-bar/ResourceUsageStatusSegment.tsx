@@ -383,7 +383,7 @@ function WorktreeRow({
   onToggle,
   onNavigate,
   onSleep,
-  onDelete,
+  onArchive,
   onKillSession,
   navigateToTab
 }: {
@@ -393,7 +393,7 @@ function WorktreeRow({
   onToggle: () => void
   onNavigate: () => void
   onSleep: () => void
-  onDelete: () => void
+  onArchive: () => void
   onKillSession: (session: UnifiedSessionRow) => void
   navigateToTab: (tabId: string, paneKey: string | null) => void
 }): React.JSX.Element {
@@ -489,7 +489,7 @@ function WorktreeRow({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      onClick={onDelete}
+                      onClick={onArchive}
                       disabled={isMainWorktree}
                       aria-label={`Archive workspace ${rowLabel}`}
                       className={cn(
@@ -546,7 +546,7 @@ function ResourceTree({
   navigateToWorktree,
   navigateToTab,
   onSleep,
-  onDelete,
+  onArchive,
   onKillSession
 }: {
   repos: UnifiedRepoGroup[]
@@ -558,7 +558,7 @@ function ResourceTree({
   navigateToWorktree: (worktreeId: string) => void
   navigateToTab: (tabId: string, paneKey: string | null) => void
   onSleep: (worktreeId: string) => void
-  onDelete: (worktreeId: string) => void
+  onArchive: (worktreeId: string) => void
   onKillSession: (session: UnifiedSessionRow) => void
 }): React.JSX.Element {
   const worktreeById = useWorktreeMap()
@@ -582,7 +582,7 @@ function ResourceTree({
         onToggle={() => toggleWorktree(wt.worktreeId)}
         onNavigate={() => navigateToWorktree(wt.worktreeId)}
         onSleep={() => onSleep(wt.worktreeId)}
-        onDelete={() => onDelete(wt.worktreeId)}
+        onArchive={() => onArchive(wt.worktreeId)}
         onKillSession={onKillSession}
         navigateToTab={navigateToTab}
       />
@@ -917,7 +917,7 @@ export function ResourceUsageStatusSegment({
     [tabsByWorktree, setActiveView]
   )
 
-  const deleteWorktree = useCallback((worktreeId: string): void => {
+  const handleArchiveWorktree = useCallback((worktreeId: string): void => {
     setOpen(false)
     runWorktreeArchive(worktreeId)
   }, [])
@@ -1274,7 +1274,7 @@ export function ResourceUsageStatusSegment({
                 navigateToWorktree={navigateToWorktree}
                 navigateToTab={navigateToTab}
                 onSleep={handleSleep}
-                onDelete={deleteWorktree}
+                onArchive={handleArchiveWorktree}
                 onKillSession={handleKillSession}
               />
             )}
