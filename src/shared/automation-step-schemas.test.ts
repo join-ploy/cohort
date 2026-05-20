@@ -36,9 +36,8 @@ describe('automation step schemas', () => {
     })
   })
 
-  it('run-command produces ptyId/paneKey + exitCode/durationMs', () => {
+  it('run-command produces paneKey + exitCode + durationMs', () => {
     expect(RUN_COMMAND_OUTPUT_SCHEMA).toEqual({
-      ptyId: 'string',
       paneKey: 'string',
       exitCode: 'number',
       durationMs: 'number'

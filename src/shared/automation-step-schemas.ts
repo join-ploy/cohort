@@ -20,7 +20,6 @@ export const RUN_PROMPT_OUTPUT_SCHEMA: OutputSchema = {
 }
 
 export const RUN_COMMAND_OUTPUT_SCHEMA: OutputSchema = {
-  ptyId: 'string',
   paneKey: 'string',
   exitCode: 'number',
   durationMs: 'number'
