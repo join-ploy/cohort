@@ -568,6 +568,15 @@ app.whenReady().then(async () => {
   // meta cleanup that the runWorktreeRemoval path performs is the load-bearing
   // work; the changed-notify is just a UI hint that the next list refresh
   // picks up anyway.
+  // Why: E2E specs need a way to make a freshly-archived worktree immediately
+  // past TTL without waiting 30 days or mutating persisted state by hand. The
+  // override is a positive number (not 0) so the gt-threshold comparison still
+  // captures the just-archived row deterministically.
+  const archiveTtlOverrideRaw = process.env.ORCA_ARCHIVE_TTL_MS_OVERRIDE
+  const archiveTtlOverride =
+    archiveTtlOverrideRaw !== undefined && Number.isFinite(Number(archiveTtlOverrideRaw))
+      ? Math.max(0, Number(archiveTtlOverrideRaw))
+      : undefined
   archiveCleanup = createCleanupService({
     store: storeRef,
     runRemoval: async (worktreeId) => {
@@ -579,9 +588,19 @@ app.whenReady().then(async () => {
         { worktreeId, force: false },
         { store: storeRef, runtime: runtimeRef, mainWindow: window }
       )
-    }
+    },
+    ...(archiveTtlOverride !== undefined ? { ttlMs: archiveTtlOverride } : {})
   })
   archiveCleanup.start()
+  // Why: E2E specs trigger the cleanup tick on demand to assert TTL behaviour
+  // without waiting for the hourly setInterval. Guarded by ORCA_E2E so the
+  // handler is never registered in shipping builds.
+  if (process.env.ORCA_E2E_USER_DATA_DIR) {
+    ipcMain.removeHandler('worktrees:_archiveCleanupNow')
+    ipcMain.handle('worktrees:_archiveCleanupNow', async () => {
+      await archiveCleanup?.runOnce()
+    })
+  }
   automations = new AutomationService(store, {
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.

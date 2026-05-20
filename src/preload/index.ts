@@ -449,6 +449,14 @@ const api = {
     restore: (args: { worktreeId: string }): Promise<void> =>
       ipcRenderer.invoke('worktrees:restore', args),
 
+    // Why: e2e-only seam — preloadE2EConfig.enabled is true only when ORCA_E2E_*
+    // env vars are set, so production builds expose this as `undefined` and the
+    // IPC handler isn't registered either. Lets specs trigger the archive cleanup
+    // tick deterministically without waiting for the hourly setInterval.
+    _archiveCleanupNow: preloadE2EConfig.enabled
+      ? (): Promise<void> => ipcRenderer.invoke('worktrees:_archiveCleanupNow')
+      : undefined,
+
     updateMeta: (args: {
       worktreeId: string
       updates: Record<string, unknown>
