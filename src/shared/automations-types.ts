@@ -8,6 +8,12 @@ export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'
   | 'dispatched'
+  // Chain executor states (Phase 1). `running` covers any in-progress chain
+  // tick; `failed` is the terminal halt state when a step's onFailure='halt'
+  // triggers, distinct from `dispatch_failed` which is the pre-tick dispatch
+  // error from the legacy path.
+  | 'running'
+  | 'failed'
   | 'completed'
   | 'skipped_missed'
   | 'skipped_unavailable'
@@ -39,6 +45,11 @@ export type Automation = {
   missedRunGraceMinutes: number
   createdAt: number
   updatedAt: number
+  trigger?: TriggerConfig
+  steps?: Step[]
+  haltOnFailure?: boolean
+  maxConcurrentRuns?: number
+  deduplicationKey?: string | null
 }
 
 export type AutomationRun = {
@@ -56,6 +67,12 @@ export type AutomationRun = {
   startedAt: number | null
   dispatchedAt: number | null
   createdAt: number
+  /** Set by the chain executor when the run reaches a terminal status
+   *  (`completed` or `failed`). Optional for backwards compat with rows
+   *  written before Phase 1. */
+  finishedAt?: number
+  stepStates?: StepRunState[]
+  context?: Record<string, unknown>
 }
 
 export type AutomationCreateInput = {
@@ -102,4 +119,62 @@ export type AutomationDispatchResult = {
   workspaceId?: string | null
   terminalSessionId?: string | null
   error?: string | null
+}
+
+// Phase 1 chain types. Coexist with the legacy fields above during migration.
+
+export type TriggerConfig = { kind: 'manual' }
+
+export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
+
+export type RunPromptConfig = {
+  worktreeRef: string
+  agentId: TuiAgent
+  prompt: string
+  doneDebounceSeconds: number
+}
+
+export type CreateWorktreeConfig = {
+  baseBranch: string // template
+  branchName: string // template
+  displayName: string // template
+  linkLinearIssue: boolean
+}
+
+export type WaitForSetupConfig = {
+  worktreeRef: string // template
+  requireSuccess: boolean
+}
+
+export type RunCommandConfig = {
+  worktreeRef: string // template
+  source: 'review' | 'create-pr' | 'custom'
+  commandId?: string // when source is 'review' | 'create-pr'
+  customCommand?: string // when source is 'custom'
+  captureStdout: boolean
+}
+
+export type StepConfig =
+  | RunPromptConfig
+  | CreateWorktreeConfig
+  | WaitForSetupConfig
+  | RunCommandConfig
+
+export type Step = {
+  id: string
+  kind: StepKind
+  config: StepConfig
+  onFailure: 'halt' | 'continue'
+  timeoutSeconds: number | null
+}
+
+export type StepRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'timed-out'
+
+export type StepRunState = {
+  stepId: string
+  status: StepRunStatus
+  startedAt: number | null
+  finishedAt: number | null
+  output: unknown // shape depends on kind; documented per-runner
+  error: string | null
 }

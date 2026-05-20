@@ -168,18 +168,6 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         }
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
-          {/* Why: no GitHub remote → no avatar URL available on the Repo
-              record. Falls back to the same color dot WorktreeCard uses so
-              the bar stays visually consistent with the sidebar identity.
-              TODO: surface repo owner via IPC so we can render the
-              github.com/<owner>.png avatar when one exists. */}
-          {repo ? (
-            <span
-              aria-hidden
-              className="size-3 shrink-0 rounded-sm"
-              style={{ backgroundColor: repo.badgeColor }}
-            />
-          ) : null}
           <span className="shrink-0 truncate text-sm font-medium text-muted-foreground">
             {repo?.displayName ?? 'Workspace'}
           </span>

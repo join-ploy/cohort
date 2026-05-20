@@ -4,7 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AGENT_CATALOG, AgentIcon } from '@/lib/agent-catalog'
-import type { Automation, AutomationRun } from '../../../../shared/automations-types'
+import type {
+  Automation,
+  AutomationRun,
+  StepRunState,
+  StepRunStatus
+} from '../../../../shared/automations-types'
 import type { Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
 import {
@@ -74,6 +79,35 @@ function formatSchedule(rrule: string): string {
     new Date(2026, 0, 4 + schedule.dayOfWeek)
   )
   return `${day}s at ${time}`
+}
+
+// Why: keep status → color mapping in one spot so chain step pills stay
+// visually distinct from the top-level run pill (which uses semantic
+// shadcn variants). These map directly to Tailwind tokens documented in
+// docs/STYLEGUIDE.md — no new color values invented.
+const STEP_STATUS_BADGE_CLASS: Record<StepRunStatus, string> = {
+  pending: 'bg-muted text-muted-foreground',
+  running: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+  succeeded: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+  failed: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+  skipped: 'bg-muted text-muted-foreground italic',
+  'timed-out': 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+}
+
+function StepRunRow({ step }: { step: StepRunState }): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-1 px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className={STEP_STATUS_BADGE_CLASS[step.status]}>
+          {step.status}
+        </Badge>
+        <span className="truncate font-mono text-xs text-muted-foreground">{step.stepId}</span>
+      </div>
+      {step.error ? (
+        <div className="ml-1 truncate text-xs text-rose-600 dark:text-rose-400">{step.error}</div>
+      ) : null}
+    </div>
+  )
 }
 
 function ToolbarIconButton({
@@ -265,18 +299,31 @@ export function AutomationDetail({
                 </div>
               </>
             )
-            return runWorktree ? (
-              <button
-                key={run.id}
-                type="button"
-                className={`${rowClassName} w-full cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50`}
-                onClick={() => onOpenRunWorkspace(run)}
-              >
-                {rowContent}
-              </button>
-            ) : (
-              <div key={run.id} className={rowClassName}>
-                {rowContent}
+            const hasStepStates = Boolean(run.stepStates && run.stepStates.length > 0)
+            // Why: chain runs (`stepStates` present) get a per-step breakdown
+            // appended below the existing summary row; legacy runs keep their
+            // single-row rendering untouched.
+            const stepList = hasStepStates ? (
+              <div className="flex flex-col gap-0 border-t border-border/50 bg-background/60 py-1">
+                {run.stepStates!.map((step) => (
+                  <StepRunRow key={step.stepId} step={step} />
+                ))}
+              </div>
+            ) : null
+            return (
+              <div key={run.id}>
+                {runWorktree ? (
+                  <button
+                    type="button"
+                    className={`${rowClassName} w-full cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50`}
+                    onClick={() => onOpenRunWorkspace(run)}
+                  >
+                    {rowContent}
+                  </button>
+                ) : (
+                  <div className={rowClassName}>{rowContent}</div>
+                )}
+                {stepList}
               </div>
             )
           })}

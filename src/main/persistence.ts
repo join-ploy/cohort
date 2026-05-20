@@ -47,6 +47,7 @@ import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId } from '../shared/worktree-id'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
+import { upgradeLegacyAutomation } from './persistence-automation-migration'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -417,7 +418,9 @@ export class Store {
           sshRemotePtyLeases: (parsed.sshRemotePtyLeases ?? [])
             .map(normalizeSshRemotePtyLease)
             .filter((lease): lease is SshRemotePtyLease => lease !== null),
-          automations: Array.isArray(parsed.automations) ? parsed.automations : [],
+          automations: Array.isArray(parsed.automations)
+            ? parsed.automations.map(upgradeLegacyAutomation)
+            : [],
           automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
           onboarding: (() => {
             // Why: if we successfully parsed an existing orca-data.json that
@@ -968,6 +971,28 @@ export class Store {
     }
     this.flush()
     return updated
+  }
+
+  /** Full-record replace for an existing AutomationRun. Used by the chain
+   *  executor, which mutates the run object in place (stepStates, context,
+   *  finishedAt, status) and then asks the store to persist the whole row.
+   *  `updateAutomationRun` above only covers the legacy dispatch path's
+   *  dispatch-result fields, so it can't carry chain state. */
+  replaceAutomationRun(run: AutomationRun): AutomationRun {
+    const index = (this.state.automationRuns ?? []).findIndex((entry) => entry.id === run.id)
+    if (index === -1) {
+      throw new Error('Automation run not found.')
+    }
+    this.state.automationRuns[index] = run
+    this.flush()
+    return run
+  }
+
+  /** Fetch a single automation run by id. Returns the live reference (no
+   *  copy) so callers that mutate-then-persist see the same object the store
+   *  holds — mirrors the listAutomationRuns() / replaceAutomationRun() pair. */
+  getAutomationRun(runId: string): AutomationRun | undefined {
+    return (this.state.automationRuns ?? []).find((entry) => entry.id === runId)
   }
 
   advanceAutomationNextRun(id: string, now = Date.now()): Automation {

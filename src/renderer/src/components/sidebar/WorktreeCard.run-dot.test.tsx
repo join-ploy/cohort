@@ -134,7 +134,7 @@ describe('WorktreeCard run-script dot', () => {
     mockState = baseState()
   })
 
-  it('shows an animated amber dot when the run script is running', async () => {
+  it('shows the equalizer indicator when the run script is running', async () => {
     mockState = baseState({
       [baseWorktree.id]: scriptsEntry({ run: { status: 'running', ptyId: 'p-1' } })
     })
@@ -143,8 +143,9 @@ describe('WorktreeCard run-script dot', () => {
       <WorktreeCard worktree={baseWorktree} repo={baseRepo} isActive={false} />
     )
     expect(markup).toContain('Run script is running')
-    expect(markup).toContain('bg-amber-500')
-    expect(markup).toContain('animate-pulse')
+    expect(markup).toContain('orca-run-eq')
+    // 3 staggered bars drive the equalizer wave (CSS keyframe in main.css).
+    expect(markup.match(/orca-run-eq__bar/g) ?? []).toHaveLength(3)
   })
 
   it('renders no run dot when the run script is idle', async () => {

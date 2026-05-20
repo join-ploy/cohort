@@ -38,6 +38,7 @@ import {
 } from '../../shared/telemetry-events'
 import { isRemoteAgentHooksEnabled } from '../../shared/agent-hook-relay'
 import { readShellStartupEnvVar } from '../pty/shell-startup-env'
+import type { PtyExitRegistry } from '../pty/exit-registry'
 
 // ─── Provider Registry ──────────────────────────────────────────────
 // Routes PTY operations by connectionId. null = local provider.
@@ -67,6 +68,18 @@ const paneKeyPtyId = new Map<string, string>()
 
 export function getPtyIdForPaneKey(paneKey: string): string | undefined {
   return paneKeyPtyId.get(paneKey)
+}
+
+// Why: main-process mirror of PTY exit observations for chain runners
+// (RunCommandRunner). Wired from src/main/index.ts via setPtyExitRegistry.
+// Optional — when undefined, all writes are no-ops and existing PTY exit flow
+// is unaffected. Populated from both onExit code paths below (configure().onExit
+// for the in-process LocalPtyProvider and localExitUnsub for daemon-backed
+// providers) so the registry sees every exit regardless of which adapter ran.
+let ptyExitRegistryRef: PtyExitRegistry | null = null
+
+export function setPtyExitRegistry(registry: PtyExitRegistry | null): void {
+  ptyExitRegistryRef = registry
 }
 
 // Why: consumers (currently the cursor-agent synthesized-spinner loop in
@@ -571,6 +584,11 @@ export function registerPtyHandlers(
         clearProviderPtyState(id)
         ptyOwnership.delete(id)
         markClaudePtyExited(id)
+        // Why: record the exit observation for chain runners (RunCommandRunner)
+        // before runtime.onPtyExit fans out so the registry is queryable on the
+        // same tick the renderer learns about the exit. Additive — registry
+        // writes are no-ops when unwired.
+        ptyExitRegistryRef?.set(id, { exitCode: code, finishedAt: Date.now() })
         runtime?.onPtyExit(id, code)
       },
       onData: (id, data, timestamp) => runtime?.onPtyData(id, data, timestamp)
@@ -639,6 +657,13 @@ export function registerPtyHandlers(
         clearProviderPtyState(payload.id)
         ptyOwnership.delete(payload.id)
         markClaudePtyExited(payload.id)
+        // Why: daemon-backed providers do not flow through the configure()
+        // onExit branch above, so we mirror the registry write here. Without
+        // this, RunCommandRunner would never observe exit for daemon PTYs.
+        ptyExitRegistryRef?.set(payload.id, {
+          exitCode: payload.code,
+          finishedAt: Date.now()
+        })
         runtime?.onPtyExit(payload.id, payload.code)
       }
       if (!mainWindow.isDestroyed()) {

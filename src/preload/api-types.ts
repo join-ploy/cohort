@@ -1322,6 +1322,31 @@ export type PreloadApi = {
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     rendererReady: () => Promise<void>
     onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void
+    onOpenPromptPane: (
+      callback: (request: {
+        requestId: string
+        worktreeId: string
+        agentId: string
+        prompt: string
+      }) => void
+    ) => () => void
+    replyOpenPromptPane: (
+      requestId: string,
+      result: { ok: true; paneKey: string } | { ok: false; error: string }
+    ) => void
+    onOpenCommandPane: (
+      callback: (request: {
+        requestId: string
+        worktreeId: string
+        source: 'review' | 'create-pr' | 'custom'
+        commandId?: string
+        customCommand?: string
+      }) => void
+    ) => () => void
+    replyOpenCommandPane: (
+      requestId: string,
+      result: { ok: true; ptyId: string; paneKey: string } | { ok: false; error: string }
+    ) => void
   }
   wsl: {
     isAvailable: () => Promise<boolean>

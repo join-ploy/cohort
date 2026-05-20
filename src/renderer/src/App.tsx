@@ -35,6 +35,8 @@ import { useAppStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { useIpcEvents } from './hooks/useIpcEvents'
 import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents'
+import { useAutomationOpenPromptPaneEvents } from './hooks/useAutomationOpenPromptPaneEvents'
+import { useAutomationOpenCommandPaneEvents } from './hooks/useAutomationOpenCommandPaneEvents'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
 import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
 import Sidebar from './components/Sidebar'
@@ -297,6 +299,8 @@ function App(): React.JSX.Element {
   // Subscribe to IPC push events
   useIpcEvents()
   useAutomationDispatchEvents()
+  useAutomationOpenPromptPaneEvents()
+  useAutomationOpenCommandPaneEvents()
   // Why: retention must run at App level so the inline per-card agents list
   // always sees retained entries. If retention ran inside the sidebar-card
   // subtree, "done" agents would vanish any time the user collapsed a card's

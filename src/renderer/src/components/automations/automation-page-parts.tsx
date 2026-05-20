@@ -61,7 +61,10 @@ export function getAutomationRunStatusVariant(
   if (status.startsWith('skipped')) {
     return 'outline'
   }
-  if (status === 'dispatch_failed') {
+  // Both `failed` (chain-executor terminal halt) and `dispatch_failed` (legacy
+  // pre-tick dispatch error) are user-visible failures — keep them visually
+  // identical so operators don't have to learn two "bad" badge colors.
+  if (status === 'failed' || status === 'dispatch_failed') {
     return 'destructive'
   }
   return 'dot'
@@ -75,6 +78,8 @@ export function getAutomationRunStatusLabel(status: AutomationRun['status']): st
       return 'Starting'
     case 'dispatched':
       return 'Launched'
+    case 'running':
+      return 'Running'
     case 'completed':
       return 'Done'
     case 'skipped_missed':
@@ -83,6 +88,8 @@ export function getAutomationRunStatusLabel(status: AutomationRun['status']): st
       return 'Unavailable'
     case 'skipped_needs_interactive_auth':
       return 'Needs credentials'
+    case 'failed':
+      return 'Failed'
     case 'dispatch_failed':
       return 'Failed'
   }
