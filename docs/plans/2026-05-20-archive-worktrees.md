@@ -10,6 +10,20 @@
 
 **Reference design:** `docs/plans/2026-05-20-archive-worktrees-design.md`
 
+## Status
+
+- [x] Phase 1 — Schema + constants
+- [x] Phase 2 — Refactor real-delete path (`runWorktreeRemoval`)
+- [x] Phase 3 — Archive/restore IPC + store actions
+- [x] Phase 4 — Swap delete UI for archive (+ undo toast)
+- [x] Phase 5 — Cleanup service (hourly tick, blocked-retry, post-window startup tick)
+- [x] Phase 6 — Archived sidebar section (collapsible disclosure, Restore, Delete-now)
+- [x] Phase 7.1 — Surface audit (fixed dock + activity unread badges)
+- [x] Phase 7.5 — Full typecheck + unit sweep (no new failures)
+- [~] Phase 7.2–7.4 — **E2E tests deferred at user request.** The test-only IPC seam (`worktrees:_archiveCleanupNow`) and `ORCA_ARCHIVE_TTL_MS_OVERRIDE` env var are wired (commit `050f50e0`) and an unfinished spec sits untracked at `tests/e2e/worktree-archive.spec.ts`. Land in a follow-up.
+- [x] Phase 8.2 — Final code review pass; two important issues found and fixed in commit `ed7a9e6b` (untrusted-hook bypass + dead startup tick).
+- [ ] Phase 8.1 — STYLEGUIDE.md update for the new "collapsible secondary list at the bottom of the sidebar" pattern (Collapsible primitive + ArchivedSection chrome). Deferred — small follow-up.
+
 **Conventions / commands:**
 - Typecheck: `pnpm tc` (uses tsgo, not tsc)
 - Unit tests: `pnpm test <pattern>` (Vitest)
