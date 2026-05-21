@@ -264,12 +264,12 @@ describe('ChainEditorModal', () => {
     expect(markup).toContain('Manual + Linear')
   })
 
-  it('renders the trigger pill label "Manual + Worktree" when only acceptsWorktreeSelection is true', () => {
+  it('renders the trigger pill label "Manual + Project" when only acceptsProjectSelection is true', () => {
     const markup = renderToStaticMarkup(
       <ChainEditorModal
         open={true}
         automation={makeAutomation({
-          trigger: { kind: 'manual', acceptsWorktreeSelection: true }
+          trigger: { kind: 'manual', acceptsProjectSelection: true }
         })}
         repos={[]}
         reviewCommands={[]}
@@ -278,7 +278,7 @@ describe('ChainEditorModal', () => {
         onSave={vi.fn()}
       />
     )
-    expect(markup).toContain('Manual + Worktree')
+    expect(markup).toContain('Manual + Project')
   })
 
   it('renders the trigger pill label "Manual (2 prompts)" when both flags are true', () => {
@@ -289,7 +289,7 @@ describe('ChainEditorModal', () => {
           trigger: {
             kind: 'manual',
             acceptsLinearTicket: true,
-            acceptsWorktreeSelection: true
+            acceptsProjectSelection: true
           }
         })}
         repos={[]}
@@ -300,6 +300,27 @@ describe('ChainEditorModal', () => {
       />
     )
     expect(markup).toContain('Manual (2 prompts)')
+  })
+
+  it('hides the upfront Project select when acceptsProjectSelection is true', () => {
+    const repos = [
+      { id: 'proj-1', path: '/tmp/proj-1', displayName: 'Project One', badgeColor: '#abc', addedAt: 0 }
+    ]
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation({
+          projectId: '',
+          trigger: { kind: 'manual', acceptsProjectSelection: true }
+        })}
+        repos={repos}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).not.toMatch(/aria-label=["']Project["']/)
   })
 
   it('renders the trigger pill as a button with aria-haspopup', () => {

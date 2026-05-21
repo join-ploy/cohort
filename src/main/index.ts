@@ -56,6 +56,7 @@ import {
   registerPaneKeyTeardownListener,
   getLocalPtyProvider,
   setPtyExitRegistry,
+  setOnPtyExitListener,
   subscribePtyData
 } from './ipc/pty'
 import { killAllRunScripts } from './ipc/run-script'
@@ -69,6 +70,8 @@ import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
 import { createCleanupService, type CleanupService } from './archive/cleanup-service'
 import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
+import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
+import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -108,6 +111,12 @@ setSetupScriptRegistry(setupScriptRegistry)
 // IPC roundtrip.
 const ptyExitRegistry = new PtyExitRegistry()
 setPtyExitRegistry(ptyExitRegistry)
+// Why: nudge the chain executor whenever a PTY exits so RunCommandRunner
+// resolves the step within milliseconds instead of waiting for the next
+// scheduler tick. Mirrors the agent-status wake hook below.
+setOnPtyExitListener(() => {
+  automations?.wakeChains()
+})
 
 installUncaughtPipeErrorGuard()
 // Why: propagate the Orca app version into `process.env` so PTY-env
@@ -331,6 +340,12 @@ function openMainWindow(): BrowserWindow {
       // registry ordering consistent with the renderer slice, which also keys
       // monotonic updates off updatedAt.
       agentStatusRegistry.set(paneKey, { state: payload.state, updatedAt: receivedAt })
+      // Why: a chain run-prompt step polls agent status against the registry on
+      // each chain tick (60s cadence). Without this nudge, an agent that
+      // finishes between ticks shows `done` in the sidebar but the chain step
+      // stays `running` until the next scheduler cycle. Waking on any state
+      // change collapses that gap.
+      automations?.wakeChains()
       if (mainWindow?.isDestroyed()) {
         return
       }
@@ -635,14 +650,31 @@ app.whenReady().then(async () => {
     // is a numeric GitHub issue ID — incompatible. Passing `null` until a
     // Linear-linkage path is added (Phase 4 follow-up).
     createWorktree: async (input) => {
+      // Why: chain-shape automations don't ask the user for a worktree name —
+      // mirror the renderer's NewWorkspaceComposer flow by generating an
+      // adjective_noun slug per repo and feeding it as the canonical
+      // workspaceName. createManagedWorktree's slug mode then uses it for both
+      // folder + branch with no prefix; sanitizeWorktreeName is skipped, so an
+      // empty displayName no longer trips "Invalid worktree name".
+      const trimmedDisplay = input.displayName.trim()
+      const generatedSlug = generateUniqueWorkspaceName(
+        collectTakenWorkspaceNamesForRepo(input.repoId, store.getAllWorktreeMeta())
+      )
+      // Why: automation runs must happen in the background — never yank the
+      // user's focus into the new worktree. `runHooks: true` would force
+      // activation inside createManagedWorktree (shouldActivate ORs runHooks),
+      // so we pass `runHooks: false` and request the setup script explicitly
+      // via `setupDecision: 'run'`. The wait-for-setup step still observes the
+      // setup PTY through the same registry.
       const result = await runtimeRef.createManagedWorktree({
         repoSelector: input.repoId,
-        name: input.displayName,
+        name: trimmedDisplay || generatedSlug,
+        workspaceName: generatedSlug,
         baseBranch: input.baseBranch,
         linkedIssue: null,
-        runHooks: true,
+        runHooks: false,
         activate: false,
-        setupDecision: 'inherit'
+        setupDecision: 'run'
       })
       return {
         worktreeId: result.worktree.id,

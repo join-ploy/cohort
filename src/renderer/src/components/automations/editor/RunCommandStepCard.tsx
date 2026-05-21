@@ -130,6 +130,13 @@ export function RunCommandStepCard(props: RunCommandStepCardProps): React.JSX.El
           </select>
         </label>
       )}
+      <TemplateInput
+        value={config.paneRef ?? ''}
+        onChange={(v) => update({ paneRef: v || undefined })}
+        placeholder="Reuse pane (optional, e.g. {{steps.<id>.paneKey}})"
+        available={props.available}
+        ariaLabel="Pane ref"
+      />
     </StepCardChrome>
   )
 }

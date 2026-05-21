@@ -56,14 +56,6 @@ export const LINEAR_TICKET_TRIGGER_OVERLAY = {
   }
 } as const
 
-// Flat overlay merged into the trigger schema when the automation accepts a
-// worktree selection at manual-trigger time.
-export const WORKTREE_TRIGGER_OVERLAY: OutputSchema = {
-  worktreeId: 'string',
-  worktreeBranch: 'string',
-  worktreePath: 'string'
-}
-
 // Record<StepKind, …> makes this map exhaustive: adding a new StepKind
 // without extending the map is a compile error.
 const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {

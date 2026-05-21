@@ -15,13 +15,16 @@ import type { TuiAgent } from '../../../shared/types'
 export function useAutomationOpenPromptPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onOpenPromptPane(
-      async ({ requestId, worktreeId, agentId, prompt }) => {
+      async ({ requestId, worktreeId, agentId, prompt, worktreePath, connectionId }) => {
         try {
           const result = await launchAgentBackgroundSession({
             agent: agentId as TuiAgent,
             worktreeId,
             prompt,
-            launchSource: 'unknown'
+            launchSource: 'unknown',
+            ...(typeof worktreePath === 'string'
+              ? { worktreeOverride: { path: worktreePath, connectionId: connectionId ?? null } }
+              : {})
           })
           if (!result) {
             // Why: launchAgentBackgroundSession returns null when no startup

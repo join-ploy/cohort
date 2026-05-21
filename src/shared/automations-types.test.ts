@@ -23,7 +23,7 @@ describe('chain types', () => {
   it('TriggerConfig has a manual variant with optional accept-flags', () => {
     expectTypeOf<TriggerConfig['kind']>().toEqualTypeOf<'manual'>()
     expectTypeOf<TriggerConfig['acceptsLinearTicket']>().toEqualTypeOf<boolean | undefined>()
-    expectTypeOf<TriggerConfig['acceptsWorktreeSelection']>().toEqualTypeOf<boolean | undefined>()
+    expectTypeOf<TriggerConfig['acceptsProjectSelection']>().toEqualTypeOf<boolean | undefined>()
   })
 
   it('Step carries id, kind, config, onFailure, timeoutSeconds', () => {
@@ -100,11 +100,11 @@ describe('manual payload types', () => {
   it('TriggerConfig manual variant accepts the two optional booleans', () => {
     const t1: TriggerConfig = { kind: 'manual' }
     const t2: TriggerConfig = { kind: 'manual', acceptsLinearTicket: true }
-    const t3: TriggerConfig = { kind: 'manual', acceptsWorktreeSelection: true }
+    const t3: TriggerConfig = { kind: 'manual', acceptsProjectSelection: true }
     const t4: TriggerConfig = {
       kind: 'manual',
       acceptsLinearTicket: true,
-      acceptsWorktreeSelection: true
+      acceptsProjectSelection: true
     }
     expectTypeOf(t1).toMatchTypeOf<TriggerConfig>()
     expectTypeOf(t2).toMatchTypeOf<TriggerConfig>()

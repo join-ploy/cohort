@@ -38,6 +38,7 @@ import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents
 import { useAutomationOpenPromptPaneEvents } from './hooks/useAutomationOpenPromptPaneEvents'
 import { useAutomationSendPromptToPaneEvents } from './hooks/useAutomationSendPromptToPaneEvents'
 import { useAutomationOpenCommandPaneEvents } from './hooks/useAutomationOpenCommandPaneEvents'
+import { useAutomationSendCommandToPaneEvents } from './hooks/useAutomationSendCommandToPaneEvents'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
 import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
 import Sidebar from './components/Sidebar'
@@ -303,6 +304,7 @@ function App(): React.JSX.Element {
   useAutomationOpenPromptPaneEvents()
   useAutomationSendPromptToPaneEvents()
   useAutomationOpenCommandPaneEvents()
+  useAutomationSendCommandToPaneEvents()
   // Why: retention must run at App level so the inline per-card agents list
   // always sees retained entries. If retention ran inside the sidebar-card
   // subtree, "done" agents would vanish any time the user collapsed a card's

@@ -10,6 +10,8 @@ export type RunPromptDeps = {
     worktreeId: string
     agentId: string
     prompt: string
+    worktreePath?: string
+    connectionId?: string | null
   }) => Promise<{ paneKey: string }>
   /** Reuses an existing pane by paneKey instead of opening a new one. Optional
    *  so legacy `paneRef`-less chains keep working without wiring the IPC; the
@@ -17,6 +19,15 @@ export type RunPromptDeps = {
    *  being supplied. */
   sendPromptToPane?: (params: { paneKey: string; prompt: string }) => Promise<void>
   getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
+  /** Resolves a worktree's path and owning repo connectionId from main's
+   *  store so the openPromptPane payload carries everything the renderer
+   *  needs to spawn the PTY without relying on its (possibly stale) cache.
+   *  Returns null if the worktree id can't be parsed; the renderer falls
+   *  back to the legacy cache lookup. */
+  getWorktreeSummary?: (worktreeId: string) => {
+    path: string
+    connectionId: string | null
+  } | null
   now: () => number
 }
 
@@ -112,10 +123,18 @@ export class RunPromptRunner implements StepRunner {
 
       let paneKey: string
       try {
+        // Why: pre-resolve path + connectionId in main and hand them to the
+        // renderer so it doesn't have to look the worktree up in its cache.
+        // The chain creates the worktree milliseconds earlier; the renderer's
+        // `worktrees:changed` broadcast may not have settled yet.
+        const summary = this.deps.getWorktreeSummary?.(worktreeId) ?? null
         const result = await this.deps.openPromptPane({
           worktreeId,
           agentId: config.agentId,
-          prompt
+          prompt,
+          ...(summary
+            ? { worktreePath: summary.path, connectionId: summary.connectionId }
+            : {})
         })
         paneKey = result.paneKey
       } catch (e) {

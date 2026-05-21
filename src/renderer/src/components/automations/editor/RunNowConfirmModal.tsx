@@ -1,13 +1,15 @@
 import * as React from 'react'
 import { useState } from 'react'
+import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
   LinearIssuePayload,
   RunNowPayload
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
 import { LinearIssuePicker } from './LinearIssuePicker'
-import { WorktreePicker } from './WorktreePicker'
+import { ProjectPicker } from './ProjectPicker'
 
 export type RunNowConfirmModalProps = {
   open: boolean
@@ -33,15 +35,20 @@ export function RunNowConfirmModal(props: RunNowConfirmModalProps): React.JSX.El
 
 function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Element {
   const [pickedLinear, setPickedLinear] = useState<LinearIssuePayload | null>(null)
-  const [pickedWorktreeId, setPickedWorktreeId] = useState<string | null>(null)
+  const [pickedProjectId, setPickedProjectId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const repos = useAppStore((s) => s.repos as Repo[])
 
   const needsLinear = !!props.automation.trigger?.acceptsLinearTicket
-  const needsWorktree = !!props.automation.trigger?.acceptsWorktreeSelection
+  const needsProject = !!props.automation.trigger?.acceptsProjectSelection
   const canRun =
     (!needsLinear || pickedLinear !== null) &&
-    (!needsWorktree || pickedWorktreeId !== null) &&
+    (!needsProject || pickedProjectId !== null) &&
     !running
+
+  const pickedProjectName = pickedProjectId
+    ? (repos.find((r) => r.id === pickedProjectId)?.displayName ?? pickedProjectId)
+    : null
 
   const handleRun = async (): Promise<void> => {
     if (!canRun) {
@@ -53,8 +60,8 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
       if (pickedLinear) {
         payload.linear = { issue: pickedLinear }
       }
-      if (pickedWorktreeId) {
-        payload.worktreeId = pickedWorktreeId
+      if (pickedProjectId) {
+        payload.projectId = pickedProjectId
       }
       await props.onRun(payload)
       props.onClose()
@@ -106,25 +113,22 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
             </section>
           ) : null}
 
-          {needsWorktree ? (
+          {needsProject ? (
             <section className="flex flex-col gap-2">
-              <h3 className="text-xs font-medium text-foreground">Worktree</h3>
-              {pickedWorktreeId ? (
+              <h3 className="text-xs font-medium text-foreground">Project</h3>
+              {pickedProjectId ? (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-input bg-muted/30 px-2 py-1.5 text-xs">
-                  <span className="truncate text-foreground">{pickedWorktreeId}</span>
+                  <span className="truncate text-foreground">{pickedProjectName}</span>
                   <button
                     type="button"
-                    onClick={() => setPickedWorktreeId(null)}
+                    onClick={() => setPickedProjectId(null)}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     Change
                   </button>
                 </div>
               ) : (
-                <WorktreePicker
-                  projectId={props.automation.projectId}
-                  onSelect={(id) => setPickedWorktreeId(id)}
-                />
+                <ProjectPicker onSelect={(id) => setPickedProjectId(id)} />
               )}
             </section>
           ) : null}

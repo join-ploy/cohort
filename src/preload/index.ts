@@ -2482,11 +2482,20 @@ const api = {
         worktreeId: string
         agentId: string
         prompt: string
+        worktreePath?: string
+        connectionId?: string | null
       }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        request: { requestId: string; worktreeId: string; agentId: string; prompt: string }
+        request: {
+          requestId: string
+          worktreeId: string
+          agentId: string
+          prompt: string
+          worktreePath?: string
+          connectionId?: string | null
+        }
       ) => callback(request)
       ipcRenderer.on('automations:openPromptPane', listener)
       return () => ipcRenderer.removeListener('automations:openPromptPane', listener)
@@ -2562,6 +2571,44 @@ const api = {
       result: { ok: true; ptyId: string; paneKey: string } | { ok: false; error: string }
     ): void => {
       ipcRenderer.send(`automations:openCommandPane:reply:${requestId}`, result)
+    },
+    /** Subscribe to per-step sendCommandToPane requests from the main-process
+     *  chain executor (RunCommandRunner with paneRef). The renderer should
+     *  resolve the configured command (settings + hooks preferences), then
+     *  write the resulting command line + Enter into the referenced pane's
+     *  PTY instead of spawning a new one. */
+    onSendCommandToPane: (
+      callback: (request: {
+        requestId: string
+        paneKey: string
+        source: 'review' | 'create-pr' | 'custom'
+        commandId?: string
+        customCommand?: string
+        worktreeId: string
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        request: {
+          requestId: string
+          paneKey: string
+          source: 'review' | 'create-pr' | 'custom'
+          commandId?: string
+          customCommand?: string
+          worktreeId: string
+        }
+      ) => callback(request)
+      ipcRenderer.on('automations:sendCommandToPane', listener)
+      return () => ipcRenderer.removeListener('automations:sendCommandToPane', listener)
+    },
+    /** Reply to a sendCommandToPane request. `ok: true` is a bare ack;
+     *  `ok: false` carries a renderer-side reason that the executor surfaces
+     *  as the step's `error` (fail-fast — no retry). */
+    replySendCommandToPane: (
+      requestId: string,
+      result: { ok: true } | { ok: false; error: string }
+    ): void => {
+      ipcRenderer.send(`automations:sendCommandToPane:reply:${requestId}`, result)
     }
   },
 

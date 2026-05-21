@@ -90,8 +90,10 @@ describe('ChainExecutor', () => {
     })
     const s2: Step = { ...sampleStep, id: 's2' }
     const r = run('a1')
-    await executor.tick(automation([sampleStep, s2]), r) // first step done
-    await executor.tick(automation([sampleStep, s2]), r) // moves to second
+    // Why: a single tick() now loops past any synchronously-done steps so the
+    // 60s scheduler cadence doesn't gate trivial advances. The first call
+    // both finishes s1 (`done`) and starts s2 (`needs-more-time`).
+    await executor.tick(automation([sampleStep, s2]), r)
     expect(r.stepStates![0].status).toBe('succeeded')
     expect(r.stepStates![0].output).toEqual({ x: 1 })
     expect(r.stepStates![1].status).toBe('running')

@@ -190,6 +190,9 @@ export function walkStepConfigStrings(
       if (c.source === 'custom' && typeof c.customCommand === 'string') {
         visit('customCommand', c.customCommand)
       }
+      if (typeof c.paneRef === 'string') {
+        visit('paneRef', c.paneRef)
+      }
       break
     }
   }
@@ -237,7 +240,8 @@ function rewriteConfigStrings(
         customCommand:
           c.source === 'custom' && typeof c.customCommand === 'string'
             ? transform(c.customCommand)
-            : c.customCommand
+            : c.customCommand,
+        paneRef: typeof c.paneRef === 'string' ? transform(c.paneRef) : c.paneRef
       }
     }
   }

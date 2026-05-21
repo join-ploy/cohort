@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Automation } from '../../../../../shared/automations-types'
-import type { LinearIssue, Worktree } from '../../../../../shared/types'
+import type { LinearIssue, Repo } from '../../../../../shared/types'
 
-// Why: RunNowConfirmModal mounts the real LinearIssuePicker + WorktreePicker
+// Why: RunNowConfirmModal mounts the real LinearIssuePicker + ProjectPicker
 // subcomponents, which both read from the zustand store. Mock the store so
 // renderToStaticMarkup can exercise the modal without standing up the full app
 // context. The pickers expose enough markers (aria-label/data-* attrs) that we
@@ -33,26 +33,12 @@ const issueA: LinearIssue = {
   updatedAt: '2026-01-01T00:00:00Z'
 }
 
-const wtA: Worktree = {
-  id: 'repo-1::/wt-a',
-  repoId: 'repo-1',
-  path: '/wt-a',
-  head: 'aaa',
-  branch: 'refs/heads/feature-a',
-  isBare: false,
-  isMainWorktree: false,
-  displayName: 'Feature A',
-  workspaceName: 'wise_panther',
-  comment: '',
-  linkedIssue: null,
-  linkedPR: null,
-  linkedLinearIssue: null,
-  isArchived: false,
-  archivedAt: null,
-  isUnread: false,
-  isPinned: false,
-  sortOrder: 0,
-  lastActivityAt: 0
+const repoA: Repo = {
+  id: 'repo-1',
+  path: '/tmp/repo-1',
+  displayName: 'Repo One',
+  badgeColor: '#abc',
+  addedAt: 0
 }
 
 function makeAutomation(overrides: Partial<Automation> = {}): Automation {
@@ -98,8 +84,8 @@ function baseStoreState(): StoreState {
     searchLinearIssues: vi.fn().mockResolvedValue([]),
     listLinearIssues: vi.fn().mockResolvedValue([]),
     openSettingsTarget: vi.fn(),
-    // Worktree picker dependencies.
-    worktreesByRepo: { 'repo-1': [wtA] }
+    // Project picker dependencies.
+    repos: [repoA]
   }
 }
 
@@ -137,8 +123,8 @@ describe('RunNowConfirmModal', () => {
     )
     // LinearIssuePicker's search input identifies it.
     expect(markup).toMatch(/aria-label=["']Search Linear issues["']/)
-    // WorktreePicker would surface the displayName 'Feature A'; absent here.
-    expect(markup).not.toContain('Feature A')
+    // ProjectPicker would surface the repo's displayName; absent here.
+    expect(markup).not.toContain('Repo One')
   })
 
   it('renders the automation name in the title', async () => {
@@ -182,7 +168,7 @@ describe('RunNowConfirmModal', () => {
           trigger: {
             kind: 'manual',
             acceptsLinearTicket: true,
-            acceptsWorktreeSelection: true
+            acceptsProjectSelection: true
           }
         })}
         onClose={() => {}}
@@ -201,7 +187,7 @@ describe('RunNowConfirmModal', () => {
           trigger: {
             kind: 'manual',
             acceptsLinearTicket: true,
-            acceptsWorktreeSelection: true
+            acceptsProjectSelection: true
           }
         })}
         onClose={() => {}}
@@ -210,7 +196,7 @@ describe('RunNowConfirmModal', () => {
     )
     // Linear picker marker.
     expect(markup).toMatch(/aria-label=["']Search Linear issues["']/)
-    // Worktree picker marker — the seeded worktree's displayName.
-    expect(markup).toContain('Feature A')
+    // Project picker marker — the seeded repo's displayName.
+    expect(markup).toContain('Repo One')
   })
 })

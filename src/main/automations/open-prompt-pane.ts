@@ -4,6 +4,13 @@ export type OpenPromptPaneRequest = {
   worktreeId: string
   agentId: string
   prompt: string
+  // Optional worktree info pre-resolved in main so the renderer doesn't need
+  // to look it up in its (possibly stale) cache. When provided, the renderer
+  // uses these directly instead of hitting `allWorktrees()`. Both fields are
+  // optional for backwards compatibility with legacy callers that send only
+  // the worktreeId.
+  worktreePath?: string
+  connectionId?: string | null
 }
 
 export type OpenPromptPaneResult = { paneKey: string }

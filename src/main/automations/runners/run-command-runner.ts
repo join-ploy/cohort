@@ -1,9 +1,18 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { RunCommandConfig } from '../../../shared/automations-types'
+import type { AgentStatusEntry } from '../../agent-status/registry'
 import type { PtyExitEntry } from '../../pty/exit-registry'
 import { OpenCommandPaneError } from '../open-command-pane'
+import { SendCommandToPaneError } from '../send-command-to-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 import { OutputTail } from '../output-tail'
+
+/** Debounce window for the agent-done completion path. An agent that briefly
+ *  flips done → working → done shouldn't satisfy the gate on its first idle
+ *  blip; require the done state to hold for this many ms before we treat the
+ *  step as succeeded. Matches the `doneDebounceSeconds` default used by
+ *  run-prompt (5s) so command-launched agents feel symmetric. */
+const AGENT_DONE_DEBOUNCE_MS = 5_000
 
 /** Cap PTY output capture at 32 KiB. Big enough to show a debuggable error
  *  tail; small enough that hundreds of concurrent chain runs can't pile up
@@ -22,6 +31,22 @@ export type RunCommandDeps = {
    *  fn. PTYs in this codebase emit a single merged stream — no stdout/stderr
    *  distinction at the PTY level — so the runner captures one tail. */
   subscribePtyData: (listener: (ptyId: string, data: string) => void) => () => void
+  /** Resolve a Review / Create PR / custom command and write it (with Enter)
+   *  into an existing pane. Used by the `paneRef` branch so a chain step can
+   *  fire a follow-up command into a pane an earlier step opened. */
+  sendCommandToPane?: (params: {
+    paneKey: string
+    source: 'review' | 'create-pr' | 'custom'
+    commandId?: string
+    customCommand?: string
+    worktreeId: string
+  }) => Promise<void>
+  /** Reads the agent-status registry by paneKey. When the launched command is
+   *  an agent (Review / Create PR usually launches Claude/Codex/etc.), the
+   *  PTY stays open after the agent finishes — but the agent-status hook
+   *  flips to `done`, which is the same completion signal run-prompt uses.
+   *  Optional so existing test harnesses that don't wire it keep working. */
+  getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
   now: () => number
 }
 
@@ -39,6 +64,13 @@ type Tracker = {
    *  terminal outcome (done / failed / timed-out). MUST NOT be called on
    *  needs-more-time. */
   unsubscribe: () => void
+  /** First-seen `done` timestamp from the agent-status registry. Anchors the
+   *  AGENT_DONE_DEBOUNCE_MS gate so a flicker done → working → done can't
+   *  count as completion. Reset to null whenever the agent flips back to
+   *  `working`. Only relevant when the launched command attaches an agent
+   *  hook; pure-shell commands never populate agent-status and fall through
+   *  to the PTY-exit path. */
+  agentFirstDoneAt: number | null
 }
 
 export class RunCommandRunner implements StepRunner {
@@ -59,6 +91,7 @@ export class RunCommandRunner implements StepRunner {
     if (!tracker) {
       let worktreeId: string
       let customCommand: string | undefined
+      let resolvedPaneRef = ''
       try {
         worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
         // Why: only the custom-source path carries a free-form command line;
@@ -68,6 +101,9 @@ export class RunCommandRunner implements StepRunner {
           config.source === 'custom' && config.customCommand != null
             ? resolveTemplate(config.customCommand, ctx.context)
             : config.customCommand
+        // Why: paneRef is optional; only resolve when present so chains
+        // without it don't fail on a missing template input.
+        resolvedPaneRef = config.paneRef ? resolveTemplate(config.paneRef, ctx.context) : ''
       } catch (e) {
         // Template resolution errors can never succeed on retry (bad authoring
         // or missing context), so fail-fast instead of looping forever.
@@ -76,6 +112,54 @@ export class RunCommandRunner implements StepRunner {
         }
         throw e
       }
+
+      // paneRef branch: write the command + Enter into an existing pane
+      // instead of spawning a new PTY. Delegated to the renderer because
+      // review/create-pr need the same settings + hooks-preferences
+      // resolution that `openCommandPane` does, and custom commands likewise
+      // run through the same code path for consistency.
+      const paneRef = resolvedPaneRef.trim()
+      if (paneRef.length > 0) {
+        if (config.source === 'custom' && (customCommand ?? '').trim().length === 0) {
+          return {
+            outcome: 'failed',
+            status: 'failed',
+            error: 'run-command with paneRef requires a non-empty customCommand.'
+          }
+        }
+        if (!this.deps.sendCommandToPane) {
+          throw new Error('RunCommandRunner: sendCommandToPane dep not wired.')
+        }
+        try {
+          await this.deps.sendCommandToPane({
+            paneKey: paneRef,
+            source: config.source,
+            commandId: config.commandId,
+            customCommand,
+            worktreeId
+          })
+        } catch (e) {
+          // Deterministic renderer failure (pane gone, command id unknown,
+          // write rejected) — fail fast. Transient errors re-throw so the
+          // executor retries.
+          if (e instanceof SendCommandToPaneError) {
+            return { outcome: 'failed', status: 'failed', error: e.message }
+          }
+          throw e
+        }
+        // No exit/outputTail signal exists for a write-to-existing-pane
+        // operation. Mark succeeded after the write so downstream steps can
+        // sequence cleanly; operators who need completion gating should chain
+        // a run-prompt with paneRef or a wait-for-setup step.
+        const output = { paneKey: paneRef, durationMs: 0, exitCode: 0, outputTail: '' }
+        return {
+          outcome: 'done',
+          status: 'succeeded',
+          output,
+          contextPatch: { steps: { [ctx.step.id]: output } }
+        }
+      }
+
       let ptyId: string
       let paneKey: string
       try {
@@ -113,7 +197,8 @@ export class RunCommandRunner implements StepRunner {
         paneKey,
         openedAt: this.deps.now(),
         outputTail,
-        unsubscribe
+        unsubscribe,
+        agentFirstDoneAt: null
       }
       if (!runTrackers) {
         runTrackers = new Map()
@@ -141,32 +226,78 @@ export class RunCommandRunner implements StepRunner {
     }
 
     const exit = this.deps.getPtyExit(tracker.ptyId)
-
-    if (!exit) {
-      // PTY still running — no exit recorded yet. Keep ticking; the next tick
-      // will look again. Subscription stays live so output accumulates.
-      return { outcome: 'needs-more-time', status: 'running' }
+    if (exit) {
+      // Why: per the chain-engine plan §Step 4, a non-zero exit code is still
+      // `done` (not `failed`) — operators decide via `onFailure` or
+      // downstream prompts whether a non-zero exit halts the chain. The
+      // runner's job is to surface the exit code + outputTail in the step
+      // output, not to interpret them. PTYs emit a single merged stream so
+      // this is one tail, not split stdout/stderr.
+      const output = {
+        exitCode: exit.exitCode,
+        paneKey: tracker.paneKey,
+        durationMs: now - tracker.openedAt,
+        outputTail: tracker.outputTail.read()
+      }
+      this.cleanup(tracker)
+      return {
+        outcome: 'done',
+        status: 'succeeded',
+        output,
+        contextPatch: { steps: { [ctx.step.id]: output } }
+      }
     }
 
-    // Why: per the chain-engine plan §Step 4, a non-zero exit code is still
-    // `done` (not `failed`) — operators decide via `onFailure` or downstream
-    // prompts whether a non-zero exit halts the chain. The runner's job is to
-    // surface the exit code + outputTail in the step output, not to interpret
-    // them. PTYs emit a single merged stream so this is one tail, not split
-    // stdout/stderr.
-    const output = {
-      exitCode: exit.exitCode,
-      paneKey: tracker.paneKey,
-      durationMs: now - tracker.openedAt,
-      outputTail: tracker.outputTail.read()
+    // Why: agent-launching commands (Review / Create PR usually fire Claude,
+    // Codex, etc.) finish their turn but keep the PTY alive — so polling
+    // `getPtyExit` would wait until the step timeout. The agent-status hook
+    // flips to `done` when the agent is idle, mirroring run-prompt's
+    // completion signal. If the registry sees `done` AND a debounce window
+    // has elapsed (so a flicker can't satisfy the gate), succeed the step.
+    // Pure-shell commands never populate agent-status, so this branch is a
+    // no-op for them and PTY exit above remains the only completion path.
+    const agentStatus = this.deps.getAgentStatus?.(tracker.paneKey)
+    if (agentStatus?.state === 'blocked' || agentStatus?.state === 'waiting') {
+      // Same halt semantics as run-prompt's polling branch: can't make
+      // progress when the agent is asking for human input.
+      this.cleanup(tracker)
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: `Agent needs human input (${agentStatus.state}). Chain halted.`
+      }
     }
-    this.cleanup(tracker)
-    return {
-      outcome: 'done',
-      status: 'succeeded',
-      output,
-      contextPatch: { steps: { [ctx.step.id]: output } }
+    if (agentStatus?.state === 'working') {
+      // Any work flip after a done ping invalidates the debounce window.
+      tracker.agentFirstDoneAt = null
+    } else if (agentStatus?.state === 'done') {
+      if (tracker.agentFirstDoneAt == null) {
+        tracker.agentFirstDoneAt = now
+      } else if (now - tracker.agentFirstDoneAt >= AGENT_DONE_DEBOUNCE_MS) {
+        const output = {
+          // Why: no real exit code from a still-open PTY — surface 0 so
+          // downstream templating against `steps.<id>.exitCode` stays
+          // typeable. The agent-status `done` path implies a successful
+          // turn from the agent's perspective.
+          exitCode: 0,
+          paneKey: tracker.paneKey,
+          durationMs: now - tracker.openedAt,
+          outputTail: tracker.outputTail.read()
+        }
+        this.cleanup(tracker)
+        return {
+          outcome: 'done',
+          status: 'succeeded',
+          output,
+          contextPatch: { steps: { [ctx.step.id]: output } }
+        }
+      }
     }
+
+    // No terminal signal yet (PTY still running, agent still working or no
+    // agent attached). Keep ticking; the next tick will look again.
+    // Subscription stays live so output accumulates.
+    return { outcome: 'needs-more-time', status: 'running' }
   }
 
   /** Tear down the PTY data subscription on a terminal outcome. MUST only be

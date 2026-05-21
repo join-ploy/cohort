@@ -12,15 +12,15 @@ export type TriggerPillProps = {
 // an extra jsdom harness — same pattern as AddStepControl in the modal.
 export function triggerLabel(trigger: TriggerConfig): string {
   const l = trigger.acceptsLinearTicket === true
-  const w = trigger.acceptsWorktreeSelection === true
-  if (l && w) {
+  const p = trigger.acceptsProjectSelection === true
+  if (l && p) {
     return 'Manual (2 prompts)'
   }
   if (l) {
     return 'Manual + Linear'
   }
-  if (w) {
-    return 'Manual + Worktree'
+  if (p) {
+    return 'Manual + Project'
   }
   return 'Manual'
 }
@@ -29,7 +29,7 @@ export function TriggerPill(props: TriggerPillProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
   const label = triggerLabel(props.trigger)
   const linearOn = props.trigger.acceptsLinearTicket === true
-  const worktreeOn = props.trigger.acceptsWorktreeSelection === true
+  const projectOn = props.trigger.acceptsProjectSelection === true
 
   const toggleLinear = (): void => {
     props.onTriggerChange({
@@ -37,10 +37,10 @@ export function TriggerPill(props: TriggerPillProps): React.JSX.Element {
       acceptsLinearTicket: !linearOn
     })
   }
-  const toggleWorktree = (): void => {
+  const toggleProject = (): void => {
     props.onTriggerChange({
       ...props.trigger,
-      acceptsWorktreeSelection: !worktreeOn
+      acceptsProjectSelection: !projectOn
     })
   }
 
@@ -74,11 +74,11 @@ export function TriggerPill(props: TriggerPillProps): React.JSX.Element {
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              aria-label="Accept worktree selection on Run"
-              checked={worktreeOn}
-              onChange={toggleWorktree}
+              aria-label="Pick project on Run"
+              checked={projectOn}
+              onChange={toggleProject}
             />
-            Accept worktree selection on Run
+            Pick project on Run
           </label>
         </div>
       ) : null}

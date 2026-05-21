@@ -88,6 +88,11 @@ export type AutomationCreateInput = {
   dtstart: number
   enabled?: boolean
   missedRunGraceMinutes?: number
+  // Chain-shape automations carry their trigger config and step list here so
+  // the editor can save them on first create. Both are optional so legacy
+  // (rrule-only) create call sites stay unchanged.
+  trigger?: TriggerConfig
+  steps?: Step[]
 }
 
 export type AutomationUpdateInput = Partial<
@@ -105,6 +110,8 @@ export type AutomationUpdateInput = Partial<
     | 'dtstart'
     | 'enabled'
     | 'missedRunGraceMinutes'
+    | 'trigger'
+    | 'steps'
   >
 >
 
@@ -119,7 +126,9 @@ export type AutomationDispatchRequest = {
 // `{{trigger.linear.issue.title}}` and `{{trigger.worktreeBranch}}` etc.
 export type RunNowPayload = {
   linear?: { issue: LinearIssuePayload }
-  worktreeId?: string
+  // Operator-picked project at manual-run time. When set, takes precedence
+  // over the automation's stored projectId for that run.
+  projectId?: string
 }
 
 export type AutomationDispatchResult = {
@@ -138,7 +147,10 @@ export type TriggerConfig = {
   // migration. When set, the editor surfaces extra trigger-time inputs and the
   // dry-run validator exposes the matching overlay paths.
   acceptsLinearTicket?: boolean
-  acceptsWorktreeSelection?: boolean
+  // When true, the operator picks a project at Run Now time instead of the
+  // automation carrying a fixed projectId — the picked project becomes the
+  // run's automation.projectId for downstream steps (e.g. create-worktree).
+  acceptsProjectSelection?: boolean
 }
 
 export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
@@ -183,6 +195,13 @@ export type RunCommandConfig = {
   commandId?: string // when source is 'review' | 'create-pr'
   customCommand?: string // when source is 'custom'
   captureStdout: boolean
+  // Optional paneKey of an existing pane (template, e.g.
+  // `{{steps.<id>.paneKey}}`). When set, the command text is written to that
+  // pane's PTY with a trailing newline (Enter) instead of spawning a new
+  // pane. Only supported for `source: 'custom'` today; review/create-pr
+  // commands require renderer-side resolution that doesn't compose with
+  // existing-pane reuse.
+  paneRef?: string
 }
 
 export type StepConfig =

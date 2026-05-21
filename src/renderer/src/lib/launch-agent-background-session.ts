@@ -5,9 +5,10 @@ import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
-import type { TuiAgent } from '../../../shared/types'
+import type { TuiAgent, Worktree } from '../../../shared/types'
 import type { LaunchSource } from '../../../shared/telemetry-events'
 import { FIRST_PANE_ID } from '../../../shared/pane-key'
+import { getRepoIdFromWorktreeId } from '../../../shared/worktree-id'
 import {
   registerEagerPtyBuffer,
   subscribeToPtyData,
@@ -24,6 +25,16 @@ export type LaunchAgentBackgroundSessionArgs = {
   title?: string
   onExit?: (ptyId: string, code: number) => void
   onAgentStatus?: (payload: ParsedAgentStatusPayload) => void
+  /** When the caller already knows the worktree's path and owning repo
+   *  connectionId (e.g. the chain executor in main hands these over so the
+   *  renderer doesn't need its cache), pass them here. Bypasses the renderer
+   *  cache lookup entirely — useful when the worktree was created
+   *  milliseconds earlier and the `worktrees:changed` broadcast may not have
+   *  settled yet. */
+  worktreeOverride?: {
+    path: string
+    connectionId: string | null
+  }
 }
 
 export type LaunchAgentBackgroundSessionResult = {
@@ -32,16 +43,62 @@ export type LaunchAgentBackgroundSessionResult = {
   startupPlan: AgentStartupPlan
 }
 
+async function resolveWorktreeWithRetry(worktreeId: string): Promise<Worktree | undefined> {
+  // Why: chain-shape automations call this immediately after creating a
+  // worktree in the main process. The `worktrees:changed` broadcast that
+  // populates the renderer cache is async, so the lookup can race ahead.
+  // Force a fetch for the owning repo and retry the lookup briefly before
+  // giving up; this turns a flaky race into a deterministic resolution.
+  let worktree = useAppStore
+    .getState()
+    .allWorktrees()
+    .find((entry) => entry.id === worktreeId)
+  if (worktree) {
+    return worktree
+  }
+  const repoId = getRepoIdFromWorktreeId(worktreeId)
+  if (!repoId) {
+    return undefined
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await useAppStore.getState().fetchWorktrees(repoId)
+    worktree = useAppStore
+      .getState()
+      .allWorktrees()
+      .find((entry) => entry.id === worktreeId)
+    if (worktree) {
+      return worktree
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  return undefined
+}
+
 export async function launchAgentBackgroundSession(
   args: LaunchAgentBackgroundSessionArgs
 ): Promise<LaunchAgentBackgroundSessionResult | null> {
-  const { agent, worktreeId, prompt, launchSource, title, onExit, onAgentStatus } = args
-  const store = useAppStore.getState()
-  const worktree = store.allWorktrees().find((entry) => entry.id === worktreeId)
-  const repo = worktree ? store.repos.find((entry) => entry.id === worktree.repoId) : null
-  if (!worktree) {
-    throw new Error('The target workspace is no longer available.')
+  const { agent, worktreeId, prompt, launchSource, title, onExit, onAgentStatus, worktreeOverride } =
+    args
+  // Why: when the caller pre-resolved the worktree info, skip the cache
+  // lookup entirely. This is the chain-executor path — main already knows
+  // the path + connectionId and hands them over so we don't race the
+  // renderer's `worktrees:changed` broadcast.
+  let worktreePath: string
+  let connectionId: string | null
+  if (worktreeOverride) {
+    worktreePath = worktreeOverride.path
+    connectionId = worktreeOverride.connectionId
+  } else {
+    const worktree = await resolveWorktreeWithRetry(worktreeId)
+    if (!worktree) {
+      throw new Error('The target workspace is no longer available.')
+    }
+    const repo =
+      useAppStore.getState().repos.find((entry) => entry.id === worktree.repoId) ?? null
+    worktreePath = worktree.path
+    connectionId = repo?.connectionId ?? null
   }
+  const store = useAppStore.getState()
   const cmdOverrides = store.settings?.agentCmdOverrides ?? {}
   const trimmedPrompt = prompt?.trim() ?? ''
   const hasPrompt = trimmedPrompt.length > 0
@@ -91,10 +148,10 @@ export async function launchAgentBackgroundSession(
     result = await window.api.pty.spawn({
       cols: 120,
       rows: 40,
-      cwd: worktree.path,
+      cwd: worktreePath,
       command: startupPlan.launchCommand,
       env: paneEnv,
-      connectionId: repo?.connectionId ?? null,
+      connectionId,
       worktreeId,
       tabId: tab.id,
       leafId: 'pane:1',

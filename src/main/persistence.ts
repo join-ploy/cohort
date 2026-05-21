@@ -829,6 +829,12 @@ export class Store {
     const repo = this.state.repos.find((entry) => entry.id === input.projectId)
     const now = Date.now()
     const executionTargetType = repo?.connectionId ? 'ssh' : 'local'
+    // Why: chain-shape automations are manual-only (no recurrence). Skip the
+    // rrule parser when input.rrule is empty so the create succeeds without a
+    // schedule; scheduled runs are gated on rrule being non-empty downstream.
+    const nextRunAt = input.rrule
+      ? nextAutomationOccurrenceAfter(input.rrule, input.dtstart, now)
+      : 0
     const automation: Automation = {
       id: randomUUID(),
       name: input.name.trim() || 'Untitled automation',
@@ -845,11 +851,13 @@ export class Store {
       rrule: input.rrule,
       dtstart: input.dtstart,
       enabled: input.enabled ?? true,
-      nextRunAt: nextAutomationOccurrenceAfter(input.rrule, input.dtstart, now),
+      nextRunAt,
       missedRunPolicy: 'run_once_within_grace',
       missedRunGraceMinutes: input.missedRunGraceMinutes ?? 720,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      ...(input.trigger ? { trigger: input.trigger } : {}),
+      ...(input.steps ? { steps: input.steps } : {})
     }
     this.state.automations = [...(this.state.automations ?? []), automation]
     this.flush()
@@ -868,6 +876,14 @@ export class Store {
     const rrule = updates.rrule ?? current.rrule
     const dtstart = updates.dtstart ?? current.dtstart
     const scheduleChanged = updates.rrule !== undefined || updates.dtstart !== undefined
+    // Why: an empty rrule means the automation is manual-only (chain-shape).
+    // Reset nextRunAt to 0 rather than trying to parse, so the scheduler simply
+    // skips it.
+    const nextRunAt = scheduleChanged
+      ? rrule
+        ? nextAutomationOccurrenceAfter(rrule, dtstart, Date.now())
+        : 0
+      : current.nextRunAt
     const workspaceMode = updates.workspaceMode ?? current.workspaceMode
     const updated: Automation = {
       ...current,
@@ -893,9 +909,7 @@ export class Store {
           : null,
       rrule,
       dtstart,
-      nextRunAt: scheduleChanged
-        ? nextAutomationOccurrenceAfter(rrule, dtstart, Date.now())
-        : current.nextRunAt,
+      nextRunAt,
       updatedAt: Date.now()
     }
     this.state.automations[index] = updated

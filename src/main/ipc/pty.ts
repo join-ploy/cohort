@@ -82,6 +82,20 @@ export function setPtyExitRegistry(registry: PtyExitRegistry | null): void {
   ptyExitRegistryRef = registry
 }
 
+// Why: the chain-engine RunCommandRunner polls `getPtyExit` from the registry,
+// but without a nudge it would only check on its next scheduler tick. Calling
+// this on every PTY exit lets the AutomationService re-tick the chain
+// immediately so a finished run-command step succeeds within milliseconds
+// rather than waiting up to the next polling cadence. Optional — defaults to
+// a no-op when no listener is wired.
+let onPtyExitListenerRef: ((ptyId: string, code: number) => void) | null = null
+
+export function setOnPtyExitListener(
+  listener: ((ptyId: string, code: number) => void) | null
+): void {
+  onPtyExitListenerRef = listener
+}
+
 // Why: main-process consumers (currently the chain-engine RunCommandRunner)
 // need to tap PTY data without going through the renderer round-trip. The
 // subscriber list is invoked from the same flush window that broadcasts to
@@ -604,6 +618,7 @@ export function registerPtyHandlers(
         // same tick the renderer learns about the exit. Additive — registry
         // writes are no-ops when unwired.
         ptyExitRegistryRef?.set(id, { exitCode: code, finishedAt: Date.now() })
+        onPtyExitListenerRef?.(id, code)
         runtime?.onPtyExit(id, code)
       },
       onData: (id, data, timestamp) => runtime?.onPtyData(id, data, timestamp)
@@ -690,6 +705,7 @@ export function registerPtyHandlers(
           exitCode: payload.code,
           finishedAt: Date.now()
         })
+        onPtyExitListenerRef?.(payload.id, payload.code)
         runtime?.onPtyExit(payload.id, payload.code)
       }
       if (!mainWindow.isDestroyed()) {

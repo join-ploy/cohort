@@ -60,6 +60,28 @@ export class ChainExecutor {
       return
     }
 
+    // Why: a step that returns `done` synchronously (create-worktree, an
+    // instantly-resolved wait-for-setup, etc.) should not have to wait the
+    // full 60s scheduler cadence before the NEXT step gets its first tick.
+    // Loop until a step returns `needs-more-time`, the run finalizes, or we
+    // hit the safety bound (every step gets at most 2 tries per outer tick:
+    // one to start, one to land terminal — protects against a buggy runner
+    // that always returns `done` without making progress).
+    const maxIterations = automation.steps.length * 2 + 1
+    for (let i = 0; i < maxIterations; i++) {
+      const keepGoing = await this.tickOnce(automation, run)
+      if (!keepGoing) {
+        return
+      }
+    }
+  }
+
+  /** Drives one runner.tick() invocation and persists the result. Returns
+   *  `true` when the caller should immediately try again (a step just landed
+   *  terminal and there's more work to do) and `false` when we should wait
+   *  for the next scheduler cadence (needs-more-time, halt failure, or run
+   *  finalized). */
+  private async tickOnce(automation: Automation, run: AutomationRun): Promise<boolean> {
     if (!run.stepStates) {
       run.stepStates = []
     }
@@ -85,7 +107,7 @@ export class ChainExecutor {
           this.finalizeRun(automation, run)
         }
         this.deps.persistRun(run)
-        return
+        return false
       }
       state = makeStepState(automation.steps[activeIdx], this.deps.now())
       run.stepStates.push(state)
@@ -159,7 +181,7 @@ export class ChainExecutor {
       run.status = 'failed'
       run.finishedAt = this.deps.now()
       this.deps.persistRun(run)
-      return
+      return false
     }
 
     // For `failed` with onFailure='continue', or `done`, fall through and
@@ -167,8 +189,15 @@ export class ChainExecutor {
     // append the next step's state.
     if (run.stepStates.length >= automation.steps.length && run.stepStates.every(isTerminal)) {
       this.finalizeRun(automation, run)
+      this.deps.persistRun(run)
+      return false
     }
     this.deps.persistRun(run)
+    // Why: when the just-finished step landed terminal AND there's still
+    // work in the chain, signal the caller to advance immediately. A
+    // `needs-more-time` result returns false so we wait for the next 60s
+    // scheduler cadence before polling the runner again.
+    return result.outcome === 'done' || result.outcome === 'failed'
   }
 
   /** Final pass once every step in the automation has a terminal state. A

@@ -254,34 +254,32 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     expect(final.stepStates?.[0].finishedAt).toBeTypeOf('number')
   })
 
-  it('seeds run.context.trigger from a Linear + worktree payload', async () => {
+  it('seeds run.context with a Linear payload and a picked project at run time', async () => {
     const store = await createStore()
     store.addRepo(makeRepo())
-    // Branch lives on the optional WorktreeMeta cache; path is parsed from id.
-    store.setWorktreeMeta('r1::/x', { branch: 'main' })
+    store.addRepo(makeRepo({ id: 'r2', path: '/repo2', displayName: 'second' }))
     const automation = store.createAutomation({
       name: 'Chain auto',
       prompt: '(ignored)',
       agentId: 'claude',
-      projectId: 'r1',
+      // Saved without an upfront project — the operator picks one at Run Now.
+      projectId: '',
       workspaceMode: 'existing',
       workspaceId: 'wt1',
       timezone: 'UTC',
       rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
       dtstart: new Date('2030-01-01T00:00:00').getTime()
     })
-    // Templates against both trigger.linear.issue.title and trigger.worktreeId
-    // so the materialized context is exercised end-to-end via the runner.
     const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
-    stored.trigger = { kind: 'manual', acceptsLinearTicket: true, acceptsWorktreeSelection: true }
+    stored.trigger = { kind: 'manual', acceptsLinearTicket: true, acceptsProjectSelection: true }
     stored.steps = [
       {
         id: 's1',
         kind: 'run-prompt',
         config: {
-          worktreeRef: '{{trigger.worktreeId}}',
+          worktreeRef: 'wt1',
           agentId: 'claude',
-          prompt: 'work on {{trigger.linear.issue.title}}',
+          prompt: 'work on {{trigger.linear.issue.title}} in {{automation.projectId}}',
           doneDebounceSeconds: 15
         },
         onFailure: 'halt',
@@ -313,25 +311,23 @@ describe('runNow drives chain-shape automations end-to-end', () => {
           priority: 2
         }
       },
-      worktreeId: 'r1::/x'
+      projectId: 'r2'
     })
     expect(send).toHaveBeenCalledWith(
       'automations:openPromptPane',
       expect.objectContaining({
-        worktreeId: 'r1::/x',
+        worktreeId: 'wt1',
         agentId: 'claude',
-        prompt: 'work on My ticket'
+        prompt: 'work on My ticket in r2'
       })
     )
+    expect(result.context?.automation).toMatchObject({ projectId: 'r2', workspaceId: 'wt1' })
     expect(result.context?.trigger).toMatchObject({
-      linear: { issue: expect.objectContaining({ id: 'lin-1', title: 'My ticket' }) },
-      worktreeId: 'r1::/x',
-      worktreeBranch: 'main',
-      worktreePath: '/x'
+      linear: { issue: expect.objectContaining({ id: 'lin-1', title: 'My ticket' }) }
     })
-    // Unknown worktreeId fails fast on the same code path.
-    await expect(service.runNow(automation.id, { worktreeId: 'wt-missing' })).rejects.toThrow(
-      /Worktree wt-missing not found/
+    // Unknown projectId fails fast on the same code path.
+    await expect(service.runNow(automation.id, { projectId: 'r-missing' })).rejects.toThrow(
+      /Project r-missing not found/
     )
   })
 

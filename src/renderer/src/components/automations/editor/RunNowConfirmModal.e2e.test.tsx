@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { Automation, RunNowPayload } from '../../../../../shared/automations-types'
-import type { LinearIssue, Worktree } from '../../../../../shared/types'
+import type { LinearIssue, Repo } from '../../../../../shared/types'
 
 // Why: the pickers mounted inside RunNowConfirmModal read from the zustand
 // store. Mock it the same way the static-markup picker tests do so this jsdom
@@ -32,26 +32,12 @@ const issueA: LinearIssue = {
   updatedAt: '2026-01-01T00:00:00Z'
 }
 
-const wtA: Worktree = {
-  id: 'wt-1',
-  repoId: 'repo-1',
-  path: '/x',
-  head: 'aaa',
-  branch: 'refs/heads/feature/x',
-  isBare: false,
-  isMainWorktree: false,
-  displayName: 'feature/x',
-  workspaceName: 'wise_panther',
-  comment: '',
-  linkedIssue: null,
-  linkedPR: null,
-  linkedLinearIssue: null,
-  isArchived: false,
-  archivedAt: null,
-  isUnread: false,
-  isPinned: false,
-  sortOrder: 0,
-  lastActivityAt: 0
+const repoA: Repo = {
+  id: 'repo-1',
+  path: '/tmp/repo-1',
+  displayName: 'Repo One',
+  badgeColor: '#abc',
+  addedAt: 0
 }
 
 function makeAutomation(): Automation {
@@ -77,7 +63,7 @@ function makeAutomation(): Automation {
     createdAt: 0,
     updatedAt: 0,
     // Both trigger flags on so both pickers render.
-    trigger: { kind: 'manual', acceptsLinearTicket: true, acceptsWorktreeSelection: true },
+    trigger: { kind: 'manual', acceptsLinearTicket: true, acceptsProjectSelection: true },
     steps: []
   }
 }
@@ -96,7 +82,7 @@ function baseStoreState(): StoreState {
     searchLinearIssues: vi.fn().mockResolvedValue([]),
     listLinearIssues: vi.fn().mockResolvedValue([]),
     openSettingsTarget: vi.fn(),
-    worktreesByRepo: { 'repo-1': [wtA] }
+    repos: [repoA]
   }
 }
 
@@ -105,7 +91,7 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
     mockState = baseStoreState()
   })
 
-  it('assembles a payload from Linear + worktree picker selections', async () => {
+  it('assembles a payload from Linear + project picker selections', async () => {
     const onRun = vi.fn<(payload: RunNowPayload) => Promise<void>>().mockResolvedValue(undefined)
     const onClose = vi.fn()
     const { RunNowConfirmModal } = await import('./RunNowConfirmModal')
@@ -128,12 +114,12 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
     expect(linearButton).not.toBeNull()
     fireEvent.click(linearButton!)
 
-    // Same shape for the worktree row.
-    const worktreeButton = document.querySelector(
-      '[data-worktree-id="wt-1"]'
+    // Same shape for the project row.
+    const projectButton = document.querySelector(
+      '[data-project-id="repo-1"]'
     ) as HTMLButtonElement | null
-    expect(worktreeButton).not.toBeNull()
-    fireEvent.click(worktreeButton!)
+    expect(projectButton).not.toBeNull()
+    fireEvent.click(projectButton!)
 
     // Run is gated on both pickers — both have a value now, so it should enable.
     const runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement
@@ -150,7 +136,7 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
           title: 'My ticket'
         }
       },
-      worktreeId: 'wt-1'
+      projectId: 'repo-1'
     })
     // Modal closes itself after a successful run.
     await waitFor(() => expect(onClose).toHaveBeenCalled())

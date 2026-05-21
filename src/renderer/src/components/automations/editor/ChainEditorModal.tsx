@@ -2,6 +2,14 @@ import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+
+// Why: the editor renders as a fullscreen overlay covering the native macOS
+// traffic lights. Reserve the same 80px pad used by .titlebar-left so the
+// close/minimize/expand buttons don't sit on top of the header controls.
+const isMac =
+  typeof navigator !== 'undefined' &&
+  typeof navigator.userAgent === 'string' &&
+  navigator.userAgent.includes('Mac')
 import type {
   Automation,
   RunNowPayload,
@@ -63,9 +71,11 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
     const base = computeAllErrors(draft)
-    if (!draft.projectId) {
-      // Why: project is required to dispatch — surface the missing selection as
-      // a top-level error so Save is disabled until the user picks a project.
+    // Why: project is required to dispatch — surface the missing selection as
+    // a top-level error so Save is disabled until the user picks a project.
+    // When the trigger picks a project at Run Now time, the upfront projectId
+    // is intentionally empty, so don't gate Save on it.
+    if (!draft.projectId && !draft.trigger?.acceptsProjectSelection) {
       base.push({
         path: 'projectId',
         code: 'unknown-path',
@@ -220,7 +230,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
           // worktree), defer to the confirm modal so the operator can supply
           // them. Otherwise dispatch directly.
           const needsPayload =
-            !!draft.trigger?.acceptsLinearTicket || !!draft.trigger?.acceptsWorktreeSelection
+            !!draft.trigger?.acceptsLinearTicket || !!draft.trigger?.acceptsProjectSelection
           if (needsPayload) {
             setRunConfirmOpen(true)
           } else {
@@ -297,8 +307,13 @@ type ChainEditorHeaderProps = {
 }
 
 function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
+  // Why: when the trigger picks a project at Run Now time the upfront Project
+  // select would be redundant — and worse, misleading, since whatever the user
+  // chose here is ignored at dispatch. Hide it in that mode.
+  const picksProjectAtRunTime = props.trigger.acceptsProjectSelection === true
   return (
     <div className="flex items-center gap-3 border-b border-border px-5 py-3">
+      {isMac ? <div className="titlebar-traffic-light-pad" /> : null}
       <input
         aria-label="Automation name"
         type="text"
@@ -307,19 +322,21 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
         placeholder="Untitled automation"
         className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-base font-semibold outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
       />
-      <select
-        aria-label="Project"
-        value={props.projectId}
-        onChange={(e) => props.onProjectChange(e.target.value)}
-        className="min-w-[10rem] rounded-md border border-input bg-background px-2 py-2 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
-      >
-        <option value="">Pick a project…</option>
-        {props.repos.map((r) => (
-          <option key={r.id} value={r.id}>
-            {r.displayName}
-          </option>
-        ))}
-      </select>
+      {picksProjectAtRunTime ? null : (
+        <select
+          aria-label="Project"
+          value={props.projectId}
+          onChange={(e) => props.onProjectChange(e.target.value)}
+          className="min-w-[10rem] rounded-md border border-input bg-background px-2 py-2 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
+        >
+          <option value="">Pick a project…</option>
+          {props.repos.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.displayName}
+            </option>
+          ))}
+        </select>
+      )}
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           aria-label="Enabled"

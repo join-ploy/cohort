@@ -52,14 +52,14 @@ export function CreateWorktreeStepCard(props: CreateWorktreeStepCardProps): Reac
       <TemplateInput
         value={config.branchName}
         onChange={(v) => update({ branchName: v })}
-        placeholder="Branch name"
+        placeholder="Branch name (leave blank to auto-generate)"
         available={props.available}
         ariaLabel="Branch name"
       />
       <TemplateInput
         value={config.displayName}
         onChange={(v) => update({ displayName: v })}
-        placeholder="Display name"
+        placeholder="Display name (leave blank to auto-generate)"
         available={props.available}
         ariaLabel="Display name"
       />

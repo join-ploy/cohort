@@ -7,7 +7,6 @@ import {
   WAIT_FOR_SETUP_OUTPUT_SCHEMA,
   RUN_PROMPT_OUTPUT_SCHEMA,
   RUN_COMMAND_OUTPUT_SCHEMA,
-  WORKTREE_TRIGGER_OVERLAY,
   type SchemaLeafType
 } from './automation-step-schemas'
 
@@ -57,14 +56,6 @@ describe('automation step schemas', () => {
       assigneeEmail: 'string',
       stateName: 'string',
       priority: 'number'
-    })
-  })
-
-  it('WORKTREE_TRIGGER_OVERLAY shape', () => {
-    expect(WORKTREE_TRIGGER_OVERLAY).toEqual({
-      worktreeId: 'string',
-      worktreeBranch: 'string',
-      worktreePath: 'string'
     })
   })
 
