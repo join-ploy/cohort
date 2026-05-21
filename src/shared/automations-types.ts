@@ -15,6 +15,9 @@ export type AutomationRunStatus =
   | 'running'
   | 'failed'
   | 'completed'
+  // Operator-initiated stop. Distinct from `failed` so the UI can label the
+  // outcome accurately and the run can still be retried.
+  | 'cancelled'
   | 'skipped_missed'
   | 'skipped_unavailable'
   | 'skipped_needs_interactive_auth'

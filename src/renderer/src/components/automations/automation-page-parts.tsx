@@ -67,6 +67,9 @@ export function getAutomationRunStatusVariant(
   if (status === 'failed' || status === 'dispatch_failed') {
     return 'destructive'
   }
+  if (status === 'cancelled') {
+    return 'outline'
+  }
   return 'dot'
 }
 
@@ -92,6 +95,8 @@ export function getAutomationRunStatusLabel(status: AutomationRun['status']): st
       return 'Failed'
     case 'dispatch_failed':
       return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
   }
 }
 

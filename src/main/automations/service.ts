@@ -47,6 +47,11 @@ export type AutomationServiceOpts = {
    *  without going through the renderer round-trip. Returns an unsubscribe
    *  function the runner calls on terminal outcomes. */
   subscribePtyData?: (listener: (ptyId: string, data: string) => void) => () => void
+  /** Resolve a paneKey to its current ptyId. Wired from
+   *  `getPtyIdForPaneKey` in `./ipc/pty` so RunPromptRunner can subscribe to
+   *  the prompt pane's data stream and capture the agent's last-turn output
+   *  for templating downstream. */
+  getPtyIdForPaneKey?: (paneKey: string) => string | undefined
   /** Bridge from the chain executor's `create-worktree` step to the OrcaRuntime
    *  managed-worktree create flow. Wired in src/main/index.ts to translate
    *  the runner's narrow shape onto OrcaRuntimeService.createManagedWorktree.
@@ -70,6 +75,7 @@ export class AutomationService {
   private readonly getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
   private readonly getPtyExit: (ptyId: string) => PtyExitEntry | undefined
   private readonly subscribePtyData: (listener: (ptyId: string, data: string) => void) => () => void
+  private readonly getPtyIdForPaneKey: (paneKey: string) => string | undefined
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
   private timer: ReturnType<typeof setInterval> | null = null
@@ -100,6 +106,7 @@ export class AutomationService {
     // harnesses that never exercise run-command steps don't need to wire it.
     // The returned unsubscribe must still be a fn so cleanup() doesn't throw.
     this.subscribePtyData = opts.subscribePtyData ?? (() => () => {})
+    this.getPtyIdForPaneKey = opts.getPtyIdForPaneKey ?? (() => undefined)
     // Default getWebContents to the service's own setWebContents-tracked
     // reference so tests that don't supply a factory still get the WebContents
     // through the existing setWebContents() path.
@@ -139,6 +146,11 @@ export class AutomationService {
         const repo = this.store.getRepo(parsed.repoId)
         return { path: parsed.worktreePath, connectionId: repo?.connectionId ?? null }
       },
+      // Why: scope outputTail capture to the agent's current turn so the
+      // step's `outputTail` surfaces the last assistant reply rather than
+      // the full pane history.
+      getPtyIdForPaneKey: this.getPtyIdForPaneKey,
+      subscribePtyData: this.subscribePtyData,
       now: () => Date.now()
     })
 
@@ -183,9 +195,23 @@ export class AutomationService {
       getRunner: (kind) => this.resolveRunner(kind),
       persistRun: (run) => {
         this.store.replaceAutomationRun(run)
+        // Why: notify the renderer so AutomationsPage's run list and detail
+        // panes update without the operator hitting refresh. Mirrors the
+        // legacy dispatcher's `AUTOMATIONS_CHANGED_EVENT` flow but originates
+        // in main so chain-shape progress (step transitions, status flips,
+        // outputs) is surfaced live.
+        this.broadcastAutomationsChanged()
       },
       now: () => Date.now()
     })
+  }
+
+  private broadcastAutomationsChanged(): void {
+    const webContents = this.getWebContents()
+    if (!webContents || webContents.isDestroyed()) {
+      return
+    }
+    webContents.send('automations:changed')
   }
 
   setWebContents(webContents: WebContents | null): void {
@@ -264,6 +290,7 @@ export class AutomationService {
       }
       run.stepStates = []
       this.store.replaceAutomationRun(run)
+      this.broadcastAutomationsChanged()
       // Why: fire-and-forget the initial tick so the renderer's "Run Now"
       // modal can close immediately. The run is already persisted as
       // `running`, so the UI sees progress on the next refresh; tick failures
@@ -406,6 +433,94 @@ export class AutomationService {
     }
   }
 
+  /** Operator-initiated stop: mark the run cancelled, finalize any trailing
+   *  non-terminal step states with a "Cancelled" error so the UI doesn't
+   *  show a step indefinitely `running` under a stopped run, and drop every
+   *  runner tracker for the run so a stray tick can't pick the pane back up.
+   *  Returns the updated run or undefined when the id doesn't exist / the
+   *  run is already in a terminal state. */
+  cancelRun(runId: string): AutomationRun | undefined {
+    const run = this.store
+      .listAutomationRuns()
+      .find((entry) => entry.id === runId)
+    if (!run) {
+      return undefined
+    }
+    if (run.status !== 'running' && run.status !== 'pending' && run.status !== 'dispatching') {
+      return run
+    }
+    const now = Date.now()
+    if (run.stepStates) {
+      for (const state of run.stepStates) {
+        if (state.status === 'running' || state.status === 'pending') {
+          state.status = 'failed'
+          state.finishedAt = now
+          state.error = state.error ?? 'Cancelled by operator.'
+        }
+      }
+    }
+    run.status = 'cancelled'
+    run.error = run.error ?? 'Cancelled by operator.'
+    run.finishedAt = now
+    this.store.replaceAutomationRun(run)
+    // Drop every runner's tracker so a queued/in-flight tick doesn't try to
+    // resume the cancelled pane. Cheap no-op when a runner never saw the run.
+    for (const runner of this.allRunners()) {
+      runner.dropRun?.(run.id)
+    }
+    this.broadcastAutomationsChanged()
+    return run
+  }
+
+  /** Operator-initiated retry from a specific step. Truncates `stepStates`
+   *  to before the target index, drops every dropped step's runner tracker
+   *  so the retry starts fresh, flips the run back to `running`, and pokes
+   *  the chain executor to immediately pick it up. Returns undefined when
+   *  the run or step index can't be resolved. Why per-step: completed
+   *  steps' downstream context (`steps.<id>.…`) is preserved, so a retry of
+   *  step N can still template against steps 0…N-1. */
+  retryRunFromStep(runId: string, stepIndex: number): AutomationRun | undefined {
+    const run = this.store
+      .listAutomationRuns()
+      .find((entry) => entry.id === runId)
+    if (!run) {
+      return undefined
+    }
+    const automation = this.store
+      .listAutomations()
+      .find((entry) => entry.id === run.automationId)
+    if (!automation || !automation.steps || stepIndex < 0 || stepIndex >= automation.steps.length) {
+      return undefined
+    }
+    const droppedStepIds = (run.stepStates ?? []).slice(stepIndex).map((state) => state.stepId)
+    run.stepStates = (run.stepStates ?? []).slice(0, stepIndex)
+    run.status = 'running'
+    run.error = null
+    run.finishedAt = undefined
+    this.store.replaceAutomationRun(run)
+    for (const stepId of droppedStepIds) {
+      for (const runner of this.allRunners()) {
+        runner.dropStep?.(run.id, stepId)
+      }
+    }
+    this.broadcastAutomationsChanged()
+    // Why: kick a tick immediately rather than wait for the next scheduler
+    // cadence so the operator sees the retry start right away.
+    this.wakeChains()
+    return run
+  }
+
+  /** Iterable of every concrete runner so cancel/retry can fan out without
+   *  knowing the kind set. */
+  private allRunners(): StepRunner[] {
+    return [
+      this.runPromptRunner,
+      this.waitForSetupRunner,
+      this.runCommandRunner,
+      this.createWorktreeRunner
+    ]
+  }
+
   /** Mark a run failed in response to a tick-time error and finalize any
    *  trailing non-terminal step states so the UI never shows an indefinitely
    *  "running" step under a failed run. Shared between the manual `runNow`
@@ -427,6 +542,7 @@ export class AutomationService {
     run.error = errorMessage
     run.finishedAt = now
     this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
   }
 
   private async evaluateAutomation(automation: Automation, now: number): Promise<void> {

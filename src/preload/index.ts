@@ -2464,6 +2464,10 @@ const api = {
     delete: (args: { id: string }): Promise<void> => ipcRenderer.invoke('automations:delete', args),
     runNow: (args: { id: string; payload?: RunNowPayload }): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:runNow', args),
+    cancelRun: (args: { runId: string }): Promise<AutomationRun | null> =>
+      ipcRenderer.invoke('automations:cancelRun', args),
+    retryRunFromStep: (args: { runId: string; stepIndex: number }): Promise<AutomationRun | null> =>
+      ipcRenderer.invoke('automations:retryRunFromStep', args),
     markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:markDispatchResult', result),
     rendererReady: (): Promise<void> => ipcRenderer.invoke('automations:rendererReady'),
@@ -2472,6 +2476,16 @@ const api = {
         callback(request)
       ipcRenderer.on('automations:dispatchRequested', listener)
       return () => ipcRenderer.removeListener('automations:dispatchRequested', listener)
+    },
+    /** Subscribe to chain-shape automation run changes broadcast by the
+     *  main-process AutomationService (createAutomationRun, persistRun
+     *  callbacks from the chain executor, finalizeFailedRun). The renderer
+     *  refreshes its run/state caches in response so the UI stays live
+     *  without manual reload. */
+    onChanged: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('automations:changed', listener)
+      return () => ipcRenderer.removeListener('automations:changed', listener)
     },
     /** Subscribe to per-step prompt-pane requests from the main-process chain
      *  executor. The renderer should open a tab + launch the agent, then call

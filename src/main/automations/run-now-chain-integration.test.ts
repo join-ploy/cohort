@@ -114,7 +114,12 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     // `send` from openPromptPane fires AFTER ipc.once registers the reply
     // listener, so we can resolve the reply synchronously here by invoking
     // the registered handler with a synthetic { ok, paneKey } payload.
-    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+    const send = vi.fn((channel: string, payload?: { requestId?: string }) => {
+      // Why: the service also broadcasts `automations:changed` with no
+      // payload as a UI live-update nudge; ignore non-openPromptPane channels.
+      if (channel !== 'automations:openPromptPane' || !payload?.requestId) {
+        return
+      }
       const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
       const handler = listeners.get(replyChannel)
       handler?.({}, { ok: true, paneKey: 'tab-1:1' })
@@ -185,7 +190,10 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     stored.steps = [step]
 
     const { ipc, listeners } = makeFakeIpc()
-    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+    const send = vi.fn((channel: string, payload?: { requestId?: string }) => {
+      if (channel !== 'automations:openPromptPane' || !payload?.requestId) {
+        return
+      }
       const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
       listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
     })
@@ -216,7 +224,12 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     // Tick 1 (immediate) — opens the pane, returns needs-more-time.
     const afterImmediate = await service.runNow(automation.id)
     expect(afterImmediate.status).toBe('running')
-    expect(send).toHaveBeenCalledTimes(1) // openPromptPane fired exactly once
+    // openPromptPane fired exactly once. (`automations:changed` nudges share
+    // the same `send` mock; filter so the assertion is precise.)
+    const openPromptPaneCalls = send.mock.calls.filter(
+      (c) => c[0] === 'automations:openPromptPane'
+    )
+    expect(openPromptPaneCalls).toHaveLength(1)
 
     // Subsequent ticks happen on the 60s cadence; for the test we tickle the
     // chain executor directly via the same private path (start() + a fake
@@ -287,7 +300,10 @@ describe('runNow drives chain-shape automations end-to-end', () => {
       }
     ]
     const { ipc, listeners } = makeFakeIpc()
-    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+    const send = vi.fn((channel: string, payload?: { requestId?: string }) => {
+      if (channel !== 'automations:openPromptPane' || !payload?.requestId) {
+        return
+      }
       const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
       listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
     })
@@ -402,7 +418,15 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     // open-command-pane.ts / send-prompt-to-pane.ts). The fake `send` here
     // routes by channel and synthesizes the appropriate reply payload.
     const send = vi.fn(
-      (channel: string, payload: { requestId: string; paneKey?: string; prompt?: string }) => {
+      (
+        channel: string,
+        payload?: { requestId?: string; paneKey?: string; prompt?: string }
+      ) => {
+        if (!payload?.requestId) {
+          // Why: the service also broadcasts `automations:changed` with no
+          // payload as a UI live-update nudge — ignore non-pane channels.
+          return
+        }
         if (channel === 'automations:openPromptPane') {
           const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
           listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
@@ -429,12 +453,23 @@ describe('runNow drives chain-shape automations end-to-end', () => {
 
     // Both s1 and s3 hit the agent-status registry. s1 polls against
     // 'tab-1:1' (returned by openPromptPane) and needs `done` to satisfy the
-    // 0s debounce. s3's pane-reuse branch ALSO consults agent status for the
-    // pre-send wait gate — it must not be `working`, so `done` is fine.
-    const getAgentStatus = (_paneKey: string): AgentStatusEntry | undefined => ({
-      state: 'done',
-      updatedAt: Date.now()
-    })
+    // 0s debounce. s3's pane-reuse branch consults agent status for the
+    // pre-send wait gate AND for completion: the runner now requires a
+    // fresh `working` transition before treating `done` as completion (so
+    // the previous turn's lingering `done` can't satisfy the gate). Drive a
+    // working → done sequence after a few polls so s3 advances.
+    let agentStatusCalls = 0
+    const getAgentStatus = (_paneKey: string): AgentStatusEntry | undefined => {
+      agentStatusCalls++
+      // First few polls report `done` (s1's gate + s3's pre-send check).
+      // Once s3 has registered its paneRef tracker, flip briefly to
+      // `working`, then back to `done` so the new requiresWorkingFirst gate
+      // releases.
+      if (agentStatusCalls > 6 && agentStatusCalls < 10) {
+        return { state: 'working', updatedAt: Date.now() }
+      }
+      return { state: 'done', updatedAt: Date.now() }
+    }
 
     // Step 2's PTY exits with code 0; getPtyExit must return `undefined` on
     // the first tick (subscribe happens first), then the exit on subsequent

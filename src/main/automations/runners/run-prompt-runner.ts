@@ -4,6 +4,12 @@ import type { AgentStatusEntry } from '../../agent-status/registry'
 import { OpenPromptPaneError } from '../open-prompt-pane'
 import { SendPromptToPaneError } from '../send-prompt-to-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
+import { OutputTail } from '../output-tail'
+
+/** Cap PTY output capture at 32 KiB. Same sizing as run-command — big
+ *  enough to read the agent's last reply for downstream templating, small
+ *  enough that hundreds of concurrent chain runs can't pile up memory. */
+const OUTPUT_TAIL_MAX_BYTES = 32 * 1024
 
 export type RunPromptDeps = {
   openPromptPane: (params: {
@@ -28,6 +34,15 @@ export type RunPromptDeps = {
     path: string
     connectionId: string | null
   } | null
+  /** Resolve a paneKey to its current ptyId so the runner can subscribe to
+   *  the pane's data stream and capture the agent's last-turn output for
+   *  step output. Returns undefined if the pane has no live PTY (pane gone,
+   *  not yet spawned). Optional so existing test harnesses keep working. */
+  getPtyIdForPaneKey?: (paneKey: string) => string | undefined
+  /** Subscribe to the main-process PTY data stream so the runner can mirror
+   *  what the renderer sees into a bounded OutputTail. Same shape as
+   *  RunCommandDeps['subscribePtyData']. */
+  subscribePtyData?: (listener: (ptyId: string, data: string) => void) => () => void
   now: () => number
 }
 
@@ -42,6 +57,24 @@ type Tracker = {
    *  brief done → working → done sequence cannot accidentally satisfy the
    *  debounce. */
   firstDoneAt: number | null
+  /** Ring buffer scoped to the agent's current turn — reset the first time
+   *  the agent flips to `working` so the tail surfaced on completion is the
+   *  response to the current prompt, not the full pane history. May be null
+   *  when the PTY isn't subscribable (deps not wired). */
+  outputTail: OutputTail | null
+  /** Set the first time we observe `working` for this turn; cleared after a
+   *  successful completion drains the tail. */
+  workingSeen: boolean
+  /** True when the tracker was created by reusing an existing pane (`paneRef`
+   *  branch). The agent was already idle (`done`) when we wrote into it, so
+   *  we must observe a fresh `working` transition before treating any
+   *  subsequent `done` as completion. Without this, the previous turn's
+   *  lingering `done` state would satisfy the debounce and the step would
+   *  succeed before the new prompt produced any work. */
+  requiresWorkingFirst: boolean
+  /** Tears down the PTY data subscription on terminal outcomes. No-op when
+   *  no subscription was opened. */
+  unsubscribe: () => void
 }
 
 export class RunPromptRunner implements StepRunner {
@@ -112,7 +145,7 @@ export class RunPromptRunner implements StepRunner {
           }
           throw e
         }
-        tracker = { paneKey: paneRef, openedAt: this.deps.now(), firstDoneAt: null }
+        tracker = this.buildTracker(paneRef, { requiresWorkingFirst: true })
         if (!runTrackers) {
           runTrackers = new Map()
           this.trackers.set(ctx.runId, runTrackers)
@@ -148,7 +181,7 @@ export class RunPromptRunner implements StepRunner {
         }
         throw e
       }
-      tracker = { paneKey, openedAt: this.deps.now(), firstDoneAt: null }
+      tracker = this.buildTracker(paneKey, { requiresWorkingFirst: false })
       if (!runTrackers) {
         runTrackers = new Map()
         this.trackers.set(ctx.runId, runTrackers)
@@ -198,10 +231,30 @@ export class RunPromptRunner implements StepRunner {
       // Without this reset a brief done → working → done could satisfy the
       // window using the original firstDoneAt timestamp.
       tracker.firstDoneAt = null
+      // Why: scope the outputTail to a single agent turn. First time we see
+      // the agent flip to `working` for this prompt, drop everything that
+      // was buffered during pane warm-up so the tail surfaced on completion
+      // is the agent's actual reply (rather than the full pane history).
+      if (!tracker.workingSeen) {
+        tracker.workingSeen = true
+        tracker.outputTail?.reset()
+      }
+      // Re-attempt subscription in case the PTY wasn't live yet on tracker
+      // creation but is now — happens on freshly-opened panes where the
+      // hook's `working` event arrives before the PTY id is registered.
+      this.ensureSubscribed(tracker)
       return { outcome: 'needs-more-time', status: 'running' }
     }
 
     // status.state === 'done'
+    // Why: for paneRef reuse, we wrote the new prompt into a pane that was
+    // already idle. Until the agent actually flips to `working`, this `done`
+    // is the OLD turn's terminal state — accepting it would let the
+    // debounce satisfy before the new prompt does any work. Wait for a
+    // fresh `working` transition to clear the gate.
+    if (tracker.requiresWorkingFirst && !tracker.workingSeen) {
+      return { outcome: 'needs-more-time', status: 'running' }
+    }
     if (tracker.firstDoneAt == null) {
       tracker.firstDoneAt = now
       return { outcome: 'needs-more-time', status: 'running' }
@@ -210,8 +263,23 @@ export class RunPromptRunner implements StepRunner {
     if (now - tracker.firstDoneAt >= debounceMs) {
       // Why: also publish paneKey into context.steps so a downstream step can
       // template `paneRef: '{{steps.<this-step-id>.paneKey}}'` and chain its
-      // prompt into the same pane (the MP.10 paneRef use case).
-      const output = { paneKey: tracker.paneKey, durationMs: now - tracker.openedAt }
+      // prompt into the same pane (the MP.10 paneRef use case). outputTail
+      // surfaces the agent's last-turn response so downstream steps and the
+      // run summary can read it without re-attaching to the pane.
+      //
+      // Prefer the hook-reported `lastAssistantMessage` — Claude Code's Stop
+      // hook delivers the final response text directly, and the hook server
+      // normalizes Codex/OpenCode/etc. into the same field. This is far more
+      // deterministic than parsing the terminal stream (no ANSI/box-drawing,
+      // no warm-up render, no spinner artifacts). Fall back to the captured
+      // PTY tail only when no hook carried the field — typically a non-
+      // agent command or an agent whose stop hook isn't installed.
+      const output = {
+        paneKey: tracker.paneKey,
+        durationMs: now - tracker.openedAt,
+        outputTail: status.lastAssistantMessage ?? tracker.outputTail?.read() ?? ''
+      }
+      this.cleanup(tracker)
       return {
         outcome: 'done',
         status: 'succeeded',
@@ -220,5 +288,95 @@ export class RunPromptRunner implements StepRunner {
       }
     }
     return { outcome: 'needs-more-time', status: 'running' }
+  }
+
+  /** Build a fresh tracker, eagerly subscribing to the pane's PTY data so we
+   *  can capture the agent's last-turn output. Subscription is best-effort:
+   *  if the deps aren't wired or the pane isn't bound to a live PTY yet, we
+   *  fall through with `outputTail = null` and downstream callsites surface
+   *  an empty string. */
+  private buildTracker(
+    paneKey: string,
+    opts: { requiresWorkingFirst: boolean }
+  ): Tracker {
+    const tracker: Tracker = {
+      paneKey,
+      openedAt: this.deps.now(),
+      firstDoneAt: null,
+      outputTail: null,
+      workingSeen: false,
+      requiresWorkingFirst: opts.requiresWorkingFirst,
+      unsubscribe: () => {}
+    }
+    this.ensureSubscribed(tracker)
+    return tracker
+  }
+
+  /** Attach a PTY data subscription scoped to the tracker's pane, if both
+   *  `subscribePtyData` and `getPtyIdForPaneKey` are wired and a live PTY
+   *  exists. Idempotent — re-entering when already subscribed is a no-op.
+   *  Why: chain runs created their pane milliseconds earlier; the paneKey →
+   *  ptyId mapping may not have been written yet when `buildTracker` ran.
+   *  The agent-status `working` tick is a deterministic later moment to
+   *  retry the subscription. */
+  private ensureSubscribed(tracker: Tracker): void {
+    if (tracker.outputTail !== null) {
+      return
+    }
+    if (!this.deps.subscribePtyData || !this.deps.getPtyIdForPaneKey) {
+      return
+    }
+    const ptyId = this.deps.getPtyIdForPaneKey(tracker.paneKey)
+    if (!ptyId) {
+      return
+    }
+    const outputTail = new OutputTail(OUTPUT_TAIL_MAX_BYTES)
+    const capturedPtyId = ptyId
+    const unsubscribe = this.deps.subscribePtyData((dataPtyId, data) => {
+      if (dataPtyId === capturedPtyId) {
+        outputTail.append(data)
+      }
+    })
+    tracker.outputTail = outputTail
+    tracker.unsubscribe = unsubscribe
+  }
+
+  /** Tear down the PTY data subscription on a terminal outcome. No-op when
+   *  no subscription was opened. Mirrors RunCommandRunner.cleanup. */
+  private cleanup(tracker: Tracker): void {
+    try {
+      tracker.unsubscribe()
+    } catch (err) {
+      console.error('[run-prompt-runner] unsubscribe threw:', err)
+    }
+  }
+
+  /** Drop every tracker for a run — used on cancel so a subsequent tick
+   *  doesn't keep polling a pane the operator gave up on. */
+  dropRun(runId: string): void {
+    const runTrackers = this.trackers.get(runId)
+    if (!runTrackers) {
+      return
+    }
+    for (const tracker of runTrackers.values()) {
+      this.cleanup(tracker)
+    }
+    this.trackers.delete(runId)
+  }
+
+  /** Drop a single step's tracker — used on retry-from-step so the retried
+   *  step starts fresh while sibling completed steps' downstream context is
+   *  preserved. */
+  dropStep(runId: string, stepId: string): void {
+    const runTrackers = this.trackers.get(runId)
+    const tracker = runTrackers?.get(stepId)
+    if (!tracker) {
+      return
+    }
+    this.cleanup(tracker)
+    runTrackers!.delete(stepId)
+    if (runTrackers!.size === 0) {
+      this.trackers.delete(runId)
+    }
   }
 }

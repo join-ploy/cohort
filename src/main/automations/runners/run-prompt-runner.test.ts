@@ -245,7 +245,7 @@ describe('RunPromptRunner', () => {
     const succeed = await runner.tick(ctx)
     expect(succeed.outcome).toBe('done')
     expect(succeed.status).toBe('succeeded')
-    expect(succeed.output).toEqual({ paneKey: 'p1', durationMs: 16_000 })
+    expect(succeed.output).toEqual({ paneKey: 'p1', durationMs: 16_000, outputTail: '' })
   })
 
   it('resets the debounce if state flips back to working mid-window', async () => {
@@ -282,7 +282,7 @@ describe('RunPromptRunner', () => {
     const finallyDone = await runner.tick(ctx)
     expect(finallyDone.outcome).toBe('done')
     expect(finallyDone.status).toBe('succeeded')
-    expect(finallyDone.output).toEqual({ paneKey: 'p1', durationMs: 21_000 })
+    expect(finallyDone.output).toEqual({ paneKey: 'p1', durationMs: 21_000, outputTail: '' })
   })
 
   it('times out per step.timeoutSeconds', async () => {

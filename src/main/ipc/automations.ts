@@ -35,6 +35,16 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
       service.runNow(args.id, args.payload)
   )
   ipcMain.handle(
+    'automations:cancelRun',
+    (_event, args: { runId: string }): AutomationRun | null =>
+      service.cancelRun(args.runId) ?? null
+  )
+  ipcMain.handle(
+    'automations:retryRunFromStep',
+    (_event, args: { runId: string; stepIndex: number }): AutomationRun | null =>
+      service.retryRunFromStep(args.runId, args.stepIndex) ?? null
+  )
+  ipcMain.handle(
     'automations:markDispatchResult',
     (_event, result: AutomationDispatchResult): AutomationRun => service.markDispatchResult(result)
   )

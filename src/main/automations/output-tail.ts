@@ -42,4 +42,14 @@ export class OutputTail {
   read(): string {
     return this.chunks.join('')
   }
+
+  /** Drop everything captured so far. Used to scope the tail to a single
+   *  agent turn — the chain run-command runner calls this when the agent
+   *  flips to `working`, so the tail surfaced on completion is just the
+   *  agent's response to the current prompt rather than the full pane
+   *  history. */
+  reset(): void {
+    this.chunks = []
+    this.size = 0
+  }
 }

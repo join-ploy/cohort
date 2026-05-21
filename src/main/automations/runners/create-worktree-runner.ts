@@ -103,6 +103,21 @@ export class CreateWorktreeRunner implements StepRunner {
       return { outcome: 'failed', status: 'failed', error: message }
     }
   }
+
+  dropRun(runId: string): void {
+    this.trackers.delete(runId)
+  }
+
+  dropStep(runId: string, stepId: string): void {
+    const runTrackers = this.trackers.get(runId)
+    if (!runTrackers) {
+      return
+    }
+    runTrackers.delete(stepId)
+    if (runTrackers.size === 0) {
+      this.trackers.delete(runId)
+    }
+  }
 }
 
 function extractLinearIssue(

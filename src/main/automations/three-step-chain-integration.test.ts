@@ -138,7 +138,12 @@ describe('3-step chain integration (create-worktree → wait-for-setup → run-p
     stored.steps = steps
 
     const { ipc, listeners } = makeFakeIpc()
-    const send = vi.fn((_channel: string, payload: { requestId: string }) => {
+    const send = vi.fn((channel: string, payload?: { requestId?: string }) => {
+      // Why: the service also broadcasts `automations:changed` with no
+      // payload — ignore non-pane channels so the mock doesn't crash.
+      if (channel !== 'automations:openPromptPane' || !payload?.requestId) {
+        return
+      }
       const replyChannel = `automations:openPromptPane:reply:${payload.requestId}`
       listeners.get(replyChannel)?.({}, { ok: true, paneKey: 'tab-1:1' })
     })

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Pencil, Pause, Play, Trash2 } from 'lucide-react'
+import { Pencil, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -40,6 +40,8 @@ type AutomationDetailProps = {
   onEdit: (automation: Automation) => void
   onToggle: (automation: Automation) => void
   onDelete: (automation: Automation) => void
+  onCancelRun: (run: AutomationRun) => void
+  onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
 }
 
 function DetailMetric({ label, value }: { label: string; value: string }): React.JSX.Element {
@@ -265,17 +267,52 @@ function ChainStepRow({
   )
 }
 
-function StepRunRow({ step }: { step: StepRunState }): React.JSX.Element {
+function StepRunRow({
+  step,
+  onRetry
+}: {
+  step: StepRunState
+  onRetry?: () => void
+}): React.JSX.Element {
+  // Why: retry is only meaningful for terminal states. A `running` or
+  // `pending` step is the active edge of the chain; retrying it would race
+  // the in-flight tick. `succeeded`/`skipped` are valid retry targets too —
+  // operators sometimes want to re-run a successful step against fresh state.
+  const canRetry =
+    onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
   return (
-    <div className="flex flex-col gap-1 px-3 py-2 text-sm">
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className={STEP_STATUS_BADGE_CLASS[step.status]}>
-          {step.status}
-        </Badge>
-        <span className="truncate font-mono text-xs text-muted-foreground">{step.stepId}</span>
+    <div className="flex items-center gap-2 px-3 py-2 text-sm">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={STEP_STATUS_BADGE_CLASS[step.status]}>
+            {step.status}
+          </Badge>
+          <span className="truncate font-mono text-xs text-muted-foreground">{step.stepId}</span>
+        </div>
+        {step.error ? (
+          <div className="ml-1 truncate text-xs text-rose-600 dark:text-rose-400">{step.error}</div>
+        ) : null}
       </div>
-      {step.error ? (
-        <div className="ml-1 truncate text-xs text-rose-600 dark:text-rose-400">{step.error}</div>
+      {canRetry ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Retry from this step"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRetry?.()
+              }}
+            >
+              <RotateCcw className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left" sideOffset={6}>
+            Retry from this step
+          </TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   )
@@ -325,7 +362,9 @@ export function AutomationDetail({
   onOpenRunWorkspace,
   onEdit,
   onToggle,
-  onDelete
+  onDelete,
+  onCancelRun,
+  onRetryRunFromStep
 }: AutomationDetailProps): React.JSX.Element {
   if (!automation) {
     return (
@@ -468,20 +507,24 @@ export function AutomationDetail({
           <div className="text-sm font-medium">Run history</div>
           <div className="text-xs text-muted-foreground">{runs.length} runs</div>
         </div>
-        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.4fr)_minmax(6rem,auto)] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
+        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
           <div>Run</div>
-          <div>Workspace</div>
           <div>Status</div>
+          <div />
         </div>
         <div className="divide-y divide-border/50">
           {runs.map((run) => {
             const runWorktree = run.workspaceId ? (worktreeMap.get(run.workspaceId) ?? null) : null
-            const workspaceLabel = run.workspaceId
-              ? (runWorktree?.displayName ?? 'Missing workspace')
-              : 'Not launched'
             const linearIssue = extractLinearIssue(run.context)
+            // Why: in-flight statuses are the only ones a Stop button can act
+            // on. Terminal rows show an empty action slot so the grid stays
+            // aligned without an enabled-but-pointless button.
+            const isInFlight =
+              run.status === 'running' ||
+              run.status === 'pending' ||
+              run.status === 'dispatching'
             const rowClassName =
-              'grid grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.4fr)_minmax(6rem,auto)] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
+              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
               <>
                 <div className="min-w-0">
@@ -493,19 +536,34 @@ export function AutomationDetail({
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
                   ) : null}
                 </div>
-                <div
-                  className={
-                    runWorktree
-                      ? 'min-w-0 truncate text-foreground'
-                      : 'min-w-0 truncate text-muted-foreground'
-                  }
-                >
-                  {workspaceLabel}
-                </div>
                 <div className="flex justify-start">
                   <Badge variant={getAutomationRunStatusVariant(run.status)}>
                     {getAutomationRunStatusLabel(run.status)}
                   </Badge>
+                </div>
+                <div className="flex justify-end">
+                  {isInFlight ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Stop run"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCancelRun(run)
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Square className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={6}>
+                        Stop run
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                 </div>
               </>
             )
@@ -515,8 +573,12 @@ export function AutomationDetail({
             // single-row rendering untouched.
             const stepList = hasStepStates ? (
               <div className="flex flex-col gap-0 border-t border-border/50 bg-background/60 py-1">
-                {run.stepStates!.map((step) => (
-                  <StepRunRow key={step.stepId} step={step} />
+                {run.stepStates!.map((step, index) => (
+                  <StepRunRow
+                    key={step.stepId}
+                    step={step}
+                    onRetry={() => onRetryRunFromStep(run, index)}
+                  />
                 ))}
               </div>
             ) : null

@@ -339,7 +339,17 @@ function openMainWindow(): BrowserWindow {
       // authoritative timestamp; using it (instead of Date.now()) keeps
       // registry ordering consistent with the renderer slice, which also keys
       // monotonic updates off updatedAt.
-      agentStatusRegistry.set(paneKey, { state: payload.state, updatedAt: receivedAt })
+      // Why: forward `lastAssistantMessage` from the hook payload into the
+      // registry so chain runners can surface the agent's actual reply (per
+      // Claude Code's Stop hook contract — and Codex/OpenCode equivalents
+      // normalized in agent-hooks/server.ts) without parsing terminal output.
+      agentStatusRegistry.set(paneKey, {
+        state: payload.state,
+        updatedAt: receivedAt,
+        ...(typeof payload.lastAssistantMessage === 'string' && payload.lastAssistantMessage
+          ? { lastAssistantMessage: payload.lastAssistantMessage }
+          : {})
+      })
       // Why: a chain run-prompt step polls agent status against the registry on
       // each chain tick (60s cadence). Without this nudge, an agent that
       // finishes between ticks shows `done` in the sidebar but the chain step
@@ -639,6 +649,10 @@ app.whenReady().then(async () => {
     // executor's RunCommandRunner can capture the command `outputTail`
     // intra-process — same flush window as the renderer broadcast.
     subscribePtyData: (listener) => subscribePtyData(listener),
+    // Why: hand the paneKey → ptyId lookup to the service so RunPromptRunner
+    // can subscribe to its prompt pane's data stream and capture the agent's
+    // last-turn output.
+    getPtyIdForPaneKey: (paneKey) => getPtyIdForPaneKey(paneKey),
     // Why: bridge the chain's narrow create-worktree dep onto the runtime's
     // wider managed-worktree create API. `runHooks: true` launches the repo's
     // setup script (which the next `wait-for-setup` step is built to observe);

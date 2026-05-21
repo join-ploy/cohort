@@ -3,6 +3,14 @@ import type { AgentStatusState } from '../../shared/agent-status-types'
 export type AgentStatusEntry = {
   state: AgentStatusState
   updatedAt: number
+  /** Last-turn assistant response carried by Claude Code's Stop /
+   *  SubagentStop / StopFailure hooks (`last_assistant_message`), Codex's
+   *  `prompt_response`, OpenCode's `message.parts[role=assistant].text`, etc.
+   *  See agent-hooks/server.ts for the per-agent extraction. Stored on the
+   *  most recent hook payload (typically the one that flipped state to
+   *  `done`) so chain runners can surface the agent's actual reply in step
+   *  output instead of parsing the terminal stream. */
+  lastAssistantMessage?: string
 }
 
 // Why: mirrors the renderer slice's 30-minute TTL (AGENT_STATUS_STALE_AFTER_MS).

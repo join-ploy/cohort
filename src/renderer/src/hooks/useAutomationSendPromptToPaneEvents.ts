@@ -1,6 +1,24 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/store'
 
+// Why: agent TUIs (Claude, Codex, OpenCode, …) want `\r` (carriage return,
+// what the terminal sends when Enter is pressed) to submit input, not a bare
+// `\n` (line feed). Bracketed paste markers also keep multi-line prompts
+// intact and stop the inserted text from being interpreted
+// character-by-character.
+const BRACKETED_PASTE_BEGIN = '\x1b[200~'
+const BRACKETED_PASTE_END = '\x1b[201~'
+
+// Why: when the bracketed-paste end marker and the submit `\r` land in the
+// same PTY write, some agents consume the `\r` as part of paste processing
+// instead of as the Enter that submits the buffered text — you'd see the
+// prompt sit in the input box requiring a manual Enter. Splitting the write
+// and giving the agent's paste handler a brief moment to finish is the
+// standard fix. 80ms is conservative enough to be reliable across Claude /
+// Codex / OpenCode / Gemini / cursor-agent and short enough to feel
+// instantaneous to the operator.
+const ENTER_DELAY_MS = 80
+
 /**
  * Handle main-process chain-executor requests to send a prompt into a pane
  * that was previously opened by {@link useAutomationOpenPromptPaneEvents}.
@@ -15,7 +33,7 @@ import { useAppStore } from '@/store'
 export function useAutomationSendPromptToPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onSendPromptToPane(
-      ({ requestId, paneKey, prompt }) => {
+      async ({ requestId, paneKey, prompt }) => {
         try {
           // Why: paneKey shape is `<tabId>:<paneId>` — the opposite direction
           // of `useAutomationOpenPromptPaneEvents`, which builds the key from
@@ -46,9 +64,16 @@ export function useAutomationSendPromptToPaneEvents(): void {
             })
             return
           }
-          // Why: trailing newline submits the prompt — without it the agent's
-          // input buffer just accumulates characters.
-          window.api.pty.write(ptyId, `${prompt}\n`)
+          // Bracketed-paste envelope keeps multi-line prompts intact; write
+          // the paste first, give the agent a moment to finish processing
+          // the end marker, then send the submit `\r` in a separate write so
+          // the Enter isn't swallowed as part of the paste.
+          window.api.pty.write(
+            ptyId,
+            `${BRACKETED_PASTE_BEGIN}${prompt}${BRACKETED_PASTE_END}`
+          )
+          await new Promise((resolve) => setTimeout(resolve, ENTER_DELAY_MS))
+          window.api.pty.write(ptyId, '\r')
           window.api.automations.replySendPromptToPane(requestId, { ok: true })
         } catch (err) {
           // Why: surface the renderer-side reason verbatim so the chain

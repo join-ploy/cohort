@@ -1326,9 +1326,12 @@ export type PreloadApi = {
     update: (args: { id: string; updates: AutomationUpdateInput }) => Promise<Automation>
     delete: (args: { id: string }) => Promise<void>
     runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
+    cancelRun: (args: { runId: string }) => Promise<AutomationRun | null>
+    retryRunFromStep: (args: { runId: string; stepIndex: number }) => Promise<AutomationRun | null>
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     rendererReady: () => Promise<void>
     onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void
+    onChanged: (callback: () => void) => () => void
     onOpenPromptPane: (
       callback: (request: {
         requestId: string

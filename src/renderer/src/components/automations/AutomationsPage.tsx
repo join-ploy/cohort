@@ -108,7 +108,18 @@ export default function AutomationsPage(): React.JSX.Element {
       void refresh()
     }
     window.addEventListener(AUTOMATIONS_CHANGED_EVENT, onAutomationsChanged)
-    return () => window.removeEventListener(AUTOMATIONS_CHANGED_EVENT, onAutomationsChanged)
+    // Why: chain-shape automations don't go through the legacy dispatch path
+    // that fires AUTOMATIONS_CHANGED_EVENT — instead, main broadcasts
+    // `automations:changed` on every persistRun + run-creation +
+    // finalize-failed. Subscribe so the page reflects step transitions
+    // live without manual refresh.
+    const unsubscribeIpc = window.api.automations.onChanged(() => {
+      void refresh()
+    })
+    return () => {
+      window.removeEventListener(AUTOMATIONS_CHANGED_EVENT, onAutomationsChanged)
+      unsubscribeIpc()
+    }
   }, [refresh])
 
   useEffect(() => {
@@ -295,6 +306,24 @@ export default function AutomationsPage(): React.JSX.Element {
         store.setActiveTab(run.terminalSessionId)
         store.setActiveTabType('terminal')
       }
+    }
+  }
+
+  const cancelRun = async (run: AutomationRun): Promise<void> => {
+    try {
+      await window.api.automations.cancelRun({ runId: run.id })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to stop run.')
+    }
+  }
+
+  const retryRunFromStep = async (run: AutomationRun, stepIndex: number): Promise<void> => {
+    try {
+      await window.api.automations.retryRunFromStep({ runId: run.id, stepIndex })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to retry step.')
     }
   }
 
@@ -573,6 +602,8 @@ export default function AutomationsPage(): React.JSX.Element {
             onEdit={(automation) => void openEditDialog(automation)}
             onToggle={(automation) => void toggleAutomation(automation)}
             onDelete={requestDeleteAutomation}
+            onCancelRun={(run) => void cancelRun(run)}
+            onRetryRunFromStep={(run, stepIndex) => void retryRunFromStep(run, stepIndex)}
           />
         </section>
       </div>
