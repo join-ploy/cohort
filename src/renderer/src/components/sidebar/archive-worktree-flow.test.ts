@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => {
     archiveWorktree: vi.fn().mockResolvedValue(undefined),
     restoreWorktree: vi.fn().mockResolvedValue(undefined)
   }
-  return { state }
+  const runSleepWorktrees = vi.fn().mockResolvedValue(undefined)
+  return { state, runSleepWorktrees }
 })
 
 vi.mock('@/store', () => ({
@@ -24,6 +25,11 @@ vi.mock('sonner', () => ({
     error: vi.fn(),
     info: vi.fn()
   }
+}))
+
+vi.mock('./sleep-worktree-flow', () => ({
+  runSleepWorktrees: mocks.runSleepWorktrees,
+  runSleepWorktree: vi.fn().mockResolvedValue(undefined)
 }))
 
 import { toast } from 'sonner'
@@ -45,8 +51,11 @@ function setWorktrees(
 }
 
 async function flushMicrotasks(): Promise<void> {
-  // Why: the flow chains .then() off archiveWorktree; we need to let the
-  // microtask queue drain so the toast assertion sees the resolved state.
+  // Why: the flow chains sleep -> archive -> toast across multiple promise
+  // hops; drain enough microtasks for the deepest chain to settle before
+  // assertions.
+  await Promise.resolve()
+  await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
 }
@@ -55,9 +64,27 @@ describe('runWorktreeArchive', () => {
   beforeEach(() => {
     mocks.state.archiveWorktree.mockClear().mockResolvedValue(undefined)
     mocks.state.restoreWorktree.mockClear().mockResolvedValue(undefined)
+    mocks.runSleepWorktrees.mockClear().mockResolvedValue(undefined)
     vi.mocked(toast.info).mockClear()
     vi.mocked(toast.error).mockClear()
     setWorktrees([])
+  })
+
+  it('closes terminals (sleeps) before flipping the archive flag', async () => {
+    setWorktrees([{ id: 'wt-1', displayName: 'My Worktree' }])
+    const order: string[] = []
+    mocks.runSleepWorktrees.mockImplementationOnce(async () => {
+      order.push('sleep')
+    })
+    mocks.state.archiveWorktree.mockImplementationOnce(async () => {
+      order.push('archive')
+    })
+
+    runWorktreeArchive('wt-1')
+    await flushMicrotasks()
+
+    expect(mocks.runSleepWorktrees).toHaveBeenCalledWith(['wt-1'])
+    expect(order).toEqual(['sleep', 'archive'])
   })
 
   it('calls archive, shows toast with undo action that restores', async () => {
@@ -109,6 +136,7 @@ describe('runWorktreeBatchArchive', () => {
   beforeEach(() => {
     mocks.state.archiveWorktree.mockClear().mockResolvedValue(undefined)
     mocks.state.restoreWorktree.mockClear().mockResolvedValue(undefined)
+    mocks.runSleepWorktrees.mockClear().mockResolvedValue(undefined)
     vi.mocked(toast.info).mockClear()
     vi.mocked(toast.error).mockClear()
     setWorktrees([])

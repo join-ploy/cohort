@@ -3,6 +3,7 @@ import { useAppStore } from '@/store'
 import { getWorktreeMapFromState } from '@/store/selectors'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
+import { runSleepWorktrees } from './sleep-worktree-flow'
 import type { Worktree } from '../../../../shared/types'
 
 // Why: a failed delete almost always means the worktree still has changes
@@ -104,8 +105,12 @@ export function runWorktreeArchive(worktreeId: string): void {
 
   const displayName = target.displayName
 
-  state
-    .archiveWorktree(worktreeId)
+  // Why: archive shouldn't leave PTYs (or webviews) running for a worktree
+  // the user has set aside. Reuse the sleep flow so the active pane unmounts
+  // cleanly (setActiveWorktree(null)) before meta flips, and so undo/restore
+  // can re-spawn against the same on-disk history dir / relay session ids.
+  runSleepWorktrees([worktreeId])
+    .then(() => useAppStore.getState().archiveWorktree(worktreeId))
     .then(() => {
       toast.info(`Archived '${displayName}' — will be deleted in 30 days`, {
         duration: 10000,
