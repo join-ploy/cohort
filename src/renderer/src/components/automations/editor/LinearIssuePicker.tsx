@@ -1,12 +1,16 @@
 import * as React from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { LoaderCircle, Search } from 'lucide-react'
 import { useAppStore } from '@/store'
+import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
+import { Input } from '@/components/ui/input'
+import { LinearIcon } from '@/components/icons/LinearIcon'
 import { cn } from '@/lib/utils'
 import type { LinearIssue, LinearConnectionStatus } from '../../../../../shared/types'
 import type { LinearIssuePayload } from '../../../../../shared/automations-types'
 import type { CacheEntry } from '@/store/slices/github'
 
-const SEARCH_DEBOUNCE_MS = 250
+const SEARCH_DEBOUNCE_MS = 200
 const RESULT_LIMIT = 20
 
 export type LinearIssuePickerProps = {
@@ -59,10 +63,12 @@ export function LinearIssuePicker(props: LinearIssuePickerProps): React.JSX.Elem
 
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [commandValue, setCommandValue] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // Why: bring the connection state in sync once per mount. Mirrors the same
-  // guard used by SmartWorkspaceNameField — without it, a freshly-opened modal
-  // can flash the disconnected state while a token actually exists.
+  // Why: a freshly-opened modal can flash the disconnected state while a
+  // Linear token actually exists — refresh status once per mount.
   useEffect(() => {
     if (!linearStatusChecked) {
       void checkLinearConnection()
@@ -78,13 +84,30 @@ export function LinearIssuePicker(props: LinearIssuePickerProps): React.JSX.Elem
     if (!linearStatus.connected) {
       return
     }
+    let stale = false
+    setLoading(true)
     const trimmed = debouncedQuery.trim()
-    if (trimmed.length > 0) {
-      void searchLinearIssues(trimmed, RESULT_LIMIT)
-    } else {
-      void listLinearIssues('assigned', RESULT_LIMIT)
+    const request =
+      trimmed.length > 0
+        ? searchLinearIssues(trimmed, RESULT_LIMIT)
+        : listLinearIssues('assigned', RESULT_LIMIT)
+    void request
+      .catch(() => {
+        // Results are read from the cache below; swallow rejections to avoid
+        // an unhandled promise on transient failures.
+      })
+      .finally(() => {
+        if (!stale) {
+          setLoading(false)
+        }
+      })
+    return () => {
+      stale = true
     }
-  }, [debouncedQuery, linearStatus.connected, searchLinearIssues, listLinearIssues])
+    // Why: list/search actions are stable store methods; depending on them
+    // would refetch on unrelated store writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery, linearStatus.connected])
 
   const results: LinearIssue[] = useMemo(() => {
     const trimmed = debouncedQuery.trim()
@@ -93,7 +116,30 @@ export function LinearIssuePicker(props: LinearIssuePickerProps): React.JSX.Elem
     return linearSearchCache[cacheKey]?.data ?? []
   }, [debouncedQuery, linearSearchCache])
 
-  const inputRef = useRef<HTMLInputElement | null>(null)
+  // Why: when the typed value is an unambiguous Linear identifier ("STA-123"),
+  // the user is looking up that specific issue rather than browsing — snap the
+  // highlight onto the matching row so Enter picks it.
+  const linearIntent = useMemo(() => /^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(query.trim()), [query])
+
+  useEffect(() => {
+    if (results.length === 0) {
+      setCommandValue('')
+      return
+    }
+    if (linearIntent) {
+      const target = query.trim().toLowerCase()
+      const exact = results.find((issue) => (issue.identifier ?? '').toLowerCase() === target)
+      if (exact) {
+        setCommandValue(`linear-${exact.id}`)
+        return
+      }
+    }
+    setCommandValue((current) =>
+      results.some((issue) => `linear-${issue.id}` === current)
+        ? current
+        : `linear-${results[0].id}`
+    )
+  }, [linearIntent, query, results])
 
   if (!linearStatus.connected) {
     return (
@@ -110,39 +156,88 @@ export function LinearIssuePicker(props: LinearIssuePickerProps): React.JSX.Elem
     )
   }
 
+  const ActiveIcon = loading ? LoaderCircle : Search
+
+  const handleSelect = (issue: LinearIssue): void => {
+    props.onSelect(toLinearIssuePayload(issue))
+  }
+
   return (
     <div className={cn('flex flex-col gap-2', props.className)}>
-      <input
-        ref={inputRef}
-        type="text"
-        aria-label="Search Linear issues"
-        placeholder="Search Linear issues…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
-      />
-      <ul className="flex flex-col divide-y divide-border rounded-md border border-input">
-        {results.length === 0 ? (
-          <li className="px-2 py-2 text-xs text-muted-foreground">No issues.</li>
-        ) : (
-          results.map((issue) => (
-            <li key={issue.id}>
-              <button
-                type="button"
-                data-linear-issue-id={issue.id}
-                onClick={() => props.onSelect(toLinearIssuePayload(issue))}
-                className="flex w-full flex-col gap-0.5 px-2 py-2 text-left text-xs hover:bg-accent"
-              >
-                <span className="flex items-baseline gap-2">
-                  <span className="font-mono text-muted-foreground">{issue.identifier}</span>
-                  <span className="truncate font-medium text-foreground">{issue.title}</span>
-                </span>
-                <span className="text-muted-foreground">{issue.state?.name ?? ''}</span>
-              </button>
-            </li>
-          ))
-        )}
-      </ul>
+      <Command
+        value={commandValue}
+        onValueChange={setCommandValue}
+        shouldFilter={false}
+        className="overflow-visible bg-transparent"
+      >
+        <div className="relative">
+          <ActiveIcon
+            className={cn(
+              'pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground',
+              loading && 'animate-spin'
+            )}
+          />
+          <Input
+            ref={inputRef}
+            aria-label="Search Linear issues"
+            placeholder="Search Linear issues…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Enter' &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                results.length > 0
+              ) {
+                const row = results.find((issue) => `linear-${issue.id}` === commandValue)
+                if (row) {
+                  event.preventDefault()
+                  handleSelect(row)
+                }
+              }
+            }}
+            className="h-9 pl-8 text-sm"
+          />
+        </div>
+        <CommandList className="max-h-64 rounded-md border border-input scrollbar-sleek">
+          {loading && results.length === 0 ? (
+            <div className="space-y-1 p-1">
+              {[0, 1, 2].map((index) => (
+                <div key={index} className="h-8 animate-pulse rounded bg-muted/40" />
+              ))}
+            </div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+              {query.trim().length > 0
+                ? 'No issues match.'
+                : 'Start typing to search Linear issues.'}
+            </div>
+          ) : (
+            <CommandGroup className="p-1">
+              {results.map((issue) => (
+                <CommandItem
+                  key={issue.id}
+                  value={`linear-${issue.id}`}
+                  data-linear-issue-id={issue.id}
+                  onSelect={() => handleSelect(issue)}
+                  className="gap-2 px-2 py-1.5 text-xs"
+                >
+                  <LinearIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="font-mono text-muted-foreground">{issue.identifier}</span>
+                      <span className="truncate font-medium text-foreground">{issue.title}</span>
+                    </span>
+                    <span className="text-muted-foreground">{issue.state?.name ?? ''}</span>
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </Command>
       {props.onCancel ? (
         <button
           type="button"

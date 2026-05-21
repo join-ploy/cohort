@@ -366,6 +366,10 @@ export async function createRemoteWorktree(
         ? { displayName: requestedName }
         : {}),
     ...(isTuiAgent(args.createdWithAgent) ? { createdWithAgent: args.createdWithAgent } : {}),
+    ...(typeof args.createdByAutomationRunId === 'string' &&
+    args.createdByAutomationRunId.length > 0
+      ? { createdByAutomationRunId: args.createdByAutomationRunId }
+      : {}),
     ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
     ...(args.linkedPR !== undefined ? { linkedPR: args.linkedPR } : {})
   }
@@ -709,6 +713,10 @@ export async function createLocalWorktree(
         }
       : {}),
     ...(isTuiAgent(args.createdWithAgent) ? { createdWithAgent: args.createdWithAgent } : {}),
+    ...(typeof args.createdByAutomationRunId === 'string' &&
+    args.createdByAutomationRunId.length > 0
+      ? { createdByAutomationRunId: args.createdByAutomationRunId }
+      : {}),
     ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
     ...(args.linkedPR !== undefined ? { linkedPR: args.linkedPR } : {})
   }

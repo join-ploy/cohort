@@ -230,7 +230,8 @@ describe('3-step chain integration (create-worktree → wait-for-setup → run-p
       baseBranch: 'main',
       branchName: 'feature/integration',
       displayName: 'Integration test',
-      linkedIssue: null
+      linkedIssue: null,
+      createdByAutomationRunId: initial.id
     })
     // openPromptPane fired exactly once (the run-prompt step), addressed at
     // the worktreeId published by create-worktree.

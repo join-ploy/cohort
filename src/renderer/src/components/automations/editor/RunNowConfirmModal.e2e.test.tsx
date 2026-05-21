@@ -5,6 +5,14 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { Automation, RunNowPayload } from '../../../../../shared/automations-types'
 import type { LinearIssue, Repo } from '../../../../../shared/types'
 
+// Why: cmdk (used by LinearIssuePicker) instantiates a ResizeObserver on mount;
+// jsdom doesn't provide one. Stub it before the component renders.
+;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+  observe(): void {}
+  disconnect(): void {}
+  unobserve(): void {}
+}
+
 // Why: the pickers mounted inside RunNowConfirmModal read from the zustand
 // store. Mock it the same way the static-markup picker tests do so this jsdom
 // test can drive the full click flow without standing up the app context.

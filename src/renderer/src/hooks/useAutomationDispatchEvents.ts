@@ -17,6 +17,20 @@ function buildAutomationWorkspaceName(runTitle: string, scheduledFor: number): s
 }
 
 export function useAutomationDispatchEvents(): void {
+  // Why: hydrate the renderer-side automation run cache once on mount and
+  // refresh on every main-broadcast `automations:changed`. This keeps the
+  // sidebar's robot-indicator status (active vs. terminal) in sync without
+  // pulling each WorktreeCard into the run list lifecycle. The fetch is a
+  // single listRuns() call (no per-automation filter) — runs are paginated
+  // server-side by recency, so the working set is bounded.
+  useEffect(() => {
+    void useAppStore.getState().fetchAutomationRuns()
+    const unsubscribe = window.api.automations.onChanged(() => {
+      void useAppStore.getState().fetchAutomationRuns()
+    })
+    return unsubscribe
+  }, [])
+
   useEffect(() => {
     const unsubscribe = window.api.automations.onDispatchRequested(async ({ automation, run }) => {
       const markDispatchResult = async (result: AutomationDispatchResult): Promise<void> => {
@@ -92,7 +106,9 @@ export function useAutomationDispatchEvents(): void {
                     undefined,
                     undefined,
                     undefined,
-                    automation.agentId
+                    automation.agentId,
+                    undefined,
+                    run.id
                   )
               ).worktree
             : automation.workspaceId
