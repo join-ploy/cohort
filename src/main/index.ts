@@ -686,6 +686,9 @@ app.whenReady().then(async () => {
         workspaceName: generatedSlug,
         baseBranch: input.baseBranch,
         linkedIssue: null,
+        ...(input.createdByAutomationRunId
+          ? { createdByAutomationRunId: input.createdByAutomationRunId }
+          : {}),
         runHooks: false,
         activate: false,
         setupDecision: 'run'

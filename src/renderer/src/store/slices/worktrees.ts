@@ -234,7 +234,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     linkedPR,
     pushTarget,
     createdWithAgent,
-    workspaceName
+    workspaceName,
+    createdByAutomationRunId
   ) => {
     const retryableConflictPatterns = [
       /already exists locally/i,
@@ -260,7 +261,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(linkedPR !== undefined ? { linkedPR } : {}),
             ...(pushTarget ? { pushTarget } : {}),
             ...(createdWithAgent ? { createdWithAgent } : {}),
-            ...(workspaceName ? { workspaceName } : {})
+            ...(workspaceName ? { workspaceName } : {}),
+            ...(createdByAutomationRunId ? { createdByAutomationRunId } : {})
           })
           // Why: a file watcher (worktrees.onChanged) can fire between the
           // backend creating the worktree and this callback running, causing

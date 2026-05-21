@@ -9,6 +9,10 @@ export type CreateWorktreeDeps = {
     branchName: string
     displayName: string
     linkedIssue?: { provider: 'linear'; id: string } | null
+    /** Attribution for the sidebar's automation indicator. The runner forwards
+     *  the current ctx.runId so the persisted Worktree carries a back-pointer
+     *  to the AutomationRun that produced it. */
+    createdByAutomationRunId?: string
   }) => Promise<{ worktreeId: string; path: string; branch: string }>
   now: () => number
 }
@@ -78,7 +82,8 @@ export class CreateWorktreeRunner implements StepRunner {
         baseBranch,
         branchName,
         displayName,
-        linkedIssue
+        linkedIssue,
+        createdByAutomationRunId: ctx.runId
       })
       const tracker: Tracker = {
         worktreeId: result.worktreeId,

@@ -134,6 +134,12 @@ export type Worktree = {
    *  seed a replacement terminal if the user later reopens the worktree after
    *  closing every visible surface. */
   createdWithAgent?: TuiAgent
+  /** AutomationRun.id that created this worktree, set at create time by the
+   *  `new_per_run` dispatcher or the chain-based "create worktree" step.
+   *  Absent for human-created or pre-existing worktrees. Used by the sidebar
+   *  to render a robot badge (animated while the matching run is still
+   *  active, static after it terminates). */
+  createdByAutomationRunId?: string
   sparseDirectories?: string[]
   sparseBaseRef?: string
   /** ID of the saved preset this worktree was created from, if any. Cleared
@@ -176,6 +182,8 @@ export type WorktreeMeta = {
   createdAt?: number
   /** See {@link Worktree.createdWithAgent}. Persisted to orca-data.json. */
   createdWithAgent?: TuiAgent
+  /** See {@link Worktree.createdByAutomationRunId}. Persisted to orca-data.json. */
+  createdByAutomationRunId?: string
   sparseDirectories?: string[]
   sparseBaseRef?: string
   sparsePresetId?: string
@@ -964,6 +972,10 @@ export type CreateWorktreeArgs = {
   pushTarget?: GitPushTarget
   /** Agent selected in the create surface. Omitted for blank-shell creates. */
   createdWithAgent?: TuiAgent
+  /** Set when the caller is an automation dispatcher or chain step — attributes
+   *  the new worktree to the AutomationRun that produced it so the sidebar can
+   *  surface a robot indicator. Persisted on WorktreeMeta. */
+  createdByAutomationRunId?: string
   /** Telemetry-only: which UI surface initiated this create. Threaded from
    *  the renderer entry point so main can emit `workspace_created` with the
    *  correct `source`. `unknown` is a valid wire value — an unrecognized

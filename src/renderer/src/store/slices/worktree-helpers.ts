@@ -78,7 +78,11 @@ export type WorktreeSlice = {
     pushTarget?: GitPushTarget,
     createdWithAgent?: TuiAgent,
     /** Caller-supplied immutable workspace identifier. Validated server-side. */
-    workspaceName?: string
+    workspaceName?: string,
+    /** AutomationRun.id of the run that created this worktree, when an
+     *  automation dispatch initiated the create. Persisted on WorktreeMeta and
+     *  surfaced as a sidebar robot indicator. */
+    createdByAutomationRunId?: string
   ) => Promise<CreateWorktreeResult>
   removeWorktree: (
     worktreeId: string,

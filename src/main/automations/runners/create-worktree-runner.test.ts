@@ -49,7 +49,8 @@ describe('CreateWorktreeRunner', () => {
       baseBranch: 'main',
       branchName: 'feature/x',
       displayName: 'Feature X',
-      linkedIssue: null
+      linkedIssue: null,
+      createdByAutomationRunId: 'r1'
     })
     expect(result).toMatchObject({
       outcome: 'done',
@@ -91,7 +92,8 @@ describe('CreateWorktreeRunner', () => {
       baseBranch: 'develop',
       branchName: 'feature/abc',
       displayName: 'Fix X',
-      linkedIssue: null
+      linkedIssue: null,
+      createdByAutomationRunId: 'r1'
     })
   })
 

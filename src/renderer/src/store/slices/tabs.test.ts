@@ -106,6 +106,7 @@ import { createDiffCommentsSlice } from './diffComments'
 import { createDetectedAgentsSlice } from './detected-agents'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
 import { createScriptsSlice } from './scripts'
+import { createAutomationRunsSlice } from './automation-runs'
 
 const WT = 'repo1::/tmp/feature'
 
@@ -132,7 +133,8 @@ function createTestStore() {
     ...createDiffCommentsSlice(...a),
     ...createDetectedAgentsSlice(...a),
     ...createWorktreeNavHistorySlice(...a),
-    ...createScriptsSlice(...a)
+    ...createScriptsSlice(...a),
+    ...createAutomationRunsSlice(...a)
   }))
 }
 

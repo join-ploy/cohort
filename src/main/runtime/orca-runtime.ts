@@ -3756,6 +3756,9 @@ export class OrcaRuntimeService {
     activate?: boolean
     setupDecision?: 'run' | 'skip' | 'inherit'
     startup?: WorktreeStartupLaunch
+    /** AutomationRun.id when this create originates from a chain step.
+     *  Persisted on WorktreeMeta so the sidebar can render the robot indicator. */
+    createdByAutomationRunId?: string
   }): Promise<CreateWorktreeResult> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
@@ -3875,7 +3878,11 @@ export class OrcaRuntimeService {
         : {}),
       baseRef: baseBranch,
       ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
-      ...(args.comment !== undefined ? { comment: args.comment } : {})
+      ...(args.comment !== undefined ? { comment: args.comment } : {}),
+      ...(typeof args.createdByAutomationRunId === 'string' &&
+      args.createdByAutomationRunId.length > 0
+        ? { createdByAutomationRunId: args.createdByAutomationRunId }
+        : {})
     })
     const worktree = mergeWorktree(repo.id, created, meta)
 

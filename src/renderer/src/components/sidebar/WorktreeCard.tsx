@@ -7,6 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import {
   AlertTriangle,
   Bell,
+  Bot,
   GitMerge,
   LoaderCircle,
   CircleCheck,
@@ -14,6 +15,7 @@ import {
   Server,
   ServerOff
 } from 'lucide-react'
+import { isAutomationRunActive } from '@/store/slices/automation-runs'
 import StatusIndicator from './StatusIndicator'
 import CacheTimer from './CacheTimer'
 import WorktreeContextMenu from './WorktreeContextMenu'
@@ -124,6 +126,25 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const deleteState = useAppStore((s) => s.deleteStateByWorktreeId[worktree.id])
   const conflictOperation = useAppStore((s) => s.gitConflictOperationByWorktree[worktree.id])
   const remoteBranchConflict = useAppStore((s) => s.remoteBranchConflictByWorktreeId[worktree.id])
+
+  // Why: when the worktree was created by an automation, look up the matching
+  // run so the badge can flip between animated (run still active) and static
+  // (run terminal). A missing entry — e.g., very old run pruned from the
+  // cache — still renders the static badge: attribution alone justifies it.
+  const automationRunId = worktree.createdByAutomationRunId
+  const automationRunStatus = useAppStore((s) =>
+    automationRunId ? s.automationRunsById[automationRunId]?.status : undefined
+  )
+  const automationBadge = automationRunId
+    ? {
+        active: automationRunStatus ? isAutomationRunActive(automationRunStatus) : false,
+        tooltip: automationRunStatus
+          ? isAutomationRunActive(automationRunStatus)
+            ? 'Automation running…'
+            : 'Created by automation'
+          : 'Created by automation'
+      }
+    : null
 
   // SSH disconnected state
   const sshStatus = useAppStore((s) => {
@@ -610,6 +631,27 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
               {/* Right-side cluster: CI/PR state and the live run-script dot. */}
               <div className="flex items-center gap-2 shrink-0">
+                {automationBadge && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        data-automation-run-id={automationRunId}
+                        data-automation-active={automationBadge.active ? 'true' : 'false'}
+                        className="inline-flex items-center text-muted-foreground"
+                      >
+                        <Bot
+                          className={cn(
+                            'size-3.5',
+                            automationBadge.active && 'animate-pulse text-foreground'
+                          )}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      <span>{automationBadge.tooltip}</span>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 {cardProps.includes('ci') && pr && pr.checksStatus !== 'neutral' && (
                   <Tooltip>
                     <TooltipTrigger asChild>
