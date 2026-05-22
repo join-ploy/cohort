@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ScriptState } from '@/store/slices/scripts'
+import type { RunGroupMember } from './RunPanelGroupView'
 
 // Why: ActionButton.test.tsx pattern — call the component as a function
 // and walk the React element tree to find the inner <Button> by its
@@ -80,7 +81,14 @@ vi.mock('@/store', () => ({
 
 vi.mock('@/store/selectors', () => ({
   useActiveWorktree: () => ({ id: 'wt-1', repoId: 'repo-1', branch: 'main' }),
-  useRepoById: () => ({ id: 'repo-1', kind: 'git', path: '/tmp/repo' })
+  useRepoById: () => ({ id: 'repo-1', kind: 'git', path: '/tmp/repo' }),
+  // Why: getGroupByWorktreeId / getMemberWorktreesForGroup / getRepoMapFromState
+  // are read by the default-export container only. The view-only tests
+  // exercise RunPanelView / RunPanelGroupView directly, so these stubs only
+  // need to be present and return the no-group branch.
+  getGroupByWorktreeId: () => null,
+  getMemberWorktreesForGroup: () => [],
+  getRepoMapFromState: () => new Map()
 }))
 
 // Why: SidebarPtyTerminal pulls in xterm + the keyboard-layout probe + the
@@ -236,5 +244,206 @@ describe('RunPanel default export — start/stop wiring', () => {
     const toastError = vi.fn()
     await _testing.callRunStop({ repoId: 'repo-1' }, { stop, toastError })
     expect(toastError).toHaveBeenCalledOnce()
+  })
+})
+
+// Why: group-mode tests exercise RunPanelGroupView directly — the pure view
+// receives already-resolved member metadata so we don't need to mock the
+// hooks:check IPC or the workspace-groups store slice here.
+function makeRunMember(overrides: {
+  worktreeId: string
+  repoId: string
+  repoName: string
+  runScript?: string | undefined
+  status?: ScriptState['status']
+  ptyId?: string | null
+}): RunGroupMember {
+  return {
+    worktreeId: overrides.worktreeId,
+    repoId: overrides.repoId,
+    repoName: overrides.repoName,
+    runScript: overrides.runScript ?? 'pnpm dev',
+    runState: {
+      ptyId: overrides.ptyId ?? null,
+      status: overrides.status ?? 'idle',
+      exitCode: null,
+      startedAt: null
+    }
+  }
+}
+
+describe('RunPanelGroupView — segmented mode', () => {
+  it('renders one segment per member when the workspace is grouped', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    const members = [
+      makeRunMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'frontend' }),
+      makeRunMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'backend' }),
+      makeRunMember({ worktreeId: 'wt-c', repoId: 'repo-c', repoName: 'shared' })
+    ]
+    const html = renderToStaticMarkup(
+      <RunPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onStartAll={() => {}}
+        onStopAll={() => {}}
+        isDispatching={false}
+      />
+    )
+    expect(html).toContain('frontend')
+    expect(html).toContain('backend')
+    expect(html).toContain('shared')
+  })
+
+  it('switching segments via activeRepoId shows that member’s run state', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    // Why: each member carries a distinct run state — header text "running…"
+    // vs "never run" disambiguates which segment's body is rendered below
+    // the segmented strip.
+    const members = [
+      makeRunMember({
+        worktreeId: 'wt-a',
+        repoId: 'repo-a',
+        repoName: 'alpha',
+        status: 'idle'
+      }),
+      makeRunMember({
+        worktreeId: 'wt-b',
+        repoId: 'repo-b',
+        repoName: 'bravo',
+        status: 'running',
+        ptyId: 'p-b'
+      })
+    ]
+    const htmlA = renderToStaticMarkup(
+      <RunPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onStartAll={() => {}}
+        onStopAll={() => {}}
+        isDispatching={false}
+      />
+    )
+    expect(htmlA).toMatch(/never run/i)
+    const htmlB = renderToStaticMarkup(
+      <RunPanelGroupView
+        members={members}
+        activeRepoId="repo-b"
+        onSelectRepo={() => {}}
+        onStartAll={() => {}}
+        onStopAll={() => {}}
+        isDispatching={false}
+      />
+    )
+    expect(htmlB).toMatch(/running/i)
+  })
+
+  it('renders a single Start-all button (not per-segment)', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    const members = [
+      makeRunMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'alpha' }),
+      makeRunMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'bravo' })
+    ]
+    const html = renderToStaticMarkup(
+      <RunPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onStartAll={() => {}}
+        onStopAll={() => {}}
+        isDispatching={false}
+      />
+    )
+    // One Start-all button across the whole strip, zero per-segment Re-run.
+    const startMatches = html.match(/aria-label="Start all run scripts"/g) ?? []
+    expect(startMatches).toHaveLength(1)
+    expect(html).not.toMatch(/aria-label="Re-run script"/)
+  })
+
+  it('shows a single Stop-all button when any member is running', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    const members = [
+      makeRunMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'alpha', status: 'idle' }),
+      makeRunMember({
+        worktreeId: 'wt-b',
+        repoId: 'repo-b',
+        repoName: 'bravo',
+        status: 'running',
+        ptyId: 'p-b'
+      })
+    ]
+    const html = renderToStaticMarkup(
+      <RunPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onStartAll={() => {}}
+        onStopAll={() => {}}
+        isDispatching={false}
+      />
+    )
+    const stopMatches = html.match(/aria-label="Stop all run scripts"/g) ?? []
+    expect(stopMatches).toHaveLength(1)
+    expect(html).not.toMatch(/aria-label="Start all run scripts"/)
+  })
+
+  it('disables the Start-all button while a dispatch is in flight', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    const members = [
+      makeRunMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'alpha' }),
+      makeRunMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'bravo' })
+    ]
+    const element = RunPanelGroupView({
+      members,
+      activeRepoId: 'repo-a',
+      onSelectRepo: () => {},
+      onStartAll: () => {},
+      onStopAll: () => {},
+      isDispatching: true
+    })
+    const button = findByAriaLabel(element, 'Start all run scripts')
+    expect(button.props.disabled).toBe(true)
+  })
+
+  it('Start-all onClick fires once regardless of how many members exist', async () => {
+    const { RunPanelGroupView } = await import('./RunPanelGroupView')
+    const members = [
+      makeRunMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'alpha' }),
+      makeRunMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'bravo' }),
+      makeRunMember({ worktreeId: 'wt-c', repoId: 'repo-c', repoName: 'charlie' })
+    ]
+    const onStartAll = vi.fn()
+    const element = RunPanelGroupView({
+      members,
+      activeRepoId: 'repo-a',
+      onSelectRepo: () => {},
+      onStartAll,
+      onStopAll: () => {},
+      isDispatching: false
+    })
+    const button = findByAriaLabel(element, 'Start all run scripts')
+    ;(button.props.onClick as () => void)()
+    expect(onStartAll).toHaveBeenCalledOnce()
+  })
+})
+
+describe('aggregateGroupRunStatus', () => {
+  it('returns failed when any member failed', async () => {
+    const { aggregateGroupRunStatus } = await import('./RunPanelGroupView')
+    expect(aggregateGroupRunStatus(['done', 'failed', 'running'])).toBe('failed')
+  })
+  it('returns running when none failed but at least one is running', async () => {
+    const { aggregateGroupRunStatus } = await import('./RunPanelGroupView')
+    expect(aggregateGroupRunStatus(['idle', 'running', 'done'])).toBe('running')
+  })
+  it('returns done only when every member finished successfully', async () => {
+    const { aggregateGroupRunStatus } = await import('./RunPanelGroupView')
+    expect(aggregateGroupRunStatus(['done', 'done'])).toBe('done')
+    expect(aggregateGroupRunStatus(['done', 'idle'])).toBe('idle')
+  })
+  it('returns idle for an empty member list', async () => {
+    const { aggregateGroupRunStatus } = await import('./RunPanelGroupView')
+    expect(aggregateGroupRunStatus([])).toBe('idle')
   })
 })

@@ -1,19 +1,42 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import { describe, expect, it } from 'vitest'
-import { createScriptsSlice, type ScriptsSlice } from './scripts'
+import { describe, expect, it, vi } from 'vitest'
+import { createScriptsSlice, type GroupRunDeps, type ScriptsSlice } from './scripts'
+import type { WorkspaceGroup, Worktree } from '../../../../shared/types'
 
-// Why: this slice is self-contained — it does not read other slice state,
-// so the test store provides only the scripts surface. Mirrors the isolated
-// pattern used in worktree-nav-history.test.ts for the same reason.
-function createScriptsStore(): StoreApi<ScriptsSlice> {
+// Why: most of this slice's actions are self-contained, but startGroupRun /
+// stopGroupRun read workspace-groups + worktreesByRepo via the cross-slice
+// selectors. The store-shape stub stays narrow — only the keys those
+// selectors touch — so unrelated slices don't have to be wired up.
+type ScriptsStoreShape = ScriptsSlice & {
+  workspaceGroups: WorkspaceGroup[]
+  worktreesByRepo: Record<string, Worktree[]>
+}
+
+function createScriptsStore(
+  seed: { workspaceGroups?: WorkspaceGroup[]; worktreesByRepo?: Record<string, Worktree[]> } = {}
+): StoreApi<ScriptsStoreShape> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return createStore<any>()((set, get, api) => ({
+    workspaceGroups: seed.workspaceGroups ?? [],
+    worktreesByRepo: seed.worktreesByRepo ?? {},
     ...createScriptsSlice(
       set as Parameters<typeof createScriptsSlice>[0],
       get as Parameters<typeof createScriptsSlice>[1],
       api as Parameters<typeof createScriptsSlice>[2]
     )
-  })) as unknown as StoreApi<ScriptsSlice>
+  })) as unknown as StoreApi<ScriptsStoreShape>
+}
+
+// Why: cast through `unknown` keeps the test fixtures minimal — we only need
+// the fields the cross-slice selectors read (id, repoId, memberWorktreeIds);
+// other slice tests use the same shortcut to avoid mirroring the full
+// persisted shape inside the test file.
+function makeWorktree(id: string, repoId: string): Worktree {
+  return { id, repoId, path: `/tmp/${id}`, branch: `refs/heads/${id}` } as unknown as Worktree
+}
+
+function makeGroup(id: string, memberIds: string[]): WorkspaceGroup {
+  return { id, memberWorktreeIds: memberIds } as unknown as WorkspaceGroup
 }
 
 describe('scripts slice', () => {
@@ -199,6 +222,92 @@ describe('scripts slice', () => {
       const awaiting = store.getState().worktreeIdsAwaitingSetupAutoSwitch
       expect(awaiting.has('wt-1')).toBe(false)
       expect(awaiting.has('wt-2')).toBe(true)
+    })
+  })
+
+  describe('startGroupRun / stopGroupRun', () => {
+    function seededGroupStore(memberIds: string[]) {
+      const worktrees: Worktree[] = memberIds.map((id, i) => makeWorktree(id, `repo-${i + 1}`))
+      const worktreesByRepo: Record<string, Worktree[]> = {}
+      for (const wt of worktrees) {
+        worktreesByRepo[wt.repoId] = [wt]
+      }
+      const group = makeGroup('group-1', memberIds)
+      return createScriptsStore({ workspaceGroups: [group], worktreesByRepo })
+    }
+
+    it('startGroupRun fans out start to every member in the group', async () => {
+      const store = seededGroupStore(['wt-1', 'wt-2', 'wt-3'])
+      const deps: GroupRunDeps = {
+        start: vi.fn().mockResolvedValue({ ok: true, ptyId: 'p' }),
+        stop: vi.fn().mockResolvedValue({ ok: true })
+      }
+      await store.getState().startGroupRun('group-1', deps)
+      expect(deps.start).toHaveBeenCalledTimes(3)
+      // Each member's repoId + worktreeId pair gets forwarded.
+      expect(deps.start).toHaveBeenCalledWith({ repoId: 'repo-1', worktreeId: 'wt-1' })
+      expect(deps.start).toHaveBeenCalledWith({ repoId: 'repo-2', worktreeId: 'wt-2' })
+      expect(deps.start).toHaveBeenCalledWith({ repoId: 'repo-3', worktreeId: 'wt-3' })
+    })
+
+    it('startGroupRun stops any already-running member before starting', async () => {
+      const store = seededGroupStore(['wt-1', 'wt-2'])
+      // Why: simulate wt-1 already running — startGroupRun must pre-stop it
+      // so the new spawn replaces the live PTY instead of orphaning it.
+      store.getState().handleRunStarted({ worktreeId: 'wt-1', ptyId: 'p-old' })
+      const deps: GroupRunDeps = {
+        start: vi.fn().mockResolvedValue({ ok: true, ptyId: 'p-new' }),
+        stop: vi.fn().mockResolvedValue({ ok: true })
+      }
+      await store.getState().startGroupRun('group-1', deps)
+      expect(deps.stop).toHaveBeenCalledTimes(1)
+      expect(deps.stop).toHaveBeenCalledWith({ repoId: 'repo-1' })
+      // Every member gets a start, including the one we pre-stopped.
+      expect(deps.start).toHaveBeenCalledTimes(2)
+    })
+
+    it('startGroupRun returns the per-member RunStartResults in order', async () => {
+      const store = seededGroupStore(['wt-1', 'wt-2'])
+      const deps: GroupRunDeps = {
+        start: vi
+          .fn()
+          .mockResolvedValueOnce({ ok: true, ptyId: 'p-1' })
+          .mockResolvedValueOnce({ ok: false, reason: 'spawn-failed' as const }),
+        stop: vi.fn().mockResolvedValue({ ok: true })
+      }
+      const results = await store.getState().startGroupRun('group-1', deps)
+      expect(results).toHaveLength(2)
+      expect(results[0]).toEqual({ ok: true, ptyId: 'p-1' })
+      expect(results[1]).toEqual({ ok: false, reason: 'spawn-failed' })
+    })
+
+    it('stopGroupRun stops only members with a running PTY', async () => {
+      const store = seededGroupStore(['wt-1', 'wt-2', 'wt-3'])
+      // wt-1: running, wt-2: idle (never started), wt-3: exited
+      store.getState().handleRunStarted({ worktreeId: 'wt-1', ptyId: 'p-1' })
+      store.getState().handleRunStarted({ worktreeId: 'wt-3', ptyId: 'p-3' })
+      store.getState().handleRunExited({ worktreeId: 'wt-3', code: 0 })
+      const deps: GroupRunDeps = {
+        start: vi.fn().mockResolvedValue({ ok: true, ptyId: 'p' }),
+        stop: vi.fn().mockResolvedValue({ ok: true })
+      }
+      await store.getState().stopGroupRun('group-1', deps)
+      expect(deps.stop).toHaveBeenCalledTimes(1)
+      expect(deps.stop).toHaveBeenCalledWith({ repoId: 'repo-1' })
+    })
+
+    it('startGroupRun / stopGroupRun on an unknown group resolve to empty', async () => {
+      const store = createScriptsStore()
+      const deps: GroupRunDeps = {
+        start: vi.fn(),
+        stop: vi.fn()
+      }
+      const startResults = await store.getState().startGroupRun('group-missing', deps)
+      const stopResults = await store.getState().stopGroupRun('group-missing', deps)
+      expect(startResults).toEqual([])
+      expect(stopResults).toEqual([])
+      expect(deps.start).not.toHaveBeenCalled()
+      expect(deps.stop).not.toHaveBeenCalled()
     })
   })
 })
