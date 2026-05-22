@@ -191,7 +191,9 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
-  RunNowPayload
+  RunNowPayload,
+  SerializableTriggerSource,
+  TriggerSourceId
 } from '../shared/automations-types'
 
 export type BrowserApi = {
@@ -1380,6 +1382,14 @@ export type PreloadApi = {
       requestId: string,
       result: { ok: true } | { ok: false; error: string }
     ) => void
+  }
+  triggerSources: {
+    list: () => Promise<SerializableTriggerSource[]>
+    fetchOptions: (args: {
+      sourceId: TriggerSourceId
+      field: string
+      hostId?: string
+    }) => Promise<{ value: string; label: string }[]>
   }
   wsl: {
     isAvailable: () => Promise<boolean>

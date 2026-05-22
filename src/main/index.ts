@@ -68,6 +68,7 @@ import { AutomationService } from './automations/service'
 import { AutoTriggerEngine } from './automations/auto-trigger-engine'
 import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
+import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
 import { AgentStatusRegistry } from './agent-status/registry'
@@ -646,6 +647,9 @@ app.whenReady().then(async () => {
   // rebuilding the registry.
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
+  // Why: bridge the source catalog + fetchOptions to the renderer before any
+  // window is opened so the first TriggersModal mount has the handlers ready.
+  registerTriggerSourceHandlers(triggerSourceRegistry)
   // TODO(SSH): hostId varies per remote target once SSH execution lands.
   const AUTO_TRIGGER_HOST_ID = 'local'
   // TODO(persist): in-memory until we add a per-source watermark table to the

@@ -101,7 +101,9 @@ import type {
   AutomationRun,
   AutomationUpdateInput,
   AutoDedupEntry,
-  RunNowPayload
+  RunNowPayload,
+  SerializableTriggerSource,
+  TriggerSourceId
 } from '../shared/automations-types'
 import {
   ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT,
@@ -2636,6 +2638,16 @@ const api = {
     ): void => {
       ipcRenderer.send(`automations:sendCommandToPane:reply:${requestId}`, result)
     }
+  },
+
+  triggerSources: {
+    list: (): Promise<SerializableTriggerSource[]> => ipcRenderer.invoke('triggerSources:list'),
+    fetchOptions: (args: {
+      sourceId: TriggerSourceId
+      field: string
+      hostId?: string
+    }): Promise<{ value: string; label: string }[]> =>
+      ipcRenderer.invoke('triggerSources:fetchOptions', args)
   },
 
   e2e: {

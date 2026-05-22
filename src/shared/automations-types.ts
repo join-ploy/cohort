@@ -171,6 +171,24 @@ export type TriggerConfig = {
 // extra sources will be added here as they come online.
 export type TriggerSourceId = 'linear-issue'
 
+// Renderer-facing projection of a FieldDescriptor. The main-process descriptor
+// carries `fetchOptions: (ctx) => Promise<...>`, which cannot cross the IPC
+// boundary; instead the renderer receives `hasFetchOptions` and calls the
+// `triggerSources:fetchOptions` IPC when it needs the actual option list.
+export type SerializableFieldDescriptor = {
+  field: string
+  label: string
+  valueKind: 'user' | 'label' | 'state' | 'priority' | 'string' | 'number'
+  ops: ConditionOp[]
+  hasFetchOptions: boolean
+}
+
+export type SerializableTriggerSource = {
+  id: TriggerSourceId
+  displayName: string
+  fieldCatalog: SerializableFieldDescriptor[]
+}
+
 export type ConditionOp =
   | 'is'
   | 'is-not'
