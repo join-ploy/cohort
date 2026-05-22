@@ -9,6 +9,8 @@ import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type {
   BaseRefDefaultResult,
   BrowserViewportOverride,
+  CreateWorkspaceGroupArgs,
+  CreateWorkspaceGroupResult,
   CreateWorktreeArgs,
   CustomPet,
   FsChangedPayload,
@@ -497,7 +499,9 @@ const api = {
   },
 
   workspaceGroups: {
-    list: (): Promise<WorkspaceGroup[]> => ipcRenderer.invoke('workspace-groups:list')
+    list: (): Promise<WorkspaceGroup[]> => ipcRenderer.invoke('workspace-groups:list'),
+    create: (args: CreateWorkspaceGroupArgs): Promise<CreateWorkspaceGroupResult> =>
+      ipcRenderer.invoke('workspace-groups:create', args)
   },
 
   pty: {

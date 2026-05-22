@@ -11,7 +11,12 @@ describe('workspace-groups slice', () => {
     vi.resetModules()
     // Stub window.api before importing the store
     ;(globalThis as unknown as { window: { api: unknown } }).window = {
-      api: { workspaceGroups: { list: vi.fn().mockResolvedValue([]) } }
+      api: {
+        workspaceGroups: {
+          list: vi.fn().mockResolvedValue([]),
+          create: vi.fn()
+        }
+      }
     }
     const mod = await import('../index')
     useAppStore = mod.useAppStore
@@ -75,5 +80,29 @@ describe('workspace-groups slice', () => {
     ;(window.api.workspaceGroups.list as ReturnType<typeof vi.fn>).mockResolvedValue([g])
     await useAppStore.getState().fetchWorkspaceGroups()
     expect(useAppStore.getState().workspaceGroups).toEqual([g])
+  })
+
+  it('createGroup calls the IPC and upserts the result', async () => {
+    const newGroup = makeGroup('group:new', 'feature_x')
+    const memberWt = {
+      id: 'r1::/x/feature_x/r1',
+      repoId: 'r1',
+      groupId: 'group:new'
+    }
+    ;(window.api.workspaceGroups.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      group: newGroup,
+      memberWorktrees: [memberWt]
+    })
+
+    const args = {
+      workspaceName: 'feature_x',
+      branchName: 'feature_x',
+      members: [{ repoId: 'r1', baseRef: null, setupDecision: 'inherit' as const }]
+    }
+    const result = await useAppStore.getState().createGroup(args as never)
+
+    expect(window.api.workspaceGroups.create).toHaveBeenCalledWith(args)
+    expect(result.group).toEqual(newGroup)
+    expect(useAppStore.getState().workspaceGroups).toContainEqual(newGroup)
   })
 })

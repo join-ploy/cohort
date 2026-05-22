@@ -9,6 +9,8 @@ import type {
   BrowserViewportOverride,
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState,
+  CreateWorkspaceGroupArgs,
+  CreateWorkspaceGroupResult,
   CreateWorktreeArgs,
   CreateWorktreeResult,
   CustomPet,
@@ -505,6 +507,7 @@ export type PreloadApi = {
   }
   workspaceGroups: {
     list: () => Promise<WorkspaceGroup[]>
+    create: (args: CreateWorkspaceGroupArgs) => Promise<CreateWorkspaceGroupResult>
   }
   pty: {
     spawn: (opts: {
