@@ -1,4 +1,7 @@
 import * as React from 'react'
+import { History, Plus, Trash2, Zap } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import type {
   AutoDedupEntry,
   AutoTrigger,
@@ -8,7 +11,7 @@ import type {
   SerializableFieldDescriptor,
   TriggerSourceId
 } from '../../../../../shared/automations-types'
-import { ConditionRow } from './ConditionRow'
+import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import { DedupListPopover } from './DedupListPopover'
 
 export type AutoTriggerCardProps = {
@@ -28,14 +31,13 @@ export type AutoTriggerCardProps = {
   loadOptions: (field: string) => Promise<{ value: string; label: string }[]>
 }
 
-// Why: per-source human label; mirrors TriggerPill's SOURCE_LABEL but uses the
-// long form because this surface is the editor, not the chip.
-const SOURCE_LABEL: Record<TriggerSourceId, string> = {
-  'linear-issue': 'Linear issue'
-}
-
-function sourceLabelFor(source: TriggerSourceId): string {
-  return SOURCE_LABEL[source] ?? source
+// Why: per-source human label + icon. Long form (vs. TriggerPill's chip) since
+// this surface is the editor.
+const SOURCE_META: Record<
+  TriggerSourceId,
+  { label: string; icon: React.ComponentType<{ className?: string }> }
+> = {
+  'linear-issue': { label: 'Linear issue', icon: Zap }
 }
 
 // Pure helpers — exported so they can be unit-tested without rendering. The
@@ -169,73 +171,105 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
   }, [refresh])
 
   const hasAutomationId = automationId !== ''
+  const ruleCount = trigger.rules.length
+  const meta = SOURCE_META[trigger.source] ?? { label: trigger.source, icon: Zap }
+  const SourceIcon = meta.icon
 
   return (
-    <div aria-label={`auto trigger ${trigger.id}`} className="rounded border bg-card p-2 text-xs">
-      <div className="flex items-center justify-between gap-2">
+    <div
+      aria-label={`auto trigger ${trigger.id}`}
+      className="overflow-hidden rounded-lg border border-border bg-card text-sm shadow-xs"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{sourceLabelFor(trigger.source)}</span>
-          <label className="flex items-center gap-1 text-muted-foreground">
+          <SourceIcon className="size-4 text-muted-foreground" />
+          <span className="font-medium">{meta.label}</span>
+          <Badge variant="outline" className="font-normal text-muted-foreground">
+            {ruleCount} {ruleCount === 1 ? 'rule' : 'rules'}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer select-none items-center gap-2">
             <input
               type="checkbox"
               aria-label="Trigger enabled"
               checked={trigger.enabled}
               onChange={onToggle}
+              className="size-4 cursor-pointer rounded border-input"
             />
-            Enabled
+            <span className="text-xs text-muted-foreground">
+              {trigger.enabled ? 'Active' : 'Disabled'}
+            </span>
           </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Remove trigger ${trigger.id}`}
+            title="Remove trigger"
+            onClick={onRemove}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
         </div>
-        <button
-          type="button"
-          aria-label={`remove trigger ${trigger.id}`}
-          onClick={onRemove}
-          className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground"
-        >
-          Remove
-        </button>
       </div>
 
-      <ul className="mt-2 space-y-2">
-        {trigger.rules.map((rule, idx) => (
-          <RuleRow
-            key={rule.id}
-            rule={rule}
-            index={idx}
-            total={trigger.rules.length}
-            projects={projects}
-            fieldCatalog={fieldCatalog}
-            loadOptions={loadOptions}
-            onProjectChange={(projectId) => onChange(updateRule(trigger, rule.id, { projectId }))}
-            onMoveUp={() => onChange(reorderRule(trigger, idx, idx - 1))}
-            onMoveDown={() => onChange(reorderRule(trigger, idx, idx + 1))}
-            onDelete={() => onChange(removeRule(trigger, rule.id))}
-            onAddCondition={() => onChange(addCondition(trigger, rule.id, fieldCatalog))}
-            onRemoveCondition={(i) => onChange(removeCondition(trigger, rule.id, i))}
-            onUpdateCondition={(i, next) => onChange(updateCondition(trigger, rule.id, i, next))}
-          />
-        ))}
-      </ul>
+      <div className="space-y-3 px-4 py-3">
+        {trigger.rules.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border bg-background p-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              No rules yet — add one to start matching events.
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {trigger.rules.map((rule, idx) => (
+              <AutoTriggerRuleRow
+                key={rule.id}
+                rule={rule}
+                index={idx}
+                total={trigger.rules.length}
+                projects={projects}
+                fieldCatalog={fieldCatalog}
+                loadOptions={loadOptions}
+                onProjectChange={(projectId) =>
+                  onChange(updateRule(trigger, rule.id, { projectId }))
+                }
+                onMoveUp={() => onChange(reorderRule(trigger, idx, idx - 1))}
+                onMoveDown={() => onChange(reorderRule(trigger, idx, idx + 1))}
+                onDelete={() => onChange(removeRule(trigger, rule.id))}
+                onAddCondition={() => onChange(addCondition(trigger, rule.id, fieldCatalog))}
+                onRemoveCondition={(i) => onChange(removeCondition(trigger, rule.id, i))}
+                onUpdateCondition={(i, next) =>
+                  onChange(updateCondition(trigger, rule.id, i, next))
+                }
+              />
+            ))}
+          </ul>
+        )}
 
-      <button
-        type="button"
-        onClick={onAddRule}
-        className="mt-2 rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground"
-      >
-        + Add rule
-      </button>
+        <Button type="button" variant="outline" size="xs" onClick={onAddRule}>
+          <Plus className="size-3" />
+          Add rule
+        </Button>
+      </div>
 
-      {/* Dedup management footer */}
-      <div className="relative mt-3 flex items-center justify-between border-t pt-2 text-xs">
-        <span className="text-muted-foreground">Fired for {dedupEntries.length} issues</span>
-        <button
+      <div className="relative flex items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
+        <span className="text-xs text-muted-foreground">
+          Fired for <span className="font-medium text-foreground">{dedupEntries.length}</span>{' '}
+          {dedupEntries.length === 1 ? 'issue' : 'issues'}
+        </span>
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           aria-label="View fired issues"
           disabled={!hasAutomationId}
           onClick={() => setDedupOpen(true)}
-          className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
+          <History className="size-3" />
           View
-        </button>
+        </Button>
         <DedupListPopover
           entries={dedupEntries}
           open={dedupOpen}
@@ -260,118 +294,5 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
         />
       </div>
     </div>
-  )
-}
-
-type RuleRowProps = {
-  rule: Rule
-  index: number
-  total: number
-  projects: { id: string; displayName: string }[]
-  fieldCatalog: SerializableFieldDescriptor[]
-  loadOptions: (field: string) => Promise<{ value: string; label: string }[]>
-  onProjectChange: (projectId: string) => void
-  onMoveUp: () => void
-  onMoveDown: () => void
-  onDelete: () => void
-  onAddCondition: () => void
-  onRemoveCondition: (index: number) => void
-  onUpdateCondition: (index: number, next: Condition) => void
-}
-
-function RuleRow(props: RuleRowProps): React.JSX.Element {
-  const {
-    rule,
-    index,
-    total,
-    projects,
-    fieldCatalog,
-    loadOptions,
-    onProjectChange,
-    onMoveUp,
-    onMoveDown,
-    onDelete,
-    onAddCondition,
-    onRemoveCondition,
-    onUpdateCondition
-  } = props
-  const isFirst = index === 0
-  const isLast = index === total - 1
-  return (
-    <li aria-label={`rule ${rule.id}`} className="rounded border border-border bg-background p-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground">Rule {index + 1}</span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Move up"
-            disabled={isFirst}
-            onClick={onMoveUp}
-            className="rounded border border-border bg-background px-1 hover:bg-accent hover:text-foreground disabled:opacity-50"
-          >
-            ▲
-          </button>
-          <button
-            type="button"
-            aria-label="Move down"
-            disabled={isLast}
-            onClick={onMoveDown}
-            className="rounded border border-border bg-background px-1 hover:bg-accent hover:text-foreground disabled:opacity-50"
-          >
-            ▼
-          </button>
-          <button
-            type="button"
-            aria-label="Delete rule"
-            onClick={onDelete}
-            className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground"
-          >
-            Delete rule
-          </button>
-        </div>
-      </div>
-
-      <label className="mt-2 flex items-center gap-2">
-        <span className="text-muted-foreground">Project:</span>
-        <select
-          aria-label="Project"
-          value={rule.projectId}
-          onChange={(e) => onProjectChange(e.target.value)}
-          className="rounded border border-border bg-background px-1 py-0.5"
-        >
-          <option value="">— Select project —</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.displayName}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div className="mt-2 space-y-1">
-        {rule.conditions.length === 0 ? (
-          <p className="text-muted-foreground">No conditions — rule matches every candidate.</p>
-        ) : (
-          rule.conditions.map((cond, i) => (
-            <ConditionRow
-              key={i}
-              condition={cond}
-              fieldCatalog={fieldCatalog}
-              loadOptions={loadOptions}
-              onChange={(next) => onUpdateCondition(i, next)}
-              onRemove={() => onRemoveCondition(i)}
-            />
-          ))
-        )}
-        <button
-          type="button"
-          onClick={onAddCondition}
-          disabled={fieldCatalog.length === 0}
-          className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-50"
-        >
-          + Add condition
-        </button>
-      </div>
-    </li>
   )
 }

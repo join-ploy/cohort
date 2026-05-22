@@ -86,7 +86,10 @@ describe('AutoTriggerCard rendering', () => {
         loadOptions={noopLoadOptions}
       />
     )
-    expect(html).toContain('+ Add rule')
+    // Why: redesign replaced the literal "+ Add rule" string with an icon +
+    // label button; assert on the label text alone.
+    expect(html).toContain('Add rule')
+    expect(html).toContain('No rules yet')
   })
 
   it('renders one rule with project select + reorder buttons + delete', () => {
@@ -109,7 +112,9 @@ describe('AutoTriggerCard rendering', () => {
     expect(html).toContain('Move up')
     expect(html).toContain('Move down')
     expect(html).toContain('Delete rule')
-    expect(html).toContain('+ Add condition')
+    // Why: redesign replaced the literal "+ Add condition" string with an
+    // icon + label button; assert on the label text alone.
+    expect(html).toContain('Add condition')
     expect(html).toContain('No conditions')
   })
 
@@ -125,7 +130,12 @@ describe('AutoTriggerCard rendering', () => {
         loadOptions={noopLoadOptions}
       />
     )
-    expect(html).toContain('Fired for 0 issues')
+    // Why: redesign wraps the count in a <span> for typographic emphasis, so
+    // the literal "Fired for 0 issues" string is broken up — match the prefix
+    // and the "issues" suffix separately.
+    expect(html).toContain('Fired for ')
+    expect(html).toContain('>0<')
+    expect(html).toContain('issues')
     expect(html).toMatch(/aria-label="View fired issues"/i)
   })
 
