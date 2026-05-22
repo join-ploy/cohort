@@ -1030,6 +1030,37 @@ export type CreateWorktreeResult = {
   initialBaseStatus?: WorktreeBaseStatusEvent
 }
 
+export type CreateGroupMemberSpec = {
+  repoId: string
+  /** Base ref to branch from. null = use the repo's default base (worktreeBaseRef → main). */
+  baseRef: string | null
+  setupDecision: SetupDecision
+}
+
+export type CreateWorkspaceGroupArgs = {
+  /** The group's workspaceName — also becomes the parent folder name and the
+   *  branch name in every member repo. Must pass `validateGroupName` against
+   *  the current repo + group namespace. */
+  workspaceName: string
+  displayName?: string
+  /** The branch name applied to every member repo. Typically equals
+   *  `workspaceName`; allowed to differ so a future composer override can
+   *  separate the two without breaking the create transaction. */
+  branchName: string
+  /** ≥2 members required. Each repoId must appear at most once. All members
+   *  must share the same connection target (all local OR all on the same SSH
+   *  target). */
+  members: CreateGroupMemberSpec[]
+  comment?: string
+  createdByAutomationRunId?: string
+  telemetrySource?: string
+}
+
+export type CreateWorkspaceGroupResult = {
+  group: WorkspaceGroup
+  memberWorktrees: Worktree[]
+}
+
 export type WorktreeBaseStatusKind = 'checking' | 'current' | 'drift' | 'base_changed' | 'unknown'
 
 export type WorktreeBaseStatusEvent = {
