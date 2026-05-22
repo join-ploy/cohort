@@ -676,7 +676,10 @@ export class Store {
   }
 
   getWorkspaceGroups(): WorkspaceGroup[] {
-    return this.state.workspaceGroups
+    // Why: hand callers a fresh array so downstream .sort()/.splice() can't
+    // mutate persisted state without going through scheduleSave. Matches
+    // listAutomations() / getSshTargets() / getRepos() conventions.
+    return [...this.state.workspaceGroups]
   }
 
   /**
