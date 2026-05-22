@@ -22,7 +22,7 @@ export type AutomationRunStatus =
   | 'skipped_unavailable'
   | 'skipped_needs_interactive_auth'
   | 'dispatch_failed'
-export type AutomationRunTrigger = 'scheduled' | 'manual'
+export type AutomationRunTrigger = 'scheduled' | 'manual' | 'auto'
 
 export type AutomationSchedulePreset = 'hourly' | 'daily' | 'weekdays' | 'weekly'
 
@@ -77,6 +77,14 @@ export type AutomationRun = {
   finishedAt?: number
   stepStates?: StepRunState[]
   context?: Record<string, unknown>
+  // Auto-trigger provenance: populated when `trigger === 'auto'` so the UI
+  // and dedup logic can attribute the run to a source/rule/entity. Optional
+  // for backwards compat with scheduled/manual rows.
+  triggerSource?: TriggerSourceId
+  triggerAutoTriggerId?: string
+  triggerRuleId?: string
+  triggerEntityId?: string
+  restartedFromRunId?: string
 }
 
 export type AutomationCreateInput = {

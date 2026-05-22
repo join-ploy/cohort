@@ -1,6 +1,7 @@
 import { describe, it, expect, expectTypeOf } from 'vitest'
 import type {
   Automation,
+  AutomationRun,
   AutoTrigger,
   Rule,
   Condition,
@@ -174,5 +175,32 @@ describe('AutoTrigger shape', () => {
       autoTriggers: [trig]
     }
     expect(a.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+  })
+})
+
+describe('AutomationRun trigger metadata', () => {
+  it('AutomationRun records auto-trigger metadata', () => {
+    const r: AutomationRun = {
+      id: 'r1',
+      automationId: 'a1',
+      title: 't',
+      scheduledFor: 0,
+      status: 'pending',
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at1',
+      triggerRuleId: 'r1',
+      triggerEntityId: 'ORC-123',
+      restartedFromRunId: undefined,
+      workspaceId: null,
+      sessionKind: 'terminal',
+      chatSessionId: null,
+      terminalSessionId: null,
+      error: null,
+      startedAt: null,
+      dispatchedAt: null,
+      createdAt: 0
+    }
+    expect(r.trigger).toBe('auto')
   })
 })
