@@ -12,6 +12,7 @@ import { LinearIcon } from '@/components/icons/LinearIcon'
 import type {
   Automation,
   AutomationRun,
+  AutomationRunStatus,
   CreateWorktreeConfig,
   LinearIssuePayload,
   RunCommandConfig,
@@ -46,9 +47,38 @@ type AutomationDetailProps = {
   onDelete: (automation: Automation) => void
   onCancelRun: (run: AutomationRun) => void
   onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
+  /** Optional restart handler; if omitted, the Restart button is hidden.
+   *  Kept optional so the existing test fixtures (which omit run-action
+   *  callbacks) don't widen into more tc:web errors. */
+  onRestartRun?: (run: AutomationRun) => void
   /** All repos in the workspace; used to label auto-trigger rule projects in
    *  the run header. Optional so legacy call sites keep compiling. */
   repos?: Repo[]
+}
+
+// Why: restart is meaningful only for terminal failure-ish states. `completed`
+// and in-flight statuses (running/pending/dispatching/dispatched) are excluded.
+const RESTARTABLE_STATUSES = new Set<AutomationRunStatus>([
+  'failed',
+  'dispatch_failed',
+  'cancelled',
+  'skipped_missed',
+  'skipped_unavailable',
+  'skipped_needs_interactive_auth'
+])
+
+export function isRestartable(status: AutomationRunStatus): boolean {
+  return RESTARTABLE_STATUSES.has(status)
+}
+
+// Why: run IDs are UUIDs; the first 8 hex chars are enough to disambiguate
+// in the lineage links without bloating the header.
+function shortId(id: string): string {
+  return id.slice(0, 8)
+}
+
+function findRestartChildren(currentRunId: string, allRuns: AutomationRun[]): AutomationRun[] {
+  return allRuns.filter((r) => r.restartedFromRunId === currentRunId)
 }
 
 function describeRunTrigger(run: AutomationRun, automation: Automation, repos: Repo[]): string {
@@ -394,6 +424,7 @@ export function AutomationDetail({
   onDelete,
   onCancelRun,
   onRetryRunFromStep,
+  onRestartRun,
   repos
 }: AutomationDetailProps): React.JSX.Element {
   if (!automation) {
@@ -539,7 +570,7 @@ export function AutomationDetail({
           <div className="text-sm font-medium">Run history</div>
           <div className="text-xs text-muted-foreground">{runs.length} runs</div>
         </div>
-        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
+        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
           <div>Run</div>
           <div>Status</div>
           <div />
@@ -554,8 +585,10 @@ export function AutomationDetail({
             const isInFlight =
               run.status === 'running' || run.status === 'pending' || run.status === 'dispatching'
             const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
+            const restartChildren = findRestartChildren(run.id, runs)
+            const showRestart = isRestartable(run.status) && onRestartRun !== undefined
             const rowClassName =
-              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
+              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
               <>
                 <div className="min-w-0">
@@ -564,6 +597,16 @@ export function AutomationDetail({
                     {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
                     <span className="text-xs text-muted-foreground">{triggerBadge}</span>
                   </div>
+                  {run.restartedFromRunId ? (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      Restarted from #{shortId(run.restartedFromRunId)}
+                    </div>
+                  ) : null}
+                  {restartChildren.length > 0 ? (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      Restarted as {restartChildren.map((c) => `#${shortId(c.id)}`).join(', ')}
+                    </div>
+                  ) : null}
                   {run.error ? (
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
                   ) : null}
@@ -573,7 +616,29 @@ export function AutomationDetail({
                     {getAutomationRunStatusLabel(run.status)}
                   </Badge>
                 </div>
-                <div className="flex justify-end">
+                <div className="flex items-center justify-end gap-1">
+                  {showRestart ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Restart run"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRestartRun?.(run)
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <RotateCcw className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={6}>
+                        Restart run
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   {isInFlight ? (
                     <Tooltip>
                       <TooltipTrigger asChild>

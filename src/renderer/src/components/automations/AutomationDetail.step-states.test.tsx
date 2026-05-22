@@ -1,6 +1,15 @@
+/* oxlint-disable max-lines -- Why: this file covers step-state rendering,
+ * trigger-badge variants, restart-button gating, restart lineage links, and
+ * the isRestartable helper for AutomationDetail. Splitting would force
+ * shared fixtures (chainRun, worktreeMap, mocks) to be duplicated. */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect, vi } from 'vitest'
-import type { Automation, AutomationRun, StepRunState } from '../../../../shared/automations-types'
+import type {
+  Automation,
+  AutomationRun,
+  AutomationRunStatus,
+  StepRunState
+} from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
 
 // Why: AutomationDetail pulls in tooltip + agent-catalog icons. Mock the
@@ -381,5 +390,196 @@ describe('AutomationDetail trigger badge', () => {
       />
     )
     expect(markup).toContain('Auto: Linear issue • Rule deleted')
+  })
+})
+
+function makeRunWithStatus(
+  status: AutomationRunStatus,
+  overrides: Partial<AutomationRun> = {}
+): AutomationRun {
+  return { ...chainRun, ...overrides, status }
+}
+
+describe('AutomationDetail restart button', () => {
+  const restartableStatuses: AutomationRunStatus[] = [
+    'failed',
+    'dispatch_failed',
+    'cancelled',
+    'skipped_missed',
+    'skipped_unavailable',
+    'skipped_needs_interactive_auth'
+  ]
+
+  for (const status of restartableStatuses) {
+    it(`renders Restart run for status "${status}"`, async () => {
+      const { AutomationDetail } = await import('./AutomationDetail')
+      const markup = renderToStaticMarkup(
+        <AutomationDetail
+          automation={baseAutomation}
+          runs={[makeRunWithStatus(status)]}
+          projectName="repo"
+          workspaceName="feature-x"
+          projectDefaultBaseRef={null}
+          worktreeMap={worktreeMap}
+          now={0}
+          onRunNow={noop}
+          onOpenRunWorkspace={noop}
+          onEdit={noop}
+          onToggle={noop}
+          onDelete={noop}
+          onCancelRun={noop}
+          onRetryRunFromStep={noop}
+          onRestartRun={noop}
+        />
+      )
+      expect(markup).toContain('Restart run')
+    })
+  }
+
+  const nonRestartableStatuses: AutomationRunStatus[] = [
+    'completed',
+    'running',
+    'pending',
+    'dispatching',
+    'dispatched'
+  ]
+
+  for (const status of nonRestartableStatuses) {
+    it(`does NOT render Restart run for status "${status}"`, async () => {
+      const { AutomationDetail } = await import('./AutomationDetail')
+      const markup = renderToStaticMarkup(
+        <AutomationDetail
+          automation={baseAutomation}
+          runs={[makeRunWithStatus(status)]}
+          projectName="repo"
+          workspaceName="feature-x"
+          projectDefaultBaseRef={null}
+          worktreeMap={worktreeMap}
+          now={0}
+          onRunNow={noop}
+          onOpenRunWorkspace={noop}
+          onEdit={noop}
+          onToggle={noop}
+          onDelete={noop}
+          onCancelRun={noop}
+          onRetryRunFromStep={noop}
+          onRestartRun={noop}
+        />
+      )
+      expect(markup).not.toContain('Restart run')
+    })
+  }
+
+  it('hides Restart when onRestartRun is omitted', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[makeRunWithStatus('failed')]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).not.toContain('Restart run')
+  })
+})
+
+describe('AutomationDetail restart lineage', () => {
+  it('renders "Restarted from #..." when restartedFromRunId is set', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const child: AutomationRun = {
+      ...chainRun,
+      id: 'r-child-aaaaaaaa',
+      restartedFromRunId: 'r-parent-bbbbbbbb'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[child]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Restarted from #r-parent')
+  })
+
+  it('renders "Restarted as #..." when a sibling has restartedFromRunId pointing at this run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const parent: AutomationRun = { ...chainRun, id: 'r-parent-cccccccc' }
+    const child: AutomationRun = {
+      ...chainRun,
+      id: 'r-child-dddddddd',
+      restartedFromRunId: 'r-parent-cccccccc'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[parent, child]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Restarted as #r-child-')
+  })
+})
+
+describe('isRestartable', () => {
+  it('returns true for all 6 restartable statuses', async () => {
+    const { isRestartable } = await import('./AutomationDetail')
+    const restartable: AutomationRunStatus[] = [
+      'failed',
+      'dispatch_failed',
+      'cancelled',
+      'skipped_missed',
+      'skipped_unavailable',
+      'skipped_needs_interactive_auth'
+    ]
+    for (const status of restartable) {
+      expect(isRestartable(status)).toBe(true)
+    }
+  })
+
+  it('returns false for completed/running/pending/dispatching/dispatched', async () => {
+    const { isRestartable } = await import('./AutomationDetail')
+    const nonRestartable: AutomationRunStatus[] = [
+      'completed',
+      'running',
+      'pending',
+      'dispatching',
+      'dispatched'
+    ]
+    for (const status of nonRestartable) {
+      expect(isRestartable(status)).toBe(false)
+    }
   })
 })

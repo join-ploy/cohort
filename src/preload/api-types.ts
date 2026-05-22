@@ -1331,6 +1331,7 @@ export type PreloadApi = {
     runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
     cancelRun: (args: { runId: string }) => Promise<AutomationRun | null>
     retryRunFromStep: (args: { runId: string; stepIndex: number }) => Promise<AutomationRun | null>
+    restartRun: (args: { runId: string }) => Promise<AutomationRun>
     listAutoDedup: (args?: {
       automationId?: string
       autoTriggerId?: string

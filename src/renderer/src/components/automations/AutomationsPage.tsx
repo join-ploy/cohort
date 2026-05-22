@@ -327,6 +327,19 @@ export default function AutomationsPage(): React.JSX.Element {
     }
   }
 
+  // Why: restartRun clones the failed/cancelled run into a new pending row.
+  // The 'automations:changed' broadcast refreshes the UI via onChanged, but we
+  // also call refresh() here to cover same-tick test/dev environments without
+  // a live broadcast.
+  const restartRun = async (run: AutomationRun): Promise<void> => {
+    try {
+      await window.api.automations.restartRun({ runId: run.id })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to restart run.')
+    }
+  }
+
   return (
     <main className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
       <header className="flex shrink-0 items-center justify-between px-5 pb-3 pt-1.5 md:px-8">
@@ -604,6 +617,7 @@ export default function AutomationsPage(): React.JSX.Element {
             onDelete={requestDeleteAutomation}
             onCancelRun={(run) => void cancelRun(run)}
             onRetryRunFromStep={(run, stepIndex) => void retryRunFromStep(run, stepIndex)}
+            onRestartRun={(run) => void restartRun(run)}
             repos={repos}
           />
         </section>
