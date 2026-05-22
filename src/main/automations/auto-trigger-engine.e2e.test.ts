@@ -208,4 +208,17 @@ describe('AutoTriggerEngine end-to-end (real service + store, fake source)', () 
     await engine.tick()
     expect(store.listAutomationRuns(automationId)).toHaveLength(0)
   })
+
+  it('two concurrent ticks racing on the same entity insert exactly one run (mutex)', async () => {
+    const { store, engine, automationId, autoTriggerId } = await setup({
+      events: [makeEvent()]
+    })
+    // Why: per Phase 5 the engine's `ticking` flag makes the second `tick()`
+    // return immediately while the first is still running. This verifies the
+    // mutex holds when both calls share a real store and service rather than
+    // exercising parallel-dispatch races.
+    await Promise.all([engine.tick(), engine.tick()])
+    expect(store.listAutomationRuns(automationId)).toHaveLength(1)
+    expect(store.listAutomationAutoDedup(automationId, autoTriggerId)).toHaveLength(1)
+  })
 })
