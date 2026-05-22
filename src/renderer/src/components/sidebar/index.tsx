@@ -152,11 +152,13 @@ function Sidebar(): React.JSX.Element {
             registerNavigateWorktree={registerNavigateWorktree}
             setActiveDescendantId={setActiveDescendantId}
           />
-
-          {/* Why: archived rows now scroll with the rest of the list instead
-              of sitting between the scrolling pane and the toolbar. */}
-          <ArchivedSection />
         </div>
+
+        {/* Why: pinned between the scroll viewport and the toolbar so the
+            Archived disclosure stays at a stable position regardless of how
+            many worktrees the user has. Self-hides (returns null) when no
+            archived entries exist. */}
+        <ArchivedSection />
 
         {/* Fixed bottom toolbar */}
         <SidebarToolbar />
