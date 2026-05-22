@@ -1,33 +1,58 @@
 import * as React from 'react'
-import type { TriggerConfig } from '../../../../../shared/automations-types'
+import type {
+  TriggerConfig,
+  AutoTrigger,
+  TriggerSourceId
+} from '../../../../../shared/automations-types'
 
 export type TriggerPillProps = {
   trigger: TriggerConfig
   onTriggerChange: (trigger: TriggerConfig) => void
+  autoTriggers?: AutoTrigger[]
+}
+
+// Why: per-source short label keeps adding future sources to a single line.
+const SOURCE_LABEL: Record<TriggerSourceId, string> = {
+  'linear-issue': 'Linear auto'
+}
+
+function sourceLabelFor(source: TriggerSourceId): string {
+  return SOURCE_LABEL[source] ?? 'auto'
 }
 
 // Why: shadcn Popover renders via Radix Portal which doesn't show up in
 // renderToStaticMarkup-based tests. We render the popover content as a
 // conditional inline <div> so the trigger pill is testable end-to-end without
 // an extra jsdom harness — same pattern as AddStepControl in the modal.
-export function triggerLabel(trigger: TriggerConfig): string {
+export function triggerLabel(trigger: TriggerConfig, autoTriggers?: AutoTrigger[]): string {
   const l = trigger.acceptsLinearTicket === true
   const p = trigger.acceptsProjectSelection === true
+  let label: string
   if (l && p) {
-    return 'Manual (2 prompts)'
+    label = 'Manual (2 prompts)'
+  } else if (l) {
+    label = 'Manual + Linear'
+  } else if (p) {
+    label = 'Manual + Project'
+  } else {
+    label = 'Manual'
   }
-  if (l) {
-    return 'Manual + Linear'
+
+  // Why: only enabled auto-triggers count toward the summary so the pill
+  // matches what the runner will actually fire.
+  const enabled = (autoTriggers ?? []).filter((t) => t.enabled)
+  if (enabled.length === 0) {
+    return label
   }
-  if (p) {
-    return 'Manual + Project'
+  if (enabled.length === 1) {
+    return `${label} + ${sourceLabelFor(enabled[0].source)}`
   }
-  return 'Manual'
+  return `${label} + ${enabled.length} auto triggers`
 }
 
 export function TriggerPill(props: TriggerPillProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
-  const label = triggerLabel(props.trigger)
+  const label = triggerLabel(props.trigger, props.autoTriggers)
   const linearOn = props.trigger.acceptsLinearTicket === true
   const projectOn = props.trigger.acceptsProjectSelection === true
 
