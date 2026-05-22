@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { FolderOpen, MessageSquare, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
+import { FolderOpen, LoaderCircle, MessageSquare, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
 import { runGroupArchive } from './archive-group-flow'
 
 export type GroupCardProps = {
@@ -40,6 +40,7 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
   const members = useAppStore(useShallow((s) => getMemberWorktreesForGroup(s, group.id)))
   const repoMap = useAppStore((s) => getRepoMapFromState(s))
   const prCache = useAppStore((s) => s.prCache)
+  const isArchiving = useAppStore((s) => s.archivingGroupIds.has(group.id))
 
   // Why: runningWorktreeIds is not a first-class store field yet; derive it
   // from scriptsByWorktree on the fly. Mirrors how WorktreeCard reads its own
@@ -129,24 +130,44 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
         'group relative flex flex-col gap-1.5 px-2 py-2 cursor-pointer transition-all duration-200 outline-none select-none ml-1 rounded-lg',
         isActive
           ? 'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] border border-black/[0.015] dark:bg-white/[0.10] dark:border-border/40 dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
-          : 'border border-transparent hover:bg-sidebar-accent/40'
+          : 'border border-transparent hover:bg-sidebar-accent/40',
+        isArchiving && 'opacity-50 grayscale cursor-not-allowed'
       )}
-      onClick={handleClick}
-      onDoubleClick={handleRename}
+      onClick={isArchiving ? undefined : handleClick}
+      onDoubleClick={isArchiving ? undefined : handleRename}
       onContextMenu={(e) => {
         e.preventDefault()
+        if (isArchiving) {
+          return
+        }
         const bounds = e.currentTarget.getBoundingClientRect()
         setMenuPoint({ x: e.clientX - bounds.left, y: e.clientY - bounds.top })
         setMenuOpen(true)
       }}
       onKeyDown={(e) => {
+        if (isArchiving) {
+          return
+        }
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           handleClick()
         }
       }}
+      aria-busy={isArchiving}
       data-testid="group-card"
     >
+      {/* Why: matches the dim-overlay-with-spinner pattern WorktreeCard uses
+          for its force-delete in-flight state. Group archive runs cleanup
+          scripts in parallel across every member which can take real seconds,
+          so the user needs visible feedback that the action is still going. */}
+      {isArchiving && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/50 backdrop-blur-[1px]">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-[11px] font-medium text-foreground shadow-sm border border-border/50">
+            <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
+            Archiving…
+          </div>
+        </div>
+      )}
       {/* Header row: optional running dot + group displayName */}
       <div className="flex items-center gap-1.5 min-w-0">
         {isRunning && (

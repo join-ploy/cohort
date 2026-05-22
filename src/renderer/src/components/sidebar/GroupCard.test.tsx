@@ -14,6 +14,7 @@ type StoreState = {
   workspaceGroups: WorkspaceGroup[]
   prCache: Record<string, CacheEntry<PRInfo>>
   scriptsByWorktree: Record<string, WorktreeScriptsEntry>
+  archivingGroupIds: ReadonlySet<string>
   setActiveWorktree: ReturnType<typeof vi.fn>
   openModal: ReturnType<typeof vi.fn>
   updateWorkspaceGroup: ReturnType<typeof vi.fn>
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => {
       workspaceGroups: [],
       prCache: {},
       scriptsByWorktree: {},
+      archivingGroupIds: new Set<string>(),
       setActiveWorktree: vi.fn(),
       openModal: vi.fn(),
       updateWorkspaceGroup: vi.fn().mockResolvedValue(undefined)

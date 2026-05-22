@@ -14,6 +14,11 @@ export type UpdateWorkspaceGroupPartial = {
 
 export type WorkspaceGroupsSlice = {
   workspaceGroups: WorkspaceGroup[]
+  /** Transient set of groupIds whose archive IPC is in flight. The GroupCard
+   *  reads this to render a dim overlay + spinner — group archive runs cleanup
+   *  scripts in parallel per member and can take real seconds, so the user
+   *  needs visible feedback that the action is still in progress. */
+  archivingGroupIds: ReadonlySet<string>
   fetchWorkspaceGroups: () => Promise<void>
   setWorkspaceGroups: (groups: WorkspaceGroup[]) => void
   upsertWorkspaceGroup: (group: WorkspaceGroup) => void
@@ -30,6 +35,7 @@ export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], Workspac
   set
 ) => ({
   workspaceGroups: [],
+  archivingGroupIds: new Set<string>(),
 
   fetchWorkspaceGroups: async () => {
     try {
@@ -63,6 +69,14 @@ export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], Workspac
   // persists the per-member error string — refetch so the visible card shows
   // the latest archiveCleanupError before we re-throw to the caller.
   archiveGroup: async (groupId) => {
+    // Why: stamp the in-flight id immediately so the GroupCard overlay paints
+    // on the same React tick the user clicked Archive. Cleared in finally so
+    // both success and failure paths reset the visual state.
+    set((s) => {
+      const next = new Set(s.archivingGroupIds)
+      next.add(groupId)
+      return { archivingGroupIds: next }
+    })
     try {
       const updated = await window.api.workspaceGroups.archive({ groupId })
       set((s) => ({
@@ -80,6 +94,15 @@ export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], Workspac
         console.error('Failed to refresh workspace groups after archive error:', refreshErr)
       }
       throw err
+    } finally {
+      set((s) => {
+        if (!s.archivingGroupIds.has(groupId)) {
+          return {}
+        }
+        const next = new Set(s.archivingGroupIds)
+        next.delete(groupId)
+        return { archivingGroupIds: next }
+      })
     }
   },
 
