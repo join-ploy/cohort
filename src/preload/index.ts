@@ -100,6 +100,7 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
+  AutoDedupEntry,
   RunNowPayload
 } from '../shared/automations-types'
 import {
@@ -2470,6 +2471,15 @@ const api = {
       ipcRenderer.invoke('automations:retryRunFromStep', args),
     restartRun: (args: { runId: string }): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:restartRun', args),
+    listAutoDedup: (args?: {
+      automationId?: string
+      autoTriggerId?: string
+    }): Promise<AutoDedupEntry[]> => ipcRenderer.invoke('automations:listAutoDedup', args),
+    clearAutoDedup: (args: {
+      automationId: string
+      autoTriggerId: string
+      entityId?: string
+    }): Promise<void> => ipcRenderer.invoke('automations:clearAutoDedup', args),
     markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:markDispatchResult', result),
     rendererReady: (): Promise<void> => ipcRenderer.invoke('automations:rendererReady'),
