@@ -1,4 +1,5 @@
-import type { Condition } from '../../shared/automations-types'
+import type { Condition, Rule } from '../../shared/automations-types'
+import type { CandidateEvent } from './trigger-sources/types'
 
 export function evalCondition(condition: Condition, actual: unknown): boolean {
   const { op, value } = condition
@@ -36,4 +37,12 @@ export function evalCondition(condition: Condition, actual: unknown): boolean {
     case 'eq':
       return actual === value
   }
+}
+
+export function evaluateRule(rule: Rule, event: CandidateEvent): boolean {
+  return rule.conditions.every((c) => evalCondition(c, event.fields[c.field]))
+}
+
+export function firstMatch(rules: Rule[], event: CandidateEvent): Rule | undefined {
+  return rules.find((r) => evaluateRule(r, event))
 }

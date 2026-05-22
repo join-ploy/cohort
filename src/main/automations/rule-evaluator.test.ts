@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { evalCondition } from './rule-evaluator'
-import type { Condition } from '../../shared/automations-types'
+import { evalCondition, evaluateRule, firstMatch } from './rule-evaluator'
+import type { Condition, Rule } from '../../shared/automations-types'
+import type { CandidateEvent } from './trigger-sources/types'
 
 const C = (op: Condition['op'], value: Condition['value']): Condition => ({
   field: 'x',
@@ -79,5 +80,52 @@ describe('evalCondition', () => {
     expect(evalCondition(C('gte', 2), null)).toBe(false)
     expect(evalCondition(C('gte', 2), undefined)).toBe(false)
     expect(evalCondition(C('lte', 2), '1')).toBe(false)
+  })
+})
+
+const makeEvent = (fields: Record<string, unknown>): CandidateEvent => ({
+  entityId: 'e',
+  updatedAt: 0,
+  payload: {},
+  fields
+})
+
+describe('evaluateRule', () => {
+  it('AND across all conditions', () => {
+    const r: Rule = {
+      id: 'r',
+      projectId: 'p',
+      conditions: [
+        { field: 'a', op: 'is', value: 1 },
+        { field: 'b', op: 'is', value: 2 }
+      ]
+    }
+    expect(evaluateRule(r, makeEvent({ a: 1, b: 2 }))).toBe(true)
+    expect(evaluateRule(r, makeEvent({ a: 1, b: 3 }))).toBe(false)
+    expect(evaluateRule(r, makeEvent({ a: 1 }))).toBe(false)
+  })
+
+  it('empty conditions always match', () => {
+    const r: Rule = { id: 'r', projectId: 'p', conditions: [] }
+    expect(evaluateRule(r, makeEvent({}))).toBe(true)
+  })
+})
+
+describe('firstMatch', () => {
+  it('returns the first matching rule (order matters)', () => {
+    const rules: Rule[] = [
+      { id: 'r1', projectId: 'p1', conditions: [{ field: 'a', op: 'is', value: 2 }] },
+      { id: 'r2', projectId: 'p2', conditions: [{ field: 'a', op: 'is', value: 1 }] },
+      { id: 'r3', projectId: 'p3', conditions: [{ field: 'a', op: 'is', value: 1 }] }
+    ]
+    expect(firstMatch(rules, makeEvent({ a: 1 }))?.id).toBe('r2')
+  })
+
+  it('returns undefined when no rule matches', () => {
+    expect(firstMatch([], makeEvent({}))).toBeUndefined()
+    const rules: Rule[] = [
+      { id: 'r1', projectId: 'p1', conditions: [{ field: 'a', op: 'is', value: 2 }] }
+    ]
+    expect(firstMatch(rules, makeEvent({ a: 1 }))).toBeUndefined()
   })
 })
