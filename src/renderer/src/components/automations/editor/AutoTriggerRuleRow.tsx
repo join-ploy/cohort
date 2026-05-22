@@ -7,7 +7,7 @@ import type {
   Rule,
   SerializableFieldDescriptor
 } from '../../../../../shared/automations-types'
-import { ConditionRow } from './ConditionRow'
+import { ConditionRow, type LoadOptionsFn } from './ConditionRow'
 
 export type AutoTriggerRuleRowProps = {
   rule: Rule
@@ -15,7 +15,7 @@ export type AutoTriggerRuleRowProps = {
   total: number
   projects: { id: string; displayName: string }[]
   fieldCatalog: SerializableFieldDescriptor[]
-  loadOptions: (field: string) => Promise<{ value: string; label: string }[]>
+  loadOptions: LoadOptionsFn
   onProjectChange: (projectId: string) => void
   onMoveUp: () => void
   onMoveDown: () => void

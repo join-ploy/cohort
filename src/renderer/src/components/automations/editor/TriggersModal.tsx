@@ -67,25 +67,32 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
   // Why: per-(sourceId, field) option cache. The first ConditionRow mount for a
   // field hits IPC; subsequent renders reuse the cached array. Cleared whenever
   // the modal closes (the effect above re-runs on open and seeds fresh sources;
-  // the cache lives only as long as the component instance).
+  // the cache lives only as long as the component instance). Passing
+  // { force: true } bypasses the cache so newly-added Linear tags/labels show
+  // up when the dropdown reopens.
   const [optionsCache, setOptionsCache] = React.useState<
     Map<string, { value: string; label: string }[]>
   >(new Map())
   const loadOptionsFor = React.useCallback(
     (sourceId: TriggerSourceId) =>
-      async (field: string): Promise<{ value: string; label: string }[]> => {
+      async (
+        field: string,
+        opts?: { force?: boolean }
+      ): Promise<{ value: string; label: string }[]> => {
         const cacheKey = `${sourceId}|${field}`
-        const cached = optionsCache.get(cacheKey)
-        if (cached) {
-          return cached
+        if (!opts?.force) {
+          const cached = optionsCache.get(cacheKey)
+          if (cached) {
+            return cached
+          }
         }
-        const opts = await window.api.triggerSources.fetchOptions({ sourceId, field })
+        const fresh = await window.api.triggerSources.fetchOptions({ sourceId, field })
         setOptionsCache((m) => {
           const next = new Map(m)
-          next.set(cacheKey, opts)
+          next.set(cacheKey, fresh)
           return next
         })
-        return opts
+        return fresh
       },
     [optionsCache]
   )

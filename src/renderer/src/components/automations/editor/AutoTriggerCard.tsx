@@ -12,6 +12,7 @@ import type {
   TriggerSourceId
 } from '../../../../../shared/automations-types'
 import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
+import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
 
 export type AutoTriggerCardProps = {
@@ -28,7 +29,7 @@ export type AutoTriggerCardProps = {
   fieldCatalog: SerializableFieldDescriptor[]
   /** Closure bound to this trigger's source by the parent so ConditionRow can
    *  fetch option lists without knowing about source ids. */
-  loadOptions: (field: string) => Promise<{ value: string; label: string }[]>
+  loadOptions: LoadOptionsFn
 }
 
 // Why: per-source human label + icon. Long form (vs. TriggerPill's chip) since
