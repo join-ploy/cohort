@@ -317,7 +317,11 @@ describe('AutomationService.dispatchAutoRun', () => {
     expect(trigCtx.linear?.issue.identifier).toBe('ORC-1')
   })
 
-  it('omits trigger.linear when the event payload has no issue field', async () => {
+  it('throws when a linear-issue event has no payload.issue, persists no run', async () => {
+    // Why: a linear-issue event without payload.issue is malformed; tolerating
+    // it silently created a run with no trigger context that would fail later
+    // at template-eval time. Fail fast at dispatch so the engine's per-event
+    // catch logs it and the only artifact is the (clearable) dedup row.
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'p1' }))
     const automation = store.createAutomation({
@@ -336,16 +340,15 @@ describe('AutomationService.dispatchAutoRun', () => {
 
     const service = new AutomationService(store, { tickMs: 60_000 })
     const rule: Rule = { id: 'rl1', projectId: 'p1', conditions: [] }
-    await service.dispatchAutoRun({
-      automation: stored,
-      trigger,
-      rule,
-      event: makeEvent({ payload: {} })
-    })
+    await expect(
+      service.dispatchAutoRun({
+        automation: stored,
+        trigger,
+        rule,
+        event: makeEvent({ payload: {} })
+      })
+    ).rejects.toThrow(/missing payload\.issue/)
 
-    const [run] = store.listAutomationRuns(automation.id)
-    const trigCtx = run.context?.trigger as Record<string, unknown>
-    expect(trigCtx).toBeDefined()
-    expect(trigCtx.linear).toBeUndefined()
+    expect(store.listAutomationRuns(automation.id)).toHaveLength(0)
   })
 })

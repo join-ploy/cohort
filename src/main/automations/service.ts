@@ -390,19 +390,29 @@ export class AutomationService {
     trigger: AutoTrigger
     rule: Rule
     event: CandidateEvent
-  }): Promise<void> {
+  }): Promise<AutomationRun> {
     const { automation, trigger, rule, event } = args
-    // Why: Linear source emits the LinearIssuePayload-shaped object under
-    // `payload.issue`; reuse it verbatim so downstream templates resolve the
-    // same `{{trigger.linear.issue.*}}` paths manual runs already use. Other
-    // sources (none yet) would omit `issue` and the run's trigger context
-    // simply won't have a `linear` field.
-    const linearPayload = (event.payload as { issue?: LinearIssuePayload }).issue
-    const runPayload: RunNowPayload = {
-      projectId: rule.projectId,
-      ...(linearPayload ? { linear: { issue: linearPayload } } : {})
+    let runPayload: RunNowPayload
+    if (trigger.source === 'linear-issue') {
+      // Why: a linear-issue source ALWAYS populates payload.issue; a missing
+      // one is a malformed event. Refuse to dispatch so the engine's per-event
+      // catch logs the error — the dedup row already written is the only
+      // artifact, and the operator can clear it from the dedup-management UI
+      // rather than chasing a phantom run with no trigger context.
+      const linearPayload = (event.payload as { issue?: LinearIssuePayload }).issue
+      if (!linearPayload) {
+        throw new Error(
+          `dispatchAutoRun: linear-issue event missing payload.issue (entityId=${event.entityId})`
+        )
+      }
+      runPayload = {
+        projectId: rule.projectId,
+        linear: { issue: linearPayload }
+      }
+    } else {
+      runPayload = { projectId: rule.projectId }
     }
-    await this.dispatchRun({
+    return this.dispatchRun({
       automation,
       payload: runPayload,
       triggerOverrides: {
