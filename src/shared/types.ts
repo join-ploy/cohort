@@ -1481,6 +1481,11 @@ export type GlobalSettings = {
    *  configuration surface and edge cases (conflicts with existing paths,
    *  cleanup on worktree delete) are still being worked out. */
   experimentalWorktreeSymlinks: boolean
+  /** Experimental: render the Groups section above repo headers in the
+   *  sidebar. Off by default while the grouped-workspaces UX is still under
+   *  active development; the section's data layer (workspace groups,
+   *  aggregation) is always available, the flag only gates the call site. */
+  experimentalGroupedWorkspaces: boolean
   /** Right-sidebar Review dropdown entries. Each entry pairs a CLI command
    *  (e.g. "claude", "codex") with a markdown prompt; clicking writes the
    *  prompt to ~/.orca/prompts/<label>.md and opens a new central terminal

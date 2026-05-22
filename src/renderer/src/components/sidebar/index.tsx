@@ -13,6 +13,7 @@ import RemoveFolderDialog from './RemoveFolderDialog'
 import AddRepoDialog from './AddRepoDialog'
 import OrcaYamlTrustDialog from './OrcaYamlTrustDialog'
 import { ArchivedSection } from './ArchivedSection'
+import { GroupsSection } from './GroupsSection'
 
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
@@ -23,6 +24,13 @@ function Sidebar(): React.JSX.Element {
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth)
   const repos = useAppStore((s) => s.repos)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
+  // Why: gate the experimental Groups sidebar section. GroupsSection itself
+  // returns null when there are no visible groups, so the flag is the only
+  // condition needed at the call site. Optional chain mirrors other sidebar
+  // settings reads — settings can be null during the initial bootstrap.
+  const groupedWorkspacesEnabled = useAppStore(
+    (s) => s.settings?.experimentalGroupedWorkspaces === true
+  )
 
   // Fetch worktrees when repos are added/removed
   const repoCount = repos.length
@@ -54,6 +62,8 @@ function Sidebar(): React.JSX.Element {
         {/* Fixed controls */}
         <SidebarNav />
         <SidebarHeader />
+
+        {groupedWorkspacesEnabled ? <GroupsSection /> : null}
 
         <WorktreeList />
 
