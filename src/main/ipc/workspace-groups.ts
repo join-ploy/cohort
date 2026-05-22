@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs'
+import { mkdirSync, rmSync } from 'fs'
 import { basename } from 'path'
 import { randomUUID } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
@@ -8,12 +8,14 @@ import type {
   CreateWorkspaceGroupArgs,
   CreateWorkspaceGroupResult,
   CreateWorktreeArgs,
+  CreateWorktreeResult,
   Repo,
   WorkspaceGroup,
   Worktree
 } from '../../shared/types'
 import { memberWorktreePath, resolveGroupParentPath } from '../../shared/workspace-group-paths'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { runWorktreeRemoval } from '../worktree-removal/run-worktree-removal'
 import { createLocalWorktree, createRemoteWorktree } from './worktree-remote'
 
 // Why: repo folders are derived from the on-disk basename (stripped of the
@@ -99,8 +101,60 @@ export function registerWorkspaceGroupHandlers(
           : createLocalWorktree(createArgs, repo, store, mainWindow, runtime)
       })
 
-      const results = await Promise.all(memberCreatePromises)
-      const memberWorktrees: Worktree[] = results.map((result) => result.worktree)
+      // Why (C5/C6): use allSettled instead of all so a single member failure
+      // doesn't leak orphan worktrees + persisted WorktreeMeta from the members
+      // that already succeeded. We need every outcome to decide what to roll
+      // back from disk and the store.
+      const settled = await Promise.allSettled(memberCreatePromises)
+      const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+      const successes = settled.filter(
+        (r): r is PromiseFulfilledResult<CreateWorktreeResult> => r.status === 'fulfilled'
+      )
+
+      if (failures.length > 0) {
+        // Roll back each successful member via the shared per-worktree removal
+        // helper — it handles `git worktree remove --force`, optimistic-token
+        // clear, WorktreeMeta deletion, and history dir cleanup in one shot,
+        // and is tolerant of an already-gone directory (orphan fallback).
+        for (const success of successes) {
+          const worktree = success.value.worktree
+          try {
+            await runWorktreeRemoval(
+              { worktreeId: worktree.id, force: true, skipArchive: true },
+              { store, runtime, mainWindow }
+            )
+          } catch (cleanupError) {
+            // Why: don't let a cleanup failure mask the original create error —
+            // the user needs to see why the group create rejected, not why
+            // a cleanup step further down the chain blew up. Log loudly so the
+            // operator can still find any leftover state.
+            console.warn(
+              `[workspace-groups] rollback failed to remove worktree ${worktree.id}:`,
+              cleanupError
+            )
+          }
+        }
+        try {
+          rmSync(parentPath, { recursive: true, force: true })
+        } catch (cleanupError) {
+          console.warn(
+            `[workspace-groups] rollback failed to remove parent folder ${parentPath}:`,
+            cleanupError
+          )
+        }
+
+        const firstFailure = failures[0]
+        const failedMemberIndex = settled.indexOf(firstFailure)
+        const failedRepo = repos[failedMemberIndex]
+        const cause = firstFailure.reason
+        const causeMessage = cause instanceof Error ? cause.message : String(cause)
+        throw new Error(
+          `Failed to create workspace group "${args.workspaceName}": ` +
+            `member "${failedRepo?.id ?? 'unknown'}" failed — ${causeMessage}`
+        )
+      }
+
+      const memberWorktrees: Worktree[] = successes.map((result) => result.value.worktree)
 
       const groupId = `group:${randomUUID()}`
       const now = Date.now()

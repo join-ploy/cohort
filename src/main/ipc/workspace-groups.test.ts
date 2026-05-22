@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { handleMock, removeHandlerMock, mkdirSyncMock } = vi.hoisted(() => ({
-  handleMock: vi.fn(),
-  removeHandlerMock: vi.fn(),
-  mkdirSyncMock: vi.fn()
-}))
+const { handleMock, removeHandlerMock, mkdirSyncMock, rmSyncMock, runWorktreeRemovalMock } =
+  vi.hoisted(() => ({
+    handleMock: vi.fn(),
+    removeHandlerMock: vi.fn(),
+    mkdirSyncMock: vi.fn(),
+    rmSyncMock: vi.fn(),
+    runWorktreeRemovalMock: vi.fn()
+  }))
 
 vi.mock('electron', () => ({
   ipcMain: {
@@ -14,12 +17,17 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('fs', () => ({
-  mkdirSync: mkdirSyncMock
+  mkdirSync: mkdirSyncMock,
+  rmSync: rmSyncMock
 }))
 
 vi.mock('./worktree-remote', () => ({
   createLocalWorktree: vi.fn(),
   createRemoteWorktree: vi.fn()
+}))
+
+vi.mock('../worktree-removal/run-worktree-removal', () => ({
+  runWorktreeRemoval: runWorktreeRemovalMock
 }))
 
 import { createLocalWorktree, createRemoteWorktree } from './worktree-remote'
@@ -92,6 +100,9 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
     handleMock.mockReset()
     removeHandlerMock.mockReset()
     mkdirSyncMock.mockReset()
+    rmSyncMock.mockReset()
+    runWorktreeRemovalMock.mockReset()
+    runWorktreeRemovalMock.mockResolvedValue(undefined)
     store.getRepo.mockReset()
     store.getSettings.mockReset()
     store.setWorktreeMeta.mockReset()
@@ -189,6 +200,59 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
     // Parent folder created once, recursive.
     expect(mkdirSyncMock).toHaveBeenCalledWith('/workspace/daring_tiger', {
       recursive: true
+    })
+  })
+
+  it('rolls back the parent folder and any successful members when a member create fails', async () => {
+    const repoA = buildRepo('repo-a', '/workspace/repo-a')
+    const repoB = buildRepo('repo-b', '/workspace/repo-b')
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoA : repoB))
+
+    const worktreeA = buildWorktree('repo-a', '/workspace/daring_tiger/repo-a', 'daring_tiger')
+    const failure = new Error('boom: clone refused for repo-b')
+    vi.mocked(createLocalWorktree).mockImplementation(async (args) => {
+      if (args.repoId === 'repo-a') {
+        return { worktree: worktreeA }
+      }
+      throw failure
+    })
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+    expect(handler).toBeDefined()
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'daring_tiger',
+          branchName: 'daring_tiger',
+          members: [
+            { repoId: 'repo-a', baseRef: 'origin/main', setupDecision: 'inherit' },
+            { repoId: 'repo-b', baseRef: null, setupDecision: 'skip' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/repo-b|boom: clone refused/)
+
+    // Group must NOT be persisted on partial failure.
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    // No groupId stamping on member meta either — that runs after the group write.
+    expect(store.setWorktreeMeta).not.toHaveBeenCalled()
+
+    // The successfully-created member-1 worktree must be cleaned up via the
+    // shared per-worktree removal primitive (which handles git worktree remove
+    // + WorktreeMeta deletion).
+    expect(runWorktreeRemovalMock).toHaveBeenCalledTimes(1)
+    expect(runWorktreeRemovalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ worktreeId: worktreeA.id, force: true }),
+      expect.objectContaining({ store, runtime, mainWindow })
+    )
+
+    // Parent group folder removed recursively after member cleanup.
+    expect(rmSyncMock).toHaveBeenCalledWith('/workspace/daring_tiger', {
+      recursive: true,
+      force: true
     })
   })
 })
