@@ -204,6 +204,19 @@ export type AutoTrigger = {
   rules: Rule[]
 }
 
+// Persisted dedup record so a given (automation, autoTrigger, entity) only
+// fires a run once across app restarts. Keyed on the tuple in `Store` ops.
+export type AutoDedupEntry = {
+  automationId: string
+  autoTriggerId: string
+  sourceId: TriggerSourceId
+  entityId: string
+  /** Optional human-readable id (e.g. 'ORC-123') for the dedup-management UI. */
+  entityIdentifier?: string
+  firedAt: number
+  lastRunId?: string
+}
+
 export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
 
 export type RunPromptConfig = {

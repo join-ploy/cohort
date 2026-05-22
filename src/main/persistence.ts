@@ -8,6 +8,7 @@ import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import type {
+  AutoDedupEntry,
   Automation,
   AutomationCreateInput,
   AutomationDispatchResult,
@@ -422,6 +423,9 @@ export class Store {
             ? parsed.automations.map(upgradeLegacyAutomation)
             : [],
           automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
+          automationAutoDedup: Array.isArray(parsed.automationAutoDedup)
+            ? parsed.automationAutoDedup
+            : [],
           onboarding: (() => {
             // Why: if we successfully parsed an existing orca-data.json that
             // lacks an onboarding block, this is an upgrade-cohort user —
@@ -1024,6 +1028,67 @@ export class Store {
 
   getLatestAutomationOccurrence(automation: Automation, now = Date.now()): number | null {
     return latestAutomationOccurrenceAtOrBefore(automation.rrule, automation.dtstart, now)
+  }
+
+  // ── Auto-trigger dedup + poll interval ─────────────────────────────
+
+  listAutomationAutoDedup(automationId?: string, autoTriggerId?: string): AutoDedupEntry[] {
+    const all = this.state.automationAutoDedup ?? []
+    return all.filter(
+      (e) =>
+        (automationId == null || e.automationId === automationId) &&
+        (autoTriggerId == null || e.autoTriggerId === autoTriggerId)
+    )
+  }
+
+  hasAutomationAutoDedup(automationId: string, autoTriggerId: string, entityId: string): boolean {
+    return (this.state.automationAutoDedup ?? []).some(
+      (e) =>
+        e.automationId === automationId &&
+        e.autoTriggerId === autoTriggerId &&
+        e.entityId === entityId
+    )
+  }
+
+  insertAutomationAutoDedup(entry: AutoDedupEntry): void {
+    // Why: keep the table append-only and idempotent on its natural key so a
+    // double-fire from the poller can't create a duplicate row.
+    if (this.hasAutomationAutoDedup(entry.automationId, entry.autoTriggerId, entry.entityId)) {
+      return
+    }
+    this.state.automationAutoDedup = [...(this.state.automationAutoDedup ?? []), entry]
+    this.flush()
+  }
+
+  clearAutomationAutoDedup(automationId: string, autoTriggerId: string, entityId?: string): void {
+    this.state.automationAutoDedup = (this.state.automationAutoDedup ?? []).filter((e) => {
+      if (e.automationId !== automationId) {
+        return true
+      }
+      if (e.autoTriggerId !== autoTriggerId) {
+        return true
+      }
+      if (entityId == null) {
+        return false
+      }
+      return e.entityId !== entityId
+    })
+    this.flush()
+  }
+
+  getAutomationsPollIntervalSeconds(): number {
+    // Why: clamp on read so a corrupt persisted value (e.g. 0 or negative)
+    // can't starve the poller or hammer rate limits.
+    const v = this.state.settings.automationsPollIntervalSeconds ?? 60
+    return Math.max(15, Math.min(600, v))
+  }
+
+  setAutomationsPollIntervalSeconds(value: number): void {
+    this.state.settings = {
+      ...this.state.settings,
+      automationsPollIntervalSeconds: Math.max(15, Math.min(600, value))
+    }
+    this.flush()
   }
 
   // ── Worktree Meta ──────────────────────────────────────────────────

@@ -2121,4 +2121,79 @@ describe('Store', () => {
       existedBeforeTelemetryRelease: false
     })
   })
+
+  // ── automationAutoDedup + automations poll interval ────────────────
+
+  it('initializes automationAutoDedup as empty array and poll interval at 60', async () => {
+    const store = await createStore()
+    expect(store.listAutomationAutoDedup()).toEqual([])
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
+  it('inserts, lists, and clears dedup entries by automationId/autoTriggerId/entityId', async () => {
+    const store = await createStore()
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 1
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-2',
+      firedAt: 2
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a2',
+      autoTriggerId: 'at2',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-3',
+      firedAt: 3
+    })
+    expect(store.listAutomationAutoDedup().length).toBe(3)
+    expect(store.listAutomationAutoDedup('a1').length).toBe(2)
+    expect(store.listAutomationAutoDedup('a1', 'at1').length).toBe(2)
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'ORC-1')).toBe(true)
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'MISSING')).toBe(false)
+
+    store.clearAutomationAutoDedup('a1', 'at1', 'ORC-1')
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'ORC-1')).toBe(false)
+    expect(store.listAutomationAutoDedup('a1').length).toBe(1)
+
+    store.clearAutomationAutoDedup('a1', 'at1')
+    expect(store.listAutomationAutoDedup('a1').length).toBe(0)
+    expect(store.listAutomationAutoDedup().length).toBe(1)
+  })
+
+  it('insertAutomationAutoDedup is idempotent on (automationId, autoTriggerId, entityId)', async () => {
+    const store = await createStore()
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 1
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 999
+    })
+    expect(store.listAutomationAutoDedup().length).toBe(1)
+  })
+
+  it('setAutomationsPollIntervalSeconds clamps to [15, 600]', async () => {
+    const store = await createStore()
+    store.setAutomationsPollIntervalSeconds(5)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(15)
+    store.setAutomationsPollIntervalSeconds(900)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(600)
+    store.setAutomationsPollIntervalSeconds(120)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(120)
+  })
 })
