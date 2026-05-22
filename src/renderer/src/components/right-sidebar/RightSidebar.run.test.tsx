@@ -21,7 +21,13 @@ vi.mock('@/store', () => ({
 vi.mock('@/store/selectors', () => ({
   useActiveWorktree: () => mockActiveWorktree,
   useRepoById: () => mockActiveRepo,
-  getRepoMapFromState: () => new Map()
+  getRepoMapFromState: () => new Map(),
+  // Why: grouped-workspaces selector is invoked inside getActiveScriptStatus
+  // to aggregate per-member status. These tests don't exercise the group
+  // path — return null/[] so the existing single-worktree behavior is
+  // preserved.
+  getGroupByWorktreeId: () => null,
+  getMemberWorktreesForGroup: () => []
 }))
 
 vi.mock('@/hooks/useSidebarResize', () => ({
