@@ -3,6 +3,7 @@ import type {
   StepKind,
   StepConfig,
   TriggerConfig,
+  AutoTrigger,
   CreateWorktreeConfig,
   WaitForSetupConfig,
   RunPromptConfig,
@@ -11,8 +12,8 @@ import type {
 
 /**
  * ChainDraft mirrors the persisted Automation shape but with only the fields
- * the editor cares about (name, projectId, trigger, steps, enabled). It is the
- * in-memory state of the chain editor modal.
+ * the editor cares about (name, projectId, trigger, steps, enabled,
+ * autoTriggers). It is the in-memory state of the chain editor modal.
  */
 export type ChainDraft = {
   id: string
@@ -21,6 +22,7 @@ export type ChainDraft = {
   trigger: TriggerConfig
   enabled: boolean
   steps: Step[]
+  autoTriggers: AutoTrigger[]
 }
 
 export type FutureReferenceViolation = {

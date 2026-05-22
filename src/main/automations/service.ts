@@ -1,3 +1,8 @@
+/* oxlint-disable max-lines -- Why: AutomationService aggregates runner
+   wiring, the rrule scheduler tick, run-now bookkeeping, and (now) the
+   auto-trigger engine controller. Splitting these concerns is a separate
+   refactor; this file was already over budget before the auto-triggers
+   work. */
 import { randomUUID } from 'crypto'
 import type { IpcMain, WebContents } from 'electron'
 import type { Store } from '../persistence'
@@ -6,8 +11,15 @@ import type {
   AutomationDispatchRequest,
   AutomationDispatchResult,
   AutomationRun,
-  RunNowPayload
+  AutomationRunStatus,
+  AutomationRunTrigger,
+  AutoTrigger,
+  LinearIssuePayload,
+  Rule,
+  RunNowPayload,
+  TriggerSourceId
 } from '../../shared/automations-types'
+import type { CandidateEvent } from './trigger-sources/types'
 import type { AgentStatusEntry } from '../agent-status/registry'
 import type { SetupScriptEntry } from '../setup-script/registry'
 import type { PtyExitEntry } from '../pty/exit-registry'
@@ -24,6 +36,14 @@ import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
 
 const DEFAULT_TICK_MS = 60 * 1000
+const DEFAULT_AUTO_TRIGGER_POLL_SECONDS = 60
+
+// Why: structural type lets service.test.ts pass a tiny stub without depending
+// on the concrete AutoTriggerEngine class, keeping the engine an optional dep.
+type AutoTriggerEngineLike = {
+  start: (intervalMs: number) => void
+  stop: () => void
+}
 
 export type AutomationServiceOpts = {
   tickMs?: number
@@ -66,9 +86,30 @@ export type AutomationServiceOpts = {
   /** Lazy accessor for ipcMain. Wrapped in a factory only so tests can stub
    *  it; in production this returns the singleton from `electron`. */
   getIpcMain?: () => IpcMain
+  /** Optional AutoTriggerEngine that polls for event-based triggers (e.g.
+   *  Linear-issue auto). Started/stopped by start()/stop() alongside the
+   *  rrule scheduler. Service tests that don't exercise auto triggers can
+   *  omit it. */
+  autoTriggerEngine?: AutoTriggerEngineLike
+  /** Optional getter for the user-configured auto-trigger poll interval in
+   *  seconds. Defaults to 60s when omitted. Read at service.start() time. */
+  getAutoTriggerPollIntervalSeconds?: () => number
 }
 
 export class AutomationService {
+  // Why: design doc allows operators to restart any terminal-non-success run,
+  // including the four `skipped_*` variants. Excludes `running`/`pending`/
+  // `dispatching`/`dispatched` (in-flight) and `completed` (no reason to
+  // re-run a successful run).
+  private static readonly RESTARTABLE_STATUSES = new Set<AutomationRunStatus>([
+    'failed',
+    'dispatch_failed',
+    'cancelled',
+    'skipped_missed',
+    'skipped_unavailable',
+    'skipped_needs_interactive_auth'
+  ])
+
   private readonly store: Store
   private readonly tickMs: number
   private readonly getAgentStatus: (paneKey: string) => AgentStatusEntry | undefined
@@ -78,6 +119,8 @@ export class AutomationService {
   private readonly getPtyIdForPaneKey: (paneKey: string) => string | undefined
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
+  private readonly autoTriggerEngine: AutoTriggerEngineLike | null
+  private readonly getAutoTriggerPollIntervalSeconds: () => number
   private timer: ReturnType<typeof setInterval> | null = null
   private webContents: WebContents | null = null
   private rendererReady = false
@@ -112,6 +155,9 @@ export class AutomationService {
     // through the existing setWebContents() path.
     this.getWebContents = opts.getWebContents ?? (() => this.webContents)
     this.getIpcMain = opts.getIpcMain ?? null
+    this.autoTriggerEngine = opts.autoTriggerEngine ?? null
+    this.getAutoTriggerPollIntervalSeconds =
+      opts.getAutoTriggerPollIntervalSeconds ?? (() => DEFAULT_AUTO_TRIGGER_POLL_SECONDS)
 
     // Why: resolve renderer/ipc lazily so a reload swap is picked up on the
     // next tick. A destroyed/null webContents throws a plain Error (transient)
@@ -243,6 +289,12 @@ export class AutomationService {
     if (this.rendererReady) {
       void this.evaluateDueRuns()
     }
+    // Why: auto-trigger engine runs alongside the rrule scheduler; its cadence
+    // is configured in seconds (user setting) but setInterval wants ms.
+    if (this.autoTriggerEngine) {
+      const intervalSec = this.getAutoTriggerPollIntervalSeconds()
+      this.autoTriggerEngine.start(intervalSec * 1000)
+    }
   }
 
   stop(): void {
@@ -250,11 +302,13 @@ export class AutomationService {
       clearTimeout(this.fastTickTimer)
       this.fastTickTimer = null
     }
-    if (!this.timer) {
-      return
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
     }
-    clearInterval(this.timer)
-    this.timer = null
+    if (this.autoTriggerEngine) {
+      this.autoTriggerEngine.stop()
+    }
   }
 
   async runNow(automationId: string, payload?: RunNowPayload): Promise<AutomationRun> {
@@ -262,60 +316,127 @@ export class AutomationService {
     if (!automation) {
       throw new Error('Automation not found.')
     }
-    // Chain-shape automation: seed the run as `running` with an empty
-    // stepStates array and tick the executor once immediately so the UI sees
-    // progress without waiting a full tick cadence. Subsequent ticks fall
-    // through the normal 60s evaluateDueRuns() loop.
+    // Chain-shape automation: dispatch via the shared internal path so manual
+    // and auto-triggered runs follow the same persistence + tick contract.
     if (automation.trigger && automation.steps && automation.steps.length > 0) {
-      // Why: build the trigger context up-front (before persisting the run) so
-      // a missing project fails fast — operators see a clear error instead of
-      // a phantom `running` row with an unresolved template downstream.
-      const triggerContext = this.buildTriggerContext(payload)
-      // Why: when the trigger accepts a project at run time, the operator's
-      // selection replaces automation.projectId for this run so downstream
-      // create-worktree steps target the picked repo.
-      const runProjectId = payload?.projectId ?? automation.projectId
-      const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
-      run.status = 'running'
-      // Seed the chain context with automation metadata so templates like
-      // `{{automation.workspaceId}}` resolve on the very first tick, and so
-      // CreateWorktreeRunner can pick up the target repo from
-      // `context.automation.projectId` (it's the only path it knows to look at).
-      run.context = {
-        automation: {
-          workspaceId: automation.workspaceId,
-          projectId: runProjectId
-        },
-        trigger: triggerContext
-      }
-      run.stepStates = []
-      this.store.replaceAutomationRun(run)
-      this.broadcastAutomationsChanged()
-      // Why: fire-and-forget the initial tick so the renderer's "Run Now"
-      // modal can close immediately. The run is already persisted as
-      // `running`, so the UI sees progress on the next refresh; tick failures
-      // route through `finalizeFailedRun` and become a `failed` row that the
-      // operator will see in the run list. Awaiting the tick used to block
-      // the modal for the full duration of the synchronous step chain
-      // (create-worktree + setup-script spawn + open-prompt-pane round-trip).
-      //
-      // Track the run as in-flight so the scheduler loop (`tickRunningChains`)
-      // doesn't pick it up concurrently and double-fire a step's side effects.
-      this.inFlightRunIds.add(run.id)
-      void this.chainExecutor
-        .tick(automation, run)
-        .catch((e) => {
-          this.finalizeFailedRun(run, e)
-        })
-        .finally(() => {
-          this.inFlightRunIds.delete(run.id)
-        })
-      return this.store.getAutomationRun(run.id) ?? run
+      return this.dispatchRun({ automation, payload })
     }
     // Legacy automation: same dispatch flow as scheduled runs.
     const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
     await this.requestDispatch(automation, run)
     return run
+  }
+
+  /** Shared chain-shape dispatch path. Builds the run row + context, persists
+   *  it as `running`, broadcasts the change, then fires the first executor
+   *  tick fire-and-forget. Reused by `runNow` (manual) and `dispatchAutoRun`
+   *  (auto). Legacy automations stay on the `requestDispatch` flow. */
+  private async dispatchRun(args: {
+    automation: Automation
+    payload?: RunNowPayload
+    triggerOverrides?: {
+      kind?: AutomationRunTrigger
+      triggerSource?: TriggerSourceId
+      triggerAutoTriggerId?: string
+      triggerRuleId?: string
+      triggerEntityId?: string
+      restartedFromRunId?: string
+    }
+  }): Promise<AutomationRun> {
+    const { automation, payload, triggerOverrides } = args
+    if (!automation.trigger || !automation.steps || automation.steps.length === 0) {
+      throw new Error('dispatchRun only supports chain-shape automations')
+    }
+    // Why: build the trigger context up-front (before persisting the run) so
+    // a missing project fails fast — operators see a clear error instead of
+    // a phantom `running` row with an unresolved template downstream.
+    const triggerContext = this.buildTriggerContext(payload)
+    // Why: when the trigger accepts a project at run time, the operator's
+    // selection (or the auto-trigger rule's projectId) replaces
+    // automation.projectId for this run so downstream create-worktree steps
+    // target the picked repo.
+    const runProjectId = payload?.projectId ?? automation.projectId
+    const kind = triggerOverrides?.kind ?? 'manual'
+    const run = this.store.createAutomationRun(automation, Date.now(), kind, {
+      triggerSource: triggerOverrides?.triggerSource,
+      triggerAutoTriggerId: triggerOverrides?.triggerAutoTriggerId,
+      triggerRuleId: triggerOverrides?.triggerRuleId,
+      triggerEntityId: triggerOverrides?.triggerEntityId,
+      restartedFromRunId: triggerOverrides?.restartedFromRunId
+    })
+    run.status = 'running'
+    // Seed the chain context with automation metadata so templates like
+    // `{{automation.workspaceId}}` resolve on the very first tick, and so
+    // CreateWorktreeRunner can pick up the target repo from
+    // `context.automation.projectId` (it's the only path it knows to look at).
+    run.context = {
+      automation: {
+        workspaceId: automation.workspaceId,
+        projectId: runProjectId
+      },
+      trigger: triggerContext
+    }
+    run.stepStates = []
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    // Why: fire-and-forget the initial tick so the caller (Run Now modal or
+    // auto-trigger engine) doesn't block on the full step chain. The run is
+    // already persisted as `running`, so the UI sees progress on the next
+    // refresh; tick failures route through `finalizeFailedRun`. Track the
+    // run as in-flight so `tickRunningChains` can't double-fire its steps.
+    this.inFlightRunIds.add(run.id)
+    void this.chainExecutor
+      .tick(automation, run)
+      .catch((e) => {
+        this.finalizeFailedRun(run, e)
+      })
+      .finally(() => {
+        this.inFlightRunIds.delete(run.id)
+      })
+    return this.store.getAutomationRun(run.id) ?? run
+  }
+
+  /** Bridge from the AutoTriggerEngine into the chain dispatch path. Maps the
+   *  engine's CandidateEvent into the same `RunNowPayload` shape manual runs
+   *  use, then stamps the trigger provenance metadata on the run row. */
+  async dispatchAutoRun(args: {
+    automation: Automation
+    trigger: AutoTrigger
+    rule: Rule
+    event: CandidateEvent
+  }): Promise<AutomationRun> {
+    const { automation, trigger, rule, event } = args
+    let runPayload: RunNowPayload
+    if (trigger.source === 'linear-issue') {
+      // Why: a linear-issue source ALWAYS populates payload.issue; a missing
+      // one is a malformed event. Refuse to dispatch so the engine's per-event
+      // catch logs the error — the dedup row already written is the only
+      // artifact, and the operator can clear it from the dedup-management UI
+      // rather than chasing a phantom run with no trigger context.
+      const linearPayload = (event.payload as { issue?: LinearIssuePayload }).issue
+      if (!linearPayload) {
+        throw new Error(
+          `dispatchAutoRun: linear-issue event missing payload.issue (entityId=${event.entityId})`
+        )
+      }
+      runPayload = {
+        projectId: rule.projectId,
+        linear: { issue: linearPayload }
+      }
+    } else {
+      runPayload = { projectId: rule.projectId }
+    }
+    return this.dispatchRun({
+      automation,
+      payload: runPayload,
+      triggerOverrides: {
+        kind: 'auto',
+        triggerSource: trigger.source,
+        triggerAutoTriggerId: trigger.id,
+        triggerRuleId: rule.id,
+        triggerEntityId: event.entityId
+      }
+    })
   }
 
   private buildTriggerContext(payload?: RunNowPayload): Record<string, unknown> {
@@ -440,9 +561,7 @@ export class AutomationService {
    *  Returns the updated run or undefined when the id doesn't exist / the
    *  run is already in a terminal state. */
   cancelRun(runId: string): AutomationRun | undefined {
-    const run = this.store
-      .listAutomationRuns()
-      .find((entry) => entry.id === runId)
+    const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
       return undefined
     }
@@ -480,15 +599,11 @@ export class AutomationService {
    *  steps' downstream context (`steps.<id>.…`) is preserved, so a retry of
    *  step N can still template against steps 0…N-1. */
   retryRunFromStep(runId: string, stepIndex: number): AutomationRun | undefined {
-    const run = this.store
-      .listAutomationRuns()
-      .find((entry) => entry.id === runId)
+    const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
       return undefined
     }
-    const automation = this.store
-      .listAutomations()
-      .find((entry) => entry.id === run.automationId)
+    const automation = this.store.listAutomations().find((entry) => entry.id === run.automationId)
     if (!automation || !automation.steps || stepIndex < 0 || stepIndex >= automation.steps.length) {
       return undefined
     }
@@ -508,6 +623,53 @@ export class AutomationService {
     // cadence so the operator sees the retry start right away.
     this.wakeChains()
     return run
+  }
+
+  /** Operator-initiated restart of a terminal non-success run. Looks up the
+   *  prior run, validates its status is restartable, and dispatches a fresh
+   *  run via `dispatchRun` carrying over the prior trigger metadata + a
+   *  `restartedFromRunId` lineage pointer. Crucially does NOT touch the
+   *  dedup table: the original auto-trigger event's dedup row stays in place
+   *  so we don't re-burn it, and restart bypasses the dedup gate entirely. */
+  async restartRun(runId: string): Promise<AutomationRun> {
+    const prior = this.store.getAutomationRun(runId)
+    if (!prior) {
+      throw new Error('run not found')
+    }
+    if (!AutomationService.RESTARTABLE_STATUSES.has(prior.status)) {
+      throw new Error('run is not restartable')
+    }
+    const automation = this.store.listAutomations().find((a) => a.id === prior.automationId)
+    if (!automation) {
+      throw new Error('automation no longer exists')
+    }
+    // Why: reconstruct payload from the prior run's context. The new run uses
+    // the automation's CURRENT steps/prompt — design intent is "restart with
+    // current config", not a snapshot. The prior context.automation.projectId
+    // captures the run-time picked project (acceptsProjectSelection); fall
+    // back to the automation's stored projectId if absent.
+    const priorContext = prior.context as
+      | {
+          automation?: { projectId?: string }
+          trigger?: { linear?: { issue: LinearIssuePayload } }
+        }
+      | undefined
+    const payload: RunNowPayload = {
+      projectId: priorContext?.automation?.projectId ?? automation.projectId,
+      ...(priorContext?.trigger?.linear ? { linear: priorContext.trigger.linear } : {})
+    }
+    return this.dispatchRun({
+      automation,
+      payload,
+      triggerOverrides: {
+        kind: prior.trigger,
+        triggerSource: prior.triggerSource,
+        triggerAutoTriggerId: prior.triggerAutoTriggerId,
+        triggerRuleId: prior.triggerRuleId,
+        triggerEntityId: prior.triggerEntityId,
+        restartedFromRunId: prior.id
+      }
+    })
   }
 
   /** Iterable of every concrete runner so cancel/retry can fan out without

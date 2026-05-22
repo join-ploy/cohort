@@ -1,6 +1,6 @@
 /* eslint-disable max-lines */
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
-import type { Automation, AutomationRun } from './automations-types'
+import type { AutoDedupEntry, Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './telemetry-events'
 import type { GitHubProjectSettings } from './github-project-types'
 
@@ -1447,6 +1447,10 @@ export type GlobalSettings = {
      *  false for fresh installs (no first-launch surface). */
     existedBeforeTelemetryRelease: boolean
   }
+  /** Poll interval (seconds) for auto-trigger sources. Clamped to [15, 600]
+   *  on read/write so a corrupt value can't starve the poller or hammer
+   *  rate limits. Optional — defaults to 60 in `getAutomationsPollIntervalSeconds`. */
+  automationsPollIntervalSeconds?: number
 }
 
 export type GhosttyImportPreview = {
@@ -1787,6 +1791,9 @@ export type PersistedState = {
   sshRemotePtyLeases: SshRemotePtyLease[]
   automations: Automation[]
   automationRuns: AutomationRun[]
+  // Why: persists the auto-trigger dedup set so a given (automation,
+  // autoTrigger, entity) only fires once across app restarts.
+  automationAutoDedup: AutoDedupEntry[]
   onboarding: OnboardingState
 }
 

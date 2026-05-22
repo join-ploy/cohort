@@ -19,7 +19,8 @@ import {
   Smartphone,
   Blocks,
   SquareTerminal,
-  UserCog
+  UserCog,
+  Zap
 } from 'lucide-react'
 import type { OrcaHooks } from '../../../../shared/types'
 import { getRepoKindLabel, isFolderRepo } from '../../../../shared/repo-kind'
@@ -47,6 +48,7 @@ import { ExperimentalPane, EXPERIMENTAL_PANE_SEARCH_ENTRIES } from './Experiment
 import { AgentsPane, AGENTS_PANE_SEARCH_ENTRIES } from './AgentsPane'
 import { OrchestrationPane } from './OrchestrationPane'
 import { ORCHESTRATION_PANE_SEARCH_ENTRIES } from './orchestration-search'
+import { AutomationsPane, AUTOMATIONS_PANE_SEARCH_ENTRIES } from './AutomationsPane'
 import { AccountsPane, ACCOUNTS_PANE_SEARCH_ENTRIES } from './AccountsPane'
 import { StatsPane, STATS_PANE_SEARCH_ENTRIES } from '../stats/StatsPane'
 import { IntegrationsPane, INTEGRATIONS_PANE_SEARCH_ENTRIES } from './IntegrationsPane'
@@ -80,6 +82,7 @@ type SettingsNavTarget =
   | 'experimental'
   | 'agents'
   | 'orchestration'
+  | 'automations'
   | 'mobile'
   | 'repo'
 
@@ -439,6 +442,13 @@ function Settings(): React.JSX.Element {
         description: 'Coordinate multiple coding agents through Orca.',
         icon: Network,
         searchEntries: ORCHESTRATION_PANE_SEARCH_ENTRIES
+      },
+      {
+        id: 'automations',
+        title: 'Automations',
+        description: 'Polling interval and Linear connection for auto-triggers.',
+        icon: Zap,
+        searchEntries: AUTOMATIONS_PANE_SEARCH_ENTRIES
       },
       {
         id: 'mobile',
@@ -805,6 +815,15 @@ function Settings(): React.JSX.Element {
                   searchEntries={ORCHESTRATION_PANE_SEARCH_ENTRIES}
                 >
                   <OrchestrationPane />
+                </SettingsSection>
+
+                <SettingsSection
+                  id="automations"
+                  title="Automations"
+                  description="Polling interval and Linear connection for auto-triggers."
+                  searchEntries={AUTOMATIONS_PANE_SEARCH_ENTRIES}
+                >
+                  <AutomationsPane />
                 </SettingsSection>
 
                 <SettingsSection

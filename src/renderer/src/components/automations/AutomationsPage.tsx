@@ -205,7 +205,11 @@ export default function AutomationsPage(): React.JSX.Element {
           // them through the create/update payload is what lets the editor save
           // a brand-new chain — without these the row would round-trip blank.
           trigger: automation.trigger,
-          steps: automation.steps
+          steps: automation.steps,
+          // Why: auto-triggers are stored alongside trigger/steps; without
+          // forwarding them through here the editor's "save" silently drops
+          // any auto-trigger rules the user just configured.
+          autoTriggers: automation.autoTriggers
         }
         await (existing
           ? window.api.automations.update({ id: existing.id, updates: payload })
@@ -324,6 +328,19 @@ export default function AutomationsPage(): React.JSX.Element {
       await refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to retry step.')
+    }
+  }
+
+  // Why: restartRun clones the failed/cancelled run into a new pending row.
+  // The 'automations:changed' broadcast refreshes the UI via onChanged, but we
+  // also call refresh() here to cover same-tick test/dev environments without
+  // a live broadcast.
+  const restartRun = async (run: AutomationRun): Promise<void> => {
+    try {
+      await window.api.automations.restartRun({ runId: run.id })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to restart run.')
     }
   }
 
@@ -604,6 +621,8 @@ export default function AutomationsPage(): React.JSX.Element {
             onDelete={requestDeleteAutomation}
             onCancelRun={(run) => void cancelRun(run)}
             onRetryRunFromStep={(run, stepIndex) => void retryRunFromStep(run, stepIndex)}
+            onRestartRun={(run) => void restartRun(run)}
+            repos={repos}
           />
         </section>
       </div>

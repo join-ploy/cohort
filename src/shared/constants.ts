@@ -399,6 +399,7 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     sshRemotePtyLeases: [],
     automations: [],
     automationRuns: [],
+    automationAutoDedup: [],
     onboarding: getDefaultOnboardingState()
   }
 }

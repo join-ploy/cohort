@@ -7,6 +7,7 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
+  AutoDedupEntry,
   RunNowPayload
 } from '../../shared/automations-types'
 
@@ -36,8 +37,7 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
   )
   ipcMain.handle(
     'automations:cancelRun',
-    (_event, args: { runId: string }): AutomationRun | null =>
-      service.cancelRun(args.runId) ?? null
+    (_event, args: { runId: string }): AutomationRun | null => service.cancelRun(args.runId) ?? null
   )
   ipcMain.handle(
     'automations:retryRunFromStep',
@@ -45,8 +45,23 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
       service.retryRunFromStep(args.runId, args.stepIndex) ?? null
   )
   ipcMain.handle(
+    'automations:restartRun',
+    (_event, args: { runId: string }): Promise<AutomationRun> => service.restartRun(args.runId)
+  )
+  ipcMain.handle(
     'automations:markDispatchResult',
     (_event, result: AutomationDispatchResult): AutomationRun => service.markDispatchResult(result)
+  )
+  ipcMain.handle(
+    'automations:listAutoDedup',
+    (_event, args?: { automationId?: string; autoTriggerId?: string }): AutoDedupEntry[] =>
+      store.listAutomationAutoDedup(args?.automationId, args?.autoTriggerId)
+  )
+  ipcMain.handle(
+    'automations:clearAutoDedup',
+    (_event, args: { automationId: string; autoTriggerId: string; entityId?: string }): void => {
+      store.clearAutomationAutoDedup(args.automationId, args.autoTriggerId, args.entityId)
+    }
   )
   ipcMain.handle('automations:rendererReady', (): void => {
     service.setRendererReady()

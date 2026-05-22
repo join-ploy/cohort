@@ -304,7 +304,13 @@ describe('ChainEditorModal', () => {
 
   it('hides the upfront Project select when acceptsProjectSelection is true', () => {
     const repos = [
-      { id: 'proj-1', path: '/tmp/proj-1', displayName: 'Project One', badgeColor: '#abc', addedAt: 0 }
+      {
+        id: 'proj-1',
+        path: '/tmp/proj-1',
+        displayName: 'Project One',
+        badgeColor: '#abc',
+        addedAt: 0
+      }
     ]
     const markup = renderToStaticMarkup(
       <ChainEditorModal
@@ -323,11 +329,9 @@ describe('ChainEditorModal', () => {
     expect(markup).not.toMatch(/aria-label=["']Project["']/)
   })
 
-  it('renders the trigger pill as a button with aria-haspopup', () => {
-    // Why: the pill is clickable and opens a popover. The shadcn Popover uses
-    // Radix Portal which doesn't appear in renderToStaticMarkup, so we render
-    // the popover body inline as a conditional <div>. Either way, the trigger
-    // itself is a <button> so it's keyboard-activatable.
+  it('renders the trigger pill as a plain button (no embedded popover)', () => {
+    // Why: Phase 11.2 — clicking the pill opens the separate TriggersModal
+    // instead of an embedded popover. The pill itself is just a button.
     const markup = renderToStaticMarkup(
       <ChainEditorModal
         open={true}
@@ -340,6 +344,9 @@ describe('ChainEditorModal', () => {
       />
     )
     expect(markup).toMatch(/<button[^>]*aria-label=["']Trigger["']/)
+    // The TriggersModal is rendered but closed by default, so its
+    // role="dialog" body should not appear in static markup.
+    expect(markup).not.toMatch(/aria-label=["']Triggers["']/)
   })
 
   it('disables save when projectId is empty (new automation)', () => {

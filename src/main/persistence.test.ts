@@ -272,6 +272,64 @@ describe('Store', () => {
     expect(second.title).toBe('Nightly run 2')
   })
 
+  it('createAutomationRun records trigger metadata when provided', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Auto trigger',
+      prompt: 'Handle issue',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0
+    })
+
+    const run = store.createAutomationRun(automation, Date.now(), 'auto', {
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at1',
+      triggerRuleId: 'rl1',
+      triggerEntityId: 'iss-9'
+    })
+
+    expect(run.trigger).toBe('auto')
+    expect(run.triggerSource).toBe('linear-issue')
+    expect(run.triggerAutoTriggerId).toBe('at1')
+    expect(run.triggerRuleId).toBe('rl1')
+    expect(run.triggerEntityId).toBe('iss-9')
+
+    const [persisted] = store.listAutomationRuns(automation.id)
+    expect(persisted.triggerSource).toBe('linear-issue')
+    expect(persisted.triggerAutoTriggerId).toBe('at1')
+    expect(persisted.triggerRuleId).toBe('rl1')
+    expect(persisted.triggerEntityId).toBe('iss-9')
+  })
+
+  it('createAutomationRun omits metadata fields when none are provided', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Nightly',
+      prompt: 'Run checks',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-13T00:00:00Z').getTime()
+    })
+
+    const run = store.createAutomationRun(automation, Date.now())
+
+    expect(run.triggerSource).toBeUndefined()
+    expect(run.triggerAutoTriggerId).toBeUndefined()
+    expect(run.triggerRuleId).toBeUndefined()
+    expect(run.triggerEntityId).toBeUndefined()
+    expect(run.restartedFromRunId).toBeUndefined()
+  })
+
   // ── 3. Corrupt JSON → falls back to defaults ────────────────────────
 
   it('falls back to defaults when data file contains invalid JSON', async () => {
@@ -2120,5 +2178,157 @@ describe('Store', () => {
       installId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       existedBeforeTelemetryRelease: false
     })
+  })
+
+  // ── automationAutoDedup + automations poll interval ────────────────
+
+  it('initializes automationAutoDedup as empty array and poll interval at 60', async () => {
+    const store = await createStore()
+    expect(store.listAutomationAutoDedup()).toEqual([])
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
+  it('inserts, lists, and clears dedup entries by automationId/autoTriggerId/entityId', async () => {
+    const store = await createStore()
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 1
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-2',
+      firedAt: 2
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a2',
+      autoTriggerId: 'at2',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-3',
+      firedAt: 3
+    })
+    expect(store.listAutomationAutoDedup().length).toBe(3)
+    expect(store.listAutomationAutoDedup('a1').length).toBe(2)
+    expect(store.listAutomationAutoDedup('a1', 'at1').length).toBe(2)
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'ORC-1')).toBe(true)
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'MISSING')).toBe(false)
+
+    store.clearAutomationAutoDedup('a1', 'at1', 'ORC-1')
+    expect(store.hasAutomationAutoDedup('a1', 'at1', 'ORC-1')).toBe(false)
+    expect(store.listAutomationAutoDedup('a1').length).toBe(1)
+
+    store.clearAutomationAutoDedup('a1', 'at1')
+    expect(store.listAutomationAutoDedup('a1').length).toBe(0)
+    expect(store.listAutomationAutoDedup().length).toBe(1)
+  })
+
+  it('insertAutomationAutoDedup is idempotent on (automationId, autoTriggerId, entityId)', async () => {
+    const store = await createStore()
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 1
+    })
+    store.insertAutomationAutoDedup({
+      automationId: 'a1',
+      autoTriggerId: 'at1',
+      sourceId: 'linear-issue',
+      entityId: 'ORC-1',
+      firedAt: 999
+    })
+    expect(store.listAutomationAutoDedup().length).toBe(1)
+  })
+
+  it('setAutomationsPollIntervalSeconds clamps to [15, 600]', async () => {
+    const store = await createStore()
+    store.setAutomationsPollIntervalSeconds(5)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(15)
+    store.setAutomationsPollIntervalSeconds(900)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(600)
+    store.setAutomationsPollIntervalSeconds(120)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(120)
+  })
+
+  it('getAutomationsPollIntervalSeconds returns 60 when state has NaN', async () => {
+    const store = await createStore()
+    store.setAutomationsPollIntervalSeconds(Number.NaN)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
+  it('updateSettings clamps automationsPollIntervalSeconds via the generic IPC path', async () => {
+    const store = await createStore()
+    store.updateSettings({ automationsPollIntervalSeconds: 5 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(15)
+    store.updateSettings({ automationsPollIntervalSeconds: 900 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(600)
+    store.updateSettings({ automationsPollIntervalSeconds: 120 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(120)
+    store.updateSettings({ automationsPollIntervalSeconds: Number.NaN })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
+  it('round-trips autoTriggers through create/update/list', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+
+    const created = store.createAutomation({
+      name: 'x',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0
+    })
+
+    store.updateAutomation(created.id, {
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 1,
+          rules: [{ id: 'rl1', conditions: [], projectId: 'p1' }]
+        }
+      ]
+    })
+
+    const after = store.listAutomations().find((a) => a.id === created.id)
+    expect(after?.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+  })
+
+  it('createAutomation persists autoTriggers when provided in the input', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+
+    const created = store.createAutomation({
+      name: 'x',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 1,
+          rules: [{ id: 'rl1', conditions: [], projectId: 'p1' }]
+        }
+      ]
+    })
+    expect(created.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+    const reloaded = store.listAutomations().find((a) => a.id === created.id)
+    expect(reloaded?.autoTriggers?.[0]?.id).toBe('at1')
   })
 })

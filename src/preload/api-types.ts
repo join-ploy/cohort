@@ -191,7 +191,10 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
-  RunNowPayload
+  AutoDedupEntry,
+  RunNowPayload,
+  SerializableTriggerSource,
+  TriggerSourceId
 } from '../shared/automations-types'
 
 export type BrowserApi = {
@@ -1328,6 +1331,16 @@ export type PreloadApi = {
     runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
     cancelRun: (args: { runId: string }) => Promise<AutomationRun | null>
     retryRunFromStep: (args: { runId: string; stepIndex: number }) => Promise<AutomationRun | null>
+    restartRun: (args: { runId: string }) => Promise<AutomationRun>
+    listAutoDedup: (args?: {
+      automationId?: string
+      autoTriggerId?: string
+    }) => Promise<AutoDedupEntry[]>
+    clearAutoDedup: (args: {
+      automationId: string
+      autoTriggerId: string
+      entityId?: string
+    }) => Promise<void>
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     rendererReady: () => Promise<void>
     onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void
@@ -1380,6 +1393,14 @@ export type PreloadApi = {
       requestId: string,
       result: { ok: true } | { ok: false; error: string }
     ) => void
+  }
+  triggerSources: {
+    list: () => Promise<SerializableTriggerSource[]>
+    fetchOptions: (args: {
+      sourceId: TriggerSourceId
+      field: string
+      hostId?: string
+    }) => Promise<{ value: string; label: string }[]>
   }
   wsl: {
     isAvailable: () => Promise<boolean>

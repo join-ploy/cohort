@@ -22,7 +22,7 @@ export type AutomationRunStatus =
   | 'skipped_unavailable'
   | 'skipped_needs_interactive_auth'
   | 'dispatch_failed'
-export type AutomationRunTrigger = 'scheduled' | 'manual'
+export type AutomationRunTrigger = 'scheduled' | 'manual' | 'auto'
 
 export type AutomationSchedulePreset = 'hourly' | 'daily' | 'weekdays' | 'weekly'
 
@@ -53,6 +53,7 @@ export type Automation = {
   haltOnFailure?: boolean
   maxConcurrentRuns?: number
   deduplicationKey?: string | null
+  autoTriggers?: AutoTrigger[]
 }
 
 export type AutomationRun = {
@@ -76,6 +77,14 @@ export type AutomationRun = {
   finishedAt?: number
   stepStates?: StepRunState[]
   context?: Record<string, unknown>
+  // Auto-trigger provenance: populated when `trigger === 'auto'` so the UI
+  // and dedup logic can attribute the run to a source/rule/entity. Optional
+  // for backwards compat with scheduled/manual rows.
+  triggerSource?: TriggerSourceId
+  triggerAutoTriggerId?: string
+  triggerRuleId?: string
+  triggerEntityId?: string
+  restartedFromRunId?: string
 }
 
 export type AutomationCreateInput = {
@@ -96,6 +105,7 @@ export type AutomationCreateInput = {
   // (rrule-only) create call sites stay unchanged.
   trigger?: TriggerConfig
   steps?: Step[]
+  autoTriggers?: AutoTrigger[]
 }
 
 export type AutomationUpdateInput = Partial<
@@ -115,6 +125,7 @@ export type AutomationUpdateInput = Partial<
     | 'missedRunGraceMinutes'
     | 'trigger'
     | 'steps'
+    | 'autoTriggers'
   >
 >
 
@@ -154,6 +165,75 @@ export type TriggerConfig = {
   // automation carrying a fixed projectId — the picked project becomes the
   // run's automation.projectId for downstream steps (e.g. create-worktree).
   acceptsProjectSelection?: boolean
+}
+
+// Auto-trigger source identifiers. Each source has its own poller wiring;
+// extra sources will be added here as they come online.
+export type TriggerSourceId = 'linear-issue'
+
+// Renderer-facing projection of a FieldDescriptor. The main-process descriptor
+// carries `fetchOptions: (ctx) => Promise<...>`, which cannot cross the IPC
+// boundary; instead the renderer receives `hasFetchOptions` and calls the
+// `triggerSources:fetchOptions` IPC when it needs the actual option list.
+export type SerializableFieldDescriptor = {
+  field: string
+  label: string
+  valueKind: 'user' | 'label' | 'state' | 'priority' | 'string' | 'number'
+  ops: ConditionOp[]
+  hasFetchOptions: boolean
+}
+
+export type SerializableTriggerSource = {
+  id: TriggerSourceId
+  displayName: string
+  fieldCatalog: SerializableFieldDescriptor[]
+}
+
+export type ConditionOp =
+  | 'is'
+  | 'is-not'
+  | 'is-any-of'
+  | 'is-none-of'
+  | 'contains-any'
+  | 'contains-all'
+  | 'contains-none'
+  | 'gte'
+  | 'lte'
+  | 'eq'
+
+export type ConditionValue = string | number | string[] | number[]
+
+export type Condition = {
+  field: string
+  op: ConditionOp
+  value: ConditionValue
+}
+
+export type Rule = {
+  id: string
+  conditions: Condition[]
+  projectId: string
+}
+
+export type AutoTrigger = {
+  id: string
+  source: TriggerSourceId
+  enabled: boolean
+  enabledAt: number
+  rules: Rule[]
+}
+
+// Persisted dedup record so a given (automation, autoTrigger, entity) only
+// fires a run once across app restarts. Keyed on the tuple in `Store` ops.
+export type AutoDedupEntry = {
+  automationId: string
+  autoTriggerId: string
+  sourceId: TriggerSourceId
+  entityId: string
+  /** Optional human-readable id (e.g. 'ORC-123') for the dedup-management UI. */
+  entityIdentifier?: string
+  firedAt: number
+  lastRunId?: string
 }
 
 export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'

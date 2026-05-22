@@ -1,24 +1,34 @@
+/* oxlint-disable max-lines -- Why: AutomationDetail owns the run header,
+ * trigger badge, lineage links, run history rows, step-state rendering and
+ * chain breakdown. Splitting now would scatter the row-shape logic; revisit
+ * when the chain rendering grows past another major addition. */
 import React from 'react'
-import { Pencil, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react'
+import { Pencil, Pause, Play, RotateCcw, Square, Trash2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AGENT_CATALOG, AgentIcon } from '@/lib/agent-catalog'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type {
+  AutoTrigger,
   Automation,
   AutomationRun,
+  AutomationRunStatus,
+  Condition,
+  ConditionOp,
   CreateWorktreeConfig,
   LinearIssuePayload,
+  Rule,
   RunCommandConfig,
   RunPromptConfig,
   Step,
   StepRunState,
   StepRunStatus,
   TriggerConfig,
+  TriggerSourceId,
   WaitForSetupConfig
 } from '../../../../shared/automations-types'
-import type { Worktree } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
 import {
   formatAutomationDateTime,
@@ -42,6 +52,63 @@ type AutomationDetailProps = {
   onDelete: (automation: Automation) => void
   onCancelRun: (run: AutomationRun) => void
   onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
+  /** Optional restart handler; if omitted, the Restart button is hidden.
+   *  Kept optional so the existing test fixtures (which omit run-action
+   *  callbacks) don't widen into more tc:web errors. */
+  onRestartRun?: (run: AutomationRun) => void
+  /** All repos in the workspace; used to label auto-trigger rule projects in
+   *  the run header. Optional so legacy call sites keep compiling. */
+  repos?: Repo[]
+}
+
+// Why: restart is meaningful only for terminal failure-ish states. `completed`
+// and in-flight statuses (running/pending/dispatching/dispatched) are excluded.
+const RESTARTABLE_STATUSES = new Set<AutomationRunStatus>([
+  'failed',
+  'dispatch_failed',
+  'cancelled',
+  'skipped_missed',
+  'skipped_unavailable',
+  'skipped_needs_interactive_auth'
+])
+
+export function isRestartable(status: AutomationRunStatus): boolean {
+  return RESTARTABLE_STATUSES.has(status)
+}
+
+// Why: run IDs are UUIDs; the first 8 hex chars are enough to disambiguate
+// in the lineage links without bloating the header.
+function shortId(id: string): string {
+  return id.slice(0, 8)
+}
+
+function findRestartChildren(currentRunId: string, allRuns: AutomationRun[]): AutomationRun[] {
+  return allRuns.filter((r) => r.restartedFromRunId === currentRunId)
+}
+
+function describeRunTrigger(run: AutomationRun, automation: Automation, repos: Repo[]): string {
+  if (run.trigger === 'manual') {
+    return 'Manual'
+  }
+  if (run.trigger === 'scheduled') {
+    return 'Scheduled'
+  }
+  if (run.trigger === 'auto') {
+    const sourceLabel =
+      run.triggerSource === 'linear-issue' ? 'Linear issue' : (run.triggerSource ?? 'auto')
+    if (run.triggerAutoTriggerId && run.triggerRuleId) {
+      const at = automation.autoTriggers?.find((t) => t.id === run.triggerAutoTriggerId)
+      const idx = at?.rules.findIndex((r) => r.id === run.triggerRuleId) ?? -1
+      if (idx >= 0 && at) {
+        const rule = at.rules[idx]
+        const projectName = repos.find((repo) => repo.id === rule.projectId)?.displayName ?? ''
+        return `Auto: ${sourceLabel} • Rule ${idx + 1}${projectName ? ` (${projectName})` : ''}`
+      }
+      return `Auto: ${sourceLabel} • Rule deleted`
+    }
+    return `Auto: ${sourceLabel}`
+  }
+  return 'Manual'
 }
 
 function DetailMetric({ label, value }: { label: string; value: string }): React.JSX.Element {
@@ -197,6 +264,157 @@ function describeTrigger(trigger: TriggerConfig): string {
   return `Manual — prompts for ${inputs.join(' + ')} on Run`
 }
 
+// Why: priority is a 0..4 enum in Linear; surface the human label instead of
+// the raw int so the rule preview reads naturally.
+const PRIORITY_LABELS: Record<number, string> = {
+  0: 'No priority',
+  1: 'Urgent',
+  2: 'High',
+  3: 'Medium',
+  4: 'Low'
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  'linear.assignee': 'assignee',
+  'linear.tag': 'tag',
+  'linear.state': 'state',
+  'linear.priority': 'priority'
+}
+
+const OP_WORDS: Record<ConditionOp, string> = {
+  is: 'is',
+  'is-not': 'is not',
+  'is-any-of': 'is any of',
+  'is-none-of': 'is none of',
+  'contains-any': 'has any of',
+  'contains-all': 'has all of',
+  'contains-none': 'has none of',
+  gte: '≥',
+  lte: '≤',
+  eq: 'is'
+}
+
+function sourceLabel(s: TriggerSourceId): string {
+  if (s === 'linear-issue') {
+    return 'Linear issue'
+  }
+  return s
+}
+
+function formatValue(c: Condition): React.ReactNode {
+  if (c.field === 'linear.priority') {
+    if (typeof c.value === 'number') {
+      return <span className="font-mono text-[11px]">{PRIORITY_LABELS[c.value] ?? c.value}</span>
+    }
+    if (Array.isArray(c.value)) {
+      return c.value
+        .map((v) => PRIORITY_LABELS[Number(v)] ?? String(v))
+        .map((label, i, arr) => (
+          <React.Fragment key={i}>
+            <span className="font-mono text-[11px]">{label}</span>
+            {i < arr.length - 1 ? ', ' : null}
+          </React.Fragment>
+        ))
+    }
+  }
+  if (Array.isArray(c.value)) {
+    return c.value.map((v, i, arr) => (
+      <React.Fragment key={i}>
+        <span className="font-mono text-[11px]">{String(v)}</span>
+        {i < arr.length - 1 ? ', ' : null}
+      </React.Fragment>
+    ))
+  }
+  return <span className="font-mono text-[11px]">{String(c.value)}</span>
+}
+
+function formatCondition(c: Condition): React.ReactNode {
+  const fieldLabel = FIELD_LABELS[c.field] ?? c.field
+  const opWord = OP_WORDS[c.op] ?? c.op
+  return (
+    <>
+      {fieldLabel} {opWord} {formatValue(c)}
+    </>
+  )
+}
+
+function describeRule(rule: Rule, repos: Repo[]): React.ReactNode {
+  const repo = repos.find((r) => r.id === rule.projectId)
+  const projectLabel = repo ? (
+    <span className="font-medium text-foreground">{repo.displayName}</span>
+  ) : (
+    <span className="text-destructive">project deleted</span>
+  )
+  if (rule.conditions.length === 0) {
+    return <>Matches every event → {projectLabel}</>
+  }
+  return (
+    <>
+      When{' '}
+      {rule.conditions.map((c, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? ' and ' : null}
+          {formatCondition(c)}
+        </React.Fragment>
+      ))}
+      {' → '}
+      {projectLabel}
+    </>
+  )
+}
+
+function AutoTriggersSummary({
+  autoTriggers,
+  repos
+}: {
+  autoTriggers: AutoTrigger[]
+  repos: Repo[]
+}): React.JSX.Element {
+  return (
+    <div className="space-y-3 rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-medium uppercase text-muted-foreground">
+          Automatic triggers
+        </div>
+        <span className="text-xs text-muted-foreground">{autoTriggers.length} configured</span>
+      </div>
+      <ul className="space-y-2">
+        {autoTriggers.map((trig) => (
+          <li
+            key={trig.id}
+            className="rounded-md border border-border/40 bg-card px-3 py-2 text-sm"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Zap className="size-4 text-muted-foreground" />
+                <span className="font-medium">{sourceLabel(trig.source)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {trig.rules.length} {trig.rules.length === 1 ? 'rule' : 'rules'}
+                </span>
+              </div>
+              <Badge variant={trig.enabled ? 'outline' : 'secondary'}>
+                {trig.enabled ? 'Active' : 'Disabled'}
+              </Badge>
+            </div>
+            {trig.rules.length === 0 ? (
+              <div className="mt-1 text-xs text-muted-foreground">No rules — never fires.</div>
+            ) : (
+              <ul className="mt-2 space-y-1.5">
+                {trig.rules.map((rule, idx) => (
+                  <li key={rule.id} className="text-xs text-muted-foreground">
+                    <span className="text-foreground/80">Rule {idx + 1}:</span>{' '}
+                    {describeRule(rule, repos)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'create-worktree': 'Create worktree',
   'wait-for-setup': 'Wait for setup',
@@ -234,21 +452,19 @@ function describeStepConfig(step: Step): string {
     }
     case 'run-command': {
       const config = step.config as RunCommandConfig
-      if (config.source === 'review') return 'Review'
-      if (config.source === 'create-pr') return 'Create PR'
+      if (config.source === 'review') {
+        return 'Review'
+      }
+      if (config.source === 'create-pr') {
+        return 'Create PR'
+      }
       const custom = (config as RunCommandConfig & { customCommand?: string }).customCommand
       return firstNonEmptyLine(custom ?? '') || 'Custom command'
     }
   }
 }
 
-function ChainStepRow({
-  step,
-  index
-}: {
-  step: Step
-  index: number
-}): React.JSX.Element {
+function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX.Element {
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
       <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
@@ -278,8 +494,7 @@ function StepRunRow({
   // `pending` step is the active edge of the chain; retrying it would race
   // the in-flight tick. `succeeded`/`skipped` are valid retry targets too —
   // operators sometimes want to re-run a successful step against fresh state.
-  const canRetry =
-    onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
+  const canRetry = onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -364,7 +579,9 @@ export function AutomationDetail({
   onToggle,
   onDelete,
   onCancelRun,
-  onRetryRunFromStep
+  onRetryRunFromStep,
+  onRestartRun,
+  repos
 }: AutomationDetailProps): React.JSX.Element {
   if (!automation) {
     return (
@@ -430,9 +647,16 @@ export function AutomationDetail({
 
       {isChain ? (
         <>
-          <div className="rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
-            <div className="text-[11px] font-medium uppercase text-muted-foreground">Trigger</div>
-            <div className="mt-1 text-sm font-medium">{describeTrigger(automation.trigger!)}</div>
+          <div className="space-y-3">
+            <div className="rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
+              <div className="text-[11px] font-medium uppercase text-muted-foreground">
+                Manual trigger
+              </div>
+              <div className="mt-1 text-sm font-medium">{describeTrigger(automation.trigger!)}</div>
+            </div>
+            {automation.autoTriggers && automation.autoTriggers.length > 0 ? (
+              <AutoTriggersSummary autoTriggers={automation.autoTriggers} repos={repos ?? []} />
+            ) : null}
           </div>
           <div className="rounded-md border border-border/50 bg-muted/20 shadow-sm">
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
@@ -492,7 +716,9 @@ export function AutomationDetail({
                 }
               />
               <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase text-muted-foreground">Prompt</div>
+                <div className="text-[11px] font-medium uppercase text-muted-foreground">
+                  Prompt
+                </div>
                 <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-foreground">
                   {automation.prompt}
                 </p>
@@ -507,7 +733,7 @@ export function AutomationDetail({
           <div className="text-sm font-medium">Run history</div>
           <div className="text-xs text-muted-foreground">{runs.length} runs</div>
         </div>
-        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
+        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
           <div>Run</div>
           <div>Status</div>
           <div />
@@ -520,18 +746,30 @@ export function AutomationDetail({
             // on. Terminal rows show an empty action slot so the grid stays
             // aligned without an enabled-but-pointless button.
             const isInFlight =
-              run.status === 'running' ||
-              run.status === 'pending' ||
-              run.status === 'dispatching'
+              run.status === 'running' || run.status === 'pending' || run.status === 'dispatching'
+            const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
+            const restartChildren = findRestartChildren(run.id, runs)
+            const showRestart = isRestartable(run.status) && onRestartRun !== undefined
             const rowClassName =
-              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
+              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
               <>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span>{formatAutomationDateTime(run.scheduledFor)}</span>
                     {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
+                    <span className="text-xs text-muted-foreground">{triggerBadge}</span>
                   </div>
+                  {run.restartedFromRunId ? (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      Restarted from #{shortId(run.restartedFromRunId)}
+                    </div>
+                  ) : null}
+                  {restartChildren.length > 0 ? (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      Restarted as {restartChildren.map((c) => `#${shortId(c.id)}`).join(', ')}
+                    </div>
+                  ) : null}
                   {run.error ? (
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
                   ) : null}
@@ -541,7 +779,29 @@ export function AutomationDetail({
                     {getAutomationRunStatusLabel(run.status)}
                   </Badge>
                 </div>
-                <div className="flex justify-end">
+                <div className="flex items-center justify-end gap-1">
+                  {showRestart ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Restart run"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRestartRun?.(run)
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <RotateCcw className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={6}>
+                        Restart run
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   {isInFlight ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
