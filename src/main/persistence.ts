@@ -682,6 +682,25 @@ export class Store {
     return [...this.state.workspaceGroups]
   }
 
+  // Why: upsert-by-id mirrors setWorktreeMeta. The group create flow stamps a
+  // brand-new id, but the same accessor is the natural fit for later edits
+  // (rename, pin, archive) so callers don't need a separate update method.
+  setWorkspaceGroup(group: WorkspaceGroup): WorkspaceGroup {
+    const index = this.state.workspaceGroups.findIndex((entry) => entry.id === group.id)
+    if (index === -1) {
+      this.state.workspaceGroups.push(group)
+    } else {
+      this.state.workspaceGroups[index] = group
+    }
+    this.scheduleSave()
+    return group
+  }
+
+  removeWorkspaceGroup(id: string): void {
+    this.state.workspaceGroups = this.state.workspaceGroups.filter((entry) => entry.id !== id)
+    this.scheduleSave()
+  }
+
   /**
    * O(1) read of the persisted repo count. Use this when you only need the
    * count (e.g. cohort-classifier) — `getRepos()` hydrates each repo and

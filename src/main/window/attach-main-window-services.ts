@@ -10,6 +10,7 @@ import type { WorktreeStartupLaunch } from '../../shared/types'
 import { ORCA_BROWSER_PARTITION } from '../../shared/constants'
 import { registerRepoHandlers } from '../ipc/repos'
 import { registerWorktreeHandlers } from '../ipc/worktrees'
+import { registerWorkspaceGroupHandlers } from '../ipc/workspace-groups'
 import { registerPtyHandlers } from '../ipc/pty'
 import { registerDaemonManagementHandlers } from '../ipc/pty-management'
 import { registerRunScriptIpc } from '../ipc/run-script'
@@ -45,6 +46,7 @@ export function attachMainWindowServices(
 ): void {
   registerRepoHandlers(mainWindow, store)
   registerWorktreeHandlers(mainWindow, store, runtime)
+  registerWorkspaceGroupHandlers(mainWindow, store, runtime)
   registerPtyHandlers(
     mainWindow,
     runtime,

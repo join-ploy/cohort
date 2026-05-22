@@ -1022,6 +1022,12 @@ export type CreateWorktreeArgs = {
    *  pre-date this prop default to `unknown` at the IPC boundary instead
    *  of failing typecheck. */
   telemetrySource?: WorkspaceSource
+  /** Explicit on-disk worktree path. When set, bypasses the standard
+   *  `<workspaceDir>/<repoName?>/<name>` derivation. Used by the
+   *  workspace-group create flow so member worktrees land under
+   *  `<workspaceDir>/<groupName>/<repoFolderName>` instead of the per-repo
+   *  layout. `ensurePathWithinWorkspace` still validates the resulting path. */
+  pathOverride?: string
 }
 
 export type CreateWorktreeResult = {
