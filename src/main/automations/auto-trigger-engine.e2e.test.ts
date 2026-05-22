@@ -221,4 +221,29 @@ describe('AutoTriggerEngine end-to-end (real service + store, fake source)', () 
     expect(store.listAutomationRuns(automationId)).toHaveLength(1)
     expect(store.listAutomationAutoDedup(automationId, autoTriggerId)).toHaveLength(1)
   })
+
+  it('restarting an auto-fired failed run preserves all trigger metadata and does NOT add a dedup row', async () => {
+    const { store, service, engine, automationId } = await setup({
+      events: [makeEvent()]
+    })
+    await engine.tick()
+    const original = store.listAutomationRuns(automationId)[0]
+    // Why: dispatchRun marks the run as `running` and fires the chain tick
+    // asynchronously — flip the status to `failed` so restartRun's
+    // RESTARTABLE_STATUSES gate lets it through.
+    original.status = 'failed'
+    store.replaceAutomationRun(original)
+    const dedupBefore = store.listAutomationAutoDedup(automationId).length
+
+    const restarted = await service.restartRun(original.id)
+    expect(restarted.trigger).toBe('auto')
+    expect(restarted.triggerSource).toBe(original.triggerSource)
+    expect(restarted.triggerAutoTriggerId).toBe(original.triggerAutoTriggerId)
+    expect(restarted.triggerRuleId).toBe(original.triggerRuleId)
+    expect(restarted.triggerEntityId).toBe(original.triggerEntityId)
+    expect(restarted.restartedFromRunId).toBe(original.id)
+
+    const dedupAfter = store.listAutomationAutoDedup(automationId).length
+    expect(dedupAfter).toBe(dedupBefore)
+  })
 })
