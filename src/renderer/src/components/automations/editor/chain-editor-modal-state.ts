@@ -1,5 +1,6 @@
 import type {
   Automation,
+  CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   RunCommandConfig,
   RunPromptConfig,
@@ -33,13 +34,18 @@ export type ChainEditorError = TemplateError & {
 
 export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'create-worktree': 'Create worktree',
+  'create-workspace-group': 'Create workspace group',
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
   'run-command': 'Run command'
 }
 
+// Why: `create-workspace-group` slots in next to `create-worktree` so the picker
+// groups "creation" kinds together visually. ChainEditorModal filters this list
+// further when the experimentalGroupedWorkspaces flag is off.
 export const STEP_KIND_ORDER: StepKind[] = [
   'create-worktree',
+  'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
   'run-command'
@@ -156,6 +162,17 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
     case 'create-worktree': {
       const cfg: CreateWorktreeConfig = {
         baseBranch: 'main',
+        branchName: '',
+        displayName: '',
+        linkLinearIssue: false
+      }
+      return cfg
+    }
+    case 'create-workspace-group': {
+      // Why: members start empty — the editor surfaces the multi-select so the
+      // user picks ≥2 repos; the IPC handler validates that minimum at run time.
+      const cfg: CreateWorkspaceGroupConfig = {
+        members: [],
         branchName: '',
         displayName: '',
         linkLinearIssue: false

@@ -16,6 +16,7 @@ import type {
   AutomationRunStatus,
   Condition,
   ConditionOp,
+  CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   LinearIssuePayload,
   Rule,
@@ -417,6 +418,7 @@ function AutoTriggersSummary({
 
 const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'create-worktree': 'Create worktree',
+  'create-workspace-group': 'Create workspace group',
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
   'run-command': 'Run command'
@@ -438,6 +440,12 @@ function describeStepConfig(step: Step): string {
       const branch = config.branchName.trim() || '(auto)'
       const base = config.baseBranch.trim() || 'main'
       return `${branch} from ${base}`
+    }
+    case 'create-workspace-group': {
+      const config = step.config as CreateWorkspaceGroupConfig
+      const branch = config.branchName.trim() || '(auto)'
+      const count = config.members.length
+      return `${branch} across ${count} ${count === 1 ? 'repo' : 'repos'}`
     }
     case 'wait-for-setup': {
       const config = step.config as WaitForSetupConfig

@@ -1,5 +1,13 @@
 import * as React from 'react'
-import { FolderGit2, Hourglass, Sparkles, TerminalSquare, GripVertical, Trash2 } from 'lucide-react'
+import {
+  FolderGit2,
+  FolderTree,
+  Hourglass,
+  Sparkles,
+  TerminalSquare,
+  GripVertical,
+  Trash2
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Step, StepConfig, StepKind } from '../../../../../shared/automations-types'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
@@ -22,6 +30,7 @@ const KIND_META: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   'create-worktree': { label: 'Create worktree', icon: FolderGit2 },
+  'create-workspace-group': { label: 'Create workspace group', icon: FolderTree },
   'wait-for-setup': { label: 'Wait for setup', icon: Hourglass },
   'run-prompt': { label: 'Run prompt', icon: Sparkles },
   'run-command': { label: 'Run command', icon: TerminalSquare }

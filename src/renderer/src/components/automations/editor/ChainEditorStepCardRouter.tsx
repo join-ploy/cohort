@@ -1,8 +1,9 @@
 import * as React from 'react'
 import type { Step, StepConfig } from '../../../../../shared/automations-types'
-import type { SidebarPromptCommand } from '../../../../../shared/types'
+import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
 import { CreateWorktreeStepCard } from './CreateWorktreeStepCard'
+import { CreateWorkspaceGroupStepCard } from './CreateWorkspaceGroupStepCard'
 import { WaitForSetupStepCard } from './WaitForSetupStepCard'
 import { RunPromptStepCard } from './RunPromptStepCard'
 import { RunCommandStepCard } from './RunCommandStepCard'
@@ -11,6 +12,10 @@ export type ChainEditorStepCardRouterProps = {
   step: Step
   index: number
   available: AvailableVariables
+  // Why: the create-workspace-group card surfaces the project's repos in a
+  // multi-select; threaded through here so the modal stays the only owner of
+  // the repos list.
+  repos: Repo[]
   reviewCommands: SidebarPromptCommand[]
   createPrCommands: SidebarPromptCommand[]
   onIdChange: (newId: string) => void
@@ -40,6 +45,14 @@ export function ChainEditorStepCardRouter(
   switch (props.step.kind) {
     case 'create-worktree':
       return <CreateWorktreeStepCard {...common} onConfigChange={props.onConfigChange} />
+    case 'create-workspace-group':
+      return (
+        <CreateWorkspaceGroupStepCard
+          {...common}
+          repos={props.repos}
+          onConfigChange={props.onConfigChange}
+        />
+      )
     case 'wait-for-setup':
       return <WaitForSetupStepCard {...common} onConfigChange={props.onConfigChange} />
     case 'run-prompt':

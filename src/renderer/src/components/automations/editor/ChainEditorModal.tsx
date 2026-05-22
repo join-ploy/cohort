@@ -292,6 +292,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
               step={step}
               index={index}
               available={getAvailableVariablesAtStep(draft, index)}
+              repos={props.repos}
               reviewCommands={props.reviewCommands}
               createPrCommands={props.createPrCommands}
               onIdChange={(newId) => renameStep(index, newId)}

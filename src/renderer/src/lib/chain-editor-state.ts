@@ -4,6 +4,7 @@ import type {
   StepConfig,
   TriggerConfig,
   AutoTrigger,
+  CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   WaitForSetupConfig,
   RunPromptConfig,
@@ -167,6 +168,23 @@ export function walkStepConfigStrings(
       }
       break
     }
+    case 'create-workspace-group': {
+      const c = config as CreateWorkspaceGroupConfig
+      if (typeof c.branchName === 'string') {
+        visit('branchName', c.branchName)
+      }
+      if (typeof c.displayName === 'string') {
+        visit('displayName', c.displayName)
+      }
+      // Why: per-member baseBranch is template-resolved at run time; surface
+      // each as `members[<i>].baseBranch` so dry-run errors point at the row.
+      c.members.forEach((member, idx) => {
+        if (typeof member.baseBranch === 'string') {
+          visit(`members[${idx}].baseBranch`, member.baseBranch)
+        }
+      })
+      break
+    }
     case 'wait-for-setup': {
       const c = config as WaitForSetupConfig
       if (typeof c.worktreeRef === 'string') {
@@ -217,6 +235,18 @@ function rewriteConfigStrings(
         baseBranch: typeof c.baseBranch === 'string' ? transform(c.baseBranch) : c.baseBranch,
         branchName: typeof c.branchName === 'string' ? transform(c.branchName) : c.branchName,
         displayName: typeof c.displayName === 'string' ? transform(c.displayName) : c.displayName
+      }
+    }
+    case 'create-workspace-group': {
+      const c = config as CreateWorkspaceGroupConfig
+      return {
+        ...c,
+        branchName: typeof c.branchName === 'string' ? transform(c.branchName) : c.branchName,
+        displayName: typeof c.displayName === 'string' ? transform(c.displayName) : c.displayName,
+        members: c.members.map((m) => ({
+          ...m,
+          baseBranch: typeof m.baseBranch === 'string' ? transform(m.baseBranch) : m.baseBranch
+        }))
       }
     }
     case 'wait-for-setup': {
