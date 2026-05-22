@@ -26,12 +26,24 @@ export type AutomationRunTrigger = 'scheduled' | 'manual' | 'auto'
 
 export type AutomationSchedulePreset = 'hourly' | 'daily' | 'weekdays' | 'weekly'
 
+// Grouped-workspaces discriminator: lets an automation address either a single
+// repo (`single`) or a set of repos run together (`group`). Legacy automations
+// have no `target`; readers should call `normalizeAutomationTarget` to inflate
+// `projectId` into a `{ kind: 'single' }` value so downstream code can branch
+// uniformly.
+export type AutomationTarget =
+  | { kind: 'single'; projectId: string }
+  | { kind: 'group'; projectIds: string[]; groupBranchName?: string }
+
 export type Automation = {
   id: string
   name: string
   prompt: string
   agentId: TuiAgent
   projectId: string
+  // Optional discriminator added for grouped-workspaces. When absent, treat the
+  // automation as `{ kind: 'single', projectId }` (see automation-target-migration).
+  target?: AutomationTarget
   executionTargetType: AutomationExecutionTargetType
   executionTargetId: string
   schedulerOwner: AutomationSchedulerOwner
@@ -92,6 +104,9 @@ export type AutomationCreateInput = {
   prompt: string
   agentId: TuiAgent
   projectId: string
+  // Optional at create time so legacy single-repo call sites stay unchanged;
+  // grouped-workspace creators pass a `{ kind: 'group', ... }` value.
+  target?: AutomationTarget
   workspaceMode: AutomationWorkspaceMode
   workspaceId?: string | null
   baseBranch?: string | null
@@ -115,6 +130,7 @@ export type AutomationUpdateInput = Partial<
     | 'prompt'
     | 'agentId'
     | 'projectId'
+    | 'target'
     | 'workspaceMode'
     | 'workspaceId'
     | 'baseBranch'
