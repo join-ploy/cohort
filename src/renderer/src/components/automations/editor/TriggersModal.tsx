@@ -1,4 +1,7 @@
 import * as React from 'react'
+import { Plus, X, Zap } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { useAppStore } from '@/store'
 import type {
   TriggerConfig,
@@ -44,7 +47,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
   // Why: load the source catalog from main on each modal open so a fresh
   // Linear connect/disconnect is reflected without a reload. Empty default keeps
   // the UI usable while the IPC roundtrip resolves; rules render with disabled
-  // "+ Add condition" until the catalog arrives.
+  // "Add condition" until the catalog arrives.
   const [sources, setSources] = React.useState<SerializableTriggerSource[]>([])
   React.useEffect(() => {
     if (!props.open) {
@@ -132,10 +135,6 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
     setDraftAutoTriggers((list) => list.filter((t) => t.id !== id))
   }
 
-  // Why: Phase 12/13 introduce validation; for the scaffolding phase Save is
-  // always available.
-  const canSave = true
-
   const save = (): void => {
     props.onSave({ trigger: draftTrigger, autoTriggers: draftAutoTriggers })
   }
@@ -144,117 +143,146 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
     <div
       role="dialog"
       aria-label="Triggers"
-      className="fixed inset-0 z-30 flex items-center justify-center bg-background/40"
+      className="fixed inset-0 z-30 flex items-center justify-center bg-background/80 backdrop-blur-sm"
     >
-      <div className="w-[28rem] rounded-md border bg-popover p-4 text-sm shadow-md">
-        <h2 className="text-base font-semibold">Triggers</h2>
-
-        <section aria-label="Manual">
-          <h3 className="mt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Manual
-          </h3>
-          <label className="mt-2 flex items-center gap-2">
-            <input
-              type="checkbox"
-              aria-label="Accept Linear ticket on Run"
-              checked={linearOn}
-              onChange={toggleLinear}
-            />
-            Accept Linear ticket on Run
-          </label>
-          <label className="mt-1 flex items-center gap-2">
-            <input
-              type="checkbox"
-              aria-label="Pick project on Run"
-              checked={projectOn}
-              onChange={toggleProject}
-            />
-            Pick project on Run
-          </label>
-        </section>
-
-        <hr className="my-3" />
-
-        <section aria-label="Automatic">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Automatic
-            </h3>
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Add automatic trigger"
-                aria-haspopup="menu"
-                aria-expanded={addOpen}
-                onClick={() => setAddOpen((v) => !v)}
-                className="rounded border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent hover:text-foreground"
-              >
-                + Add ▾
-              </button>
-              {addOpen ? (
-                <div
-                  role="menu"
-                  className="absolute right-0 mt-1 rounded-md border bg-popover p-1 shadow-md"
-                >
-                  {props.availableSources.map((s) => (
-                    <button
-                      key={s.id}
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        addTrigger(s.id)
-                        setAddOpen(false)
-                      }}
-                      className="block w-full px-2 py-1 text-left text-xs hover:bg-accent hover:text-foreground"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+      <div className="flex max-h-[calc(100vh-4rem)] w-[32rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-[0_10px_24px_rgba(0,0,0,0.18)]">
+        <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">Triggers</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Configure how this automation runs.
+            </p>
           </div>
-
-          {draftAutoTriggers.length === 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground">No automatic triggers configured.</p>
-          ) : (
-            <ul className="mt-2 space-y-2">
-              {draftAutoTriggers.map((t) => (
-                <li key={t.id}>
-                  <AutoTriggerCard
-                    trigger={t}
-                    automationId={props.automationId}
-                    onChange={(next) =>
-                      setDraftAutoTriggers((arr) => arr.map((x) => (x.id === t.id ? next : x)))
-                    }
-                    onRemove={() => removeTrigger(t.id)}
-                    projects={projects}
-                    fieldCatalog={fieldCatalogBySource.get(t.source) ?? []}
-                    loadOptions={loadOptionsFor(t.source)}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close triggers"
             onClick={props.onCancel}
-            className="rounded border border-border bg-background px-3 py-1 text-xs hover:bg-accent hover:text-foreground"
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={!canSave}
-            onClick={save}
-            className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            Save
-          </button>
+            <X className="size-4" />
+          </Button>
+        </header>
+
+        <div className="scrollbar-sleek flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          <section aria-label="Manual" className="space-y-2">
+            <div className="space-y-1">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+                Manual
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Prompt the operator for input when running on demand.
+              </p>
+            </div>
+            <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-accent/40">
+              <input
+                type="checkbox"
+                aria-label="Accept Linear ticket on Run"
+                checked={linearOn}
+                onChange={toggleLinear}
+                className="size-4 rounded border-input"
+              />
+              <span className="text-sm">Accept Linear ticket on Run</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-accent/40">
+              <input
+                type="checkbox"
+                aria-label="Pick project on Run"
+                checked={projectOn}
+                onChange={toggleProject}
+                className="size-4 rounded border-input"
+              />
+              <span className="text-sm">Pick project on Run</span>
+            </label>
+          </section>
+
+          <Separator />
+
+          <section aria-label="Automatic" className="space-y-3">
+            <div className="flex items-end justify-between gap-3">
+              <div className="space-y-1">
+                <h3 className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+                  Automatic
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Auto-fire this automation when an event matches your rules.
+                </p>
+              </div>
+              <div className="relative">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Add automatic trigger"
+                  aria-haspopup="menu"
+                  aria-expanded={addOpen}
+                  onClick={() => setAddOpen((v) => !v)}
+                >
+                  <Plus className="size-3.5" />
+                  Add trigger
+                </Button>
+                {addOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-40 mt-1 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+                  >
+                    {props.availableSources.map((s) => (
+                      <button
+                        key={s.id}
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          addTrigger(s.id)
+                          setAddOpen(false)
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      >
+                        <Zap className="size-3.5 text-muted-foreground" />
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {draftAutoTriggers.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center">
+                <p className="text-sm text-muted-foreground">No automatic triggers configured.</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Auto-fire this automation when an event matches your rules.
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {draftAutoTriggers.map((t) => (
+                  <li key={t.id}>
+                    <AutoTriggerCard
+                      trigger={t}
+                      automationId={props.automationId}
+                      onChange={(next) =>
+                        setDraftAutoTriggers((arr) => arr.map((x) => (x.id === t.id ? next : x)))
+                      }
+                      onRemove={() => removeTrigger(t.id)}
+                      projects={projects}
+                      fieldCatalog={fieldCatalogBySource.get(t.source) ?? []}
+                      loadOptions={loadOptionsFor(t.source)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
+
+        <footer className="flex justify-end gap-2 border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" size="sm" onClick={props.onCancel}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" onClick={save}>
+            Save
+          </Button>
+        </footer>
       </div>
     </div>
   )

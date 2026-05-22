@@ -50,7 +50,9 @@ describe('TriggersModal', () => {
       />
     )
     expect(html).toContain('Automatic')
-    expect(html).toContain('+ Add')
+    // Why: redesign replaced the literal "+ Add" string with an icon + label
+    // button; assert on the new "Add trigger" label.
+    expect(html).toContain('Add trigger')
     expect(html).toContain('No automatic triggers configured.')
   })
 
