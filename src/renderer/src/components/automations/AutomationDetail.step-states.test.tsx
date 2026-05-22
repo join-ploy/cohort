@@ -8,6 +8,7 @@ import type {
   Automation,
   AutomationRun,
   AutomationRunStatus,
+  Step,
   StepRunState
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
@@ -550,6 +551,137 @@ describe('AutomationDetail restart lineage', () => {
       />
     )
     expect(markup).toContain('Restarted as #r-child-')
+  })
+})
+
+describe('AutomationDetail auto-trigger overview', () => {
+  // Why: the new auto-trigger summary only renders in the `isChain` branch
+  // (trigger + steps present), so this fixture is a chain-shape automation
+  // distinct from the rrule-only `baseAutomation`.
+  const chainAutomationWithAutoTrigger: Automation = {
+    ...baseAutomation,
+    trigger: { kind: 'manual' },
+    steps: [
+      {
+        id: 'wt',
+        kind: 'create-worktree',
+        config: {
+          branchName: 'feature/x',
+          baseBranch: 'main',
+          workspaceMode: 'new_per_run'
+        }
+      } as unknown as Step
+    ],
+    autoTriggers: [
+      {
+        id: 'at-active',
+        source: 'linear-issue',
+        enabled: true,
+        enabledAt: 0,
+        rules: [
+          {
+            id: 'rule-empty',
+            conditions: [],
+            projectId: 'repo-1'
+          },
+          {
+            id: 'rule-detailed',
+            conditions: [
+              {
+                field: 'linear.assignee',
+                op: 'is',
+                value: 'me@example.com'
+              },
+              {
+                field: 'linear.priority',
+                op: 'gte',
+                value: 2
+              }
+            ],
+            projectId: 'repo-missing'
+          }
+        ]
+      },
+      {
+        id: 'at-disabled',
+        source: 'linear-issue',
+        enabled: false,
+        enabledAt: 0,
+        rules: []
+      }
+    ]
+  }
+
+  it('surfaces auto triggers with source, badge state, rule count, and rule preview', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={chainAutomationWithAutoTrigger}
+        runs={[]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    // Section title and chrome
+    expect(markup).toContain('Manual trigger')
+    expect(markup).toContain('Automatic triggers')
+    expect(markup).toContain('2 configured')
+    // Source label + state badges
+    expect(markup).toContain('Linear issue')
+    expect(markup).toContain('Active')
+    expect(markup).toContain('Disabled')
+    // Rule preview (empty conditions → project name)
+    expect(markup).toContain('Matches every event')
+    expect(markup).toContain('orca-repo')
+    // Conditions formatted with field + op + values
+    expect(markup).toContain('assignee')
+    expect(markup).toContain('me@example.com')
+    expect(markup).toContain('priority')
+    expect(markup).toContain('≥')
+    expect(markup).toContain('High')
+    // Deleted project chip when projectId is missing from repos
+    expect(markup).toContain('project deleted')
+    // Empty-rules trigger renders the explanatory line
+    expect(markup).toContain('No rules')
+  })
+
+  it('omits the auto-triggers card when none are configured', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const chainOnly: Automation = {
+      ...chainAutomationWithAutoTrigger,
+      autoTriggers: undefined
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={chainOnly}
+        runs={[]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Manual trigger')
+    expect(markup).not.toContain('Automatic triggers')
   })
 })
 

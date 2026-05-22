@@ -3,24 +3,29 @@
  * chain breakdown. Splitting now would scatter the row-shape logic; revisit
  * when the chain rendering grows past another major addition. */
 import React from 'react'
-import { Pencil, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react'
+import { Pencil, Pause, Play, RotateCcw, Square, Trash2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AGENT_CATALOG, AgentIcon } from '@/lib/agent-catalog'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type {
+  AutoTrigger,
   Automation,
   AutomationRun,
   AutomationRunStatus,
+  Condition,
+  ConditionOp,
   CreateWorktreeConfig,
   LinearIssuePayload,
+  Rule,
   RunCommandConfig,
   RunPromptConfig,
   Step,
   StepRunState,
   StepRunStatus,
   TriggerConfig,
+  TriggerSourceId,
   WaitForSetupConfig
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
@@ -259,6 +264,157 @@ function describeTrigger(trigger: TriggerConfig): string {
   return `Manual — prompts for ${inputs.join(' + ')} on Run`
 }
 
+// Why: priority is a 0..4 enum in Linear; surface the human label instead of
+// the raw int so the rule preview reads naturally.
+const PRIORITY_LABELS: Record<number, string> = {
+  0: 'No priority',
+  1: 'Urgent',
+  2: 'High',
+  3: 'Medium',
+  4: 'Low'
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  'linear.assignee': 'assignee',
+  'linear.tag': 'tag',
+  'linear.state': 'state',
+  'linear.priority': 'priority'
+}
+
+const OP_WORDS: Record<ConditionOp, string> = {
+  is: 'is',
+  'is-not': 'is not',
+  'is-any-of': 'is any of',
+  'is-none-of': 'is none of',
+  'contains-any': 'has any of',
+  'contains-all': 'has all of',
+  'contains-none': 'has none of',
+  gte: '≥',
+  lte: '≤',
+  eq: 'is'
+}
+
+function sourceLabel(s: TriggerSourceId): string {
+  if (s === 'linear-issue') {
+    return 'Linear issue'
+  }
+  return s
+}
+
+function formatValue(c: Condition): React.ReactNode {
+  if (c.field === 'linear.priority') {
+    if (typeof c.value === 'number') {
+      return <span className="font-mono text-[11px]">{PRIORITY_LABELS[c.value] ?? c.value}</span>
+    }
+    if (Array.isArray(c.value)) {
+      return c.value
+        .map((v) => PRIORITY_LABELS[Number(v)] ?? String(v))
+        .map((label, i, arr) => (
+          <React.Fragment key={i}>
+            <span className="font-mono text-[11px]">{label}</span>
+            {i < arr.length - 1 ? ', ' : null}
+          </React.Fragment>
+        ))
+    }
+  }
+  if (Array.isArray(c.value)) {
+    return c.value.map((v, i, arr) => (
+      <React.Fragment key={i}>
+        <span className="font-mono text-[11px]">{String(v)}</span>
+        {i < arr.length - 1 ? ', ' : null}
+      </React.Fragment>
+    ))
+  }
+  return <span className="font-mono text-[11px]">{String(c.value)}</span>
+}
+
+function formatCondition(c: Condition): React.ReactNode {
+  const fieldLabel = FIELD_LABELS[c.field] ?? c.field
+  const opWord = OP_WORDS[c.op] ?? c.op
+  return (
+    <>
+      {fieldLabel} {opWord} {formatValue(c)}
+    </>
+  )
+}
+
+function describeRule(rule: Rule, repos: Repo[]): React.ReactNode {
+  const repo = repos.find((r) => r.id === rule.projectId)
+  const projectLabel = repo ? (
+    <span className="font-medium text-foreground">{repo.displayName}</span>
+  ) : (
+    <span className="text-destructive">project deleted</span>
+  )
+  if (rule.conditions.length === 0) {
+    return <>Matches every event → {projectLabel}</>
+  }
+  return (
+    <>
+      When{' '}
+      {rule.conditions.map((c, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? ' and ' : null}
+          {formatCondition(c)}
+        </React.Fragment>
+      ))}
+      {' → '}
+      {projectLabel}
+    </>
+  )
+}
+
+function AutoTriggersSummary({
+  autoTriggers,
+  repos
+}: {
+  autoTriggers: AutoTrigger[]
+  repos: Repo[]
+}): React.JSX.Element {
+  return (
+    <div className="space-y-3 rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-medium uppercase text-muted-foreground">
+          Automatic triggers
+        </div>
+        <span className="text-xs text-muted-foreground">{autoTriggers.length} configured</span>
+      </div>
+      <ul className="space-y-2">
+        {autoTriggers.map((trig) => (
+          <li
+            key={trig.id}
+            className="rounded-md border border-border/40 bg-card px-3 py-2 text-sm"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Zap className="size-4 text-muted-foreground" />
+                <span className="font-medium">{sourceLabel(trig.source)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {trig.rules.length} {trig.rules.length === 1 ? 'rule' : 'rules'}
+                </span>
+              </div>
+              <Badge variant={trig.enabled ? 'outline' : 'secondary'}>
+                {trig.enabled ? 'Active' : 'Disabled'}
+              </Badge>
+            </div>
+            {trig.rules.length === 0 ? (
+              <div className="mt-1 text-xs text-muted-foreground">No rules — never fires.</div>
+            ) : (
+              <ul className="mt-2 space-y-1.5">
+                {trig.rules.map((rule, idx) => (
+                  <li key={rule.id} className="text-xs text-muted-foreground">
+                    <span className="text-foreground/80">Rule {idx + 1}:</span>{' '}
+                    {describeRule(rule, repos)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'create-worktree': 'Create worktree',
   'wait-for-setup': 'Wait for setup',
@@ -491,9 +647,16 @@ export function AutomationDetail({
 
       {isChain ? (
         <>
-          <div className="rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
-            <div className="text-[11px] font-medium uppercase text-muted-foreground">Trigger</div>
-            <div className="mt-1 text-sm font-medium">{describeTrigger(automation.trigger!)}</div>
+          <div className="space-y-3">
+            <div className="rounded-md border border-border/50 bg-muted/20 px-4 py-3 shadow-sm">
+              <div className="text-[11px] font-medium uppercase text-muted-foreground">
+                Manual trigger
+              </div>
+              <div className="mt-1 text-sm font-medium">{describeTrigger(automation.trigger!)}</div>
+            </div>
+            {automation.autoTriggers && automation.autoTriggers.length > 0 ? (
+              <AutoTriggersSummary autoTriggers={automation.autoTriggers} repos={repos ?? []} />
+            ) : null}
           </div>
           <div className="rounded-md border border-border/50 bg-muted/20 shadow-sm">
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
