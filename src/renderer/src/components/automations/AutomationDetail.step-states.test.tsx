@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect, vi } from 'vitest'
 import type { Automation, AutomationRun, StepRunState } from '../../../../shared/automations-types'
-import type { Worktree } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
 
 // Why: AutomationDetail pulls in tooltip + agent-catalog icons. Mock the
 // boundaries so the test stays focused on the new step-states rendering.
@@ -243,5 +243,143 @@ describe('AutomationDetail step states', () => {
     )
     expect(markup).not.toContain('ORC-')
     expect(markup).not.toContain('linear.app')
+  })
+})
+
+const seededRepo: Repo = {
+  id: 'repo-1',
+  path: '/repo/orca-repo',
+  displayName: 'orca-repo',
+  badgeColor: '#000',
+  addedAt: 0
+}
+
+const automationWithAutoTrigger: Automation = {
+  ...baseAutomation,
+  autoTriggers: [
+    {
+      id: 'at-1',
+      source: 'linear-issue',
+      enabled: true,
+      enabledAt: 0,
+      rules: [
+        {
+          id: 'rule-1',
+          conditions: [],
+          projectId: 'repo-1'
+        }
+      ]
+    }
+  ]
+}
+
+describe('AutomationDetail trigger badge', () => {
+  it('shows "Auto: Linear issue • Rule 1 (orca-repo)" for an auto-triggered run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const autoRun: AutomationRun = {
+      ...chainRun,
+      id: 'r-auto',
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at-1',
+      triggerRuleId: 'rule-1'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={automationWithAutoTrigger}
+        runs={[autoRun]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    expect(markup).toContain('Auto: Linear issue • Rule 1 (orca-repo)')
+  })
+
+  it('shows "Manual" for a manually-triggered run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[{ ...chainRun, trigger: 'manual' }]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Manual')
+  })
+
+  it('shows "Scheduled" for a scheduled run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[{ ...chainRun, trigger: 'scheduled' }]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Scheduled')
+  })
+
+  it('shows "Auto: Linear issue • Rule deleted" when triggerRuleId no longer matches', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const autoRun: AutomationRun = {
+      ...chainRun,
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at-1',
+      triggerRuleId: 'rule-vanished'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={automationWithAutoTrigger}
+        runs={[autoRun]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    expect(markup).toContain('Auto: Linear issue • Rule deleted')
   })
 })

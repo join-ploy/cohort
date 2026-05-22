@@ -1,3 +1,7 @@
+/* oxlint-disable max-lines -- Why: AutomationDetail owns the run header,
+ * trigger badge, lineage links, run history rows, step-state rendering and
+ * chain breakdown. Splitting now would scatter the row-shape logic; revisit
+ * when the chain rendering grows past another major addition. */
 import React from 'react'
 import { Pencil, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -18,7 +22,7 @@ import type {
   TriggerConfig,
   WaitForSetupConfig
 } from '../../../../shared/automations-types'
-import type { Worktree } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
 import {
   formatAutomationDateTime,
@@ -42,6 +46,34 @@ type AutomationDetailProps = {
   onDelete: (automation: Automation) => void
   onCancelRun: (run: AutomationRun) => void
   onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
+  /** All repos in the workspace; used to label auto-trigger rule projects in
+   *  the run header. Optional so legacy call sites keep compiling. */
+  repos?: Repo[]
+}
+
+function describeRunTrigger(run: AutomationRun, automation: Automation, repos: Repo[]): string {
+  if (run.trigger === 'manual') {
+    return 'Manual'
+  }
+  if (run.trigger === 'scheduled') {
+    return 'Scheduled'
+  }
+  if (run.trigger === 'auto') {
+    const sourceLabel =
+      run.triggerSource === 'linear-issue' ? 'Linear issue' : (run.triggerSource ?? 'auto')
+    if (run.triggerAutoTriggerId && run.triggerRuleId) {
+      const at = automation.autoTriggers?.find((t) => t.id === run.triggerAutoTriggerId)
+      const idx = at?.rules.findIndex((r) => r.id === run.triggerRuleId) ?? -1
+      if (idx >= 0 && at) {
+        const rule = at.rules[idx]
+        const projectName = repos.find((repo) => repo.id === rule.projectId)?.displayName ?? ''
+        return `Auto: ${sourceLabel} • Rule ${idx + 1}${projectName ? ` (${projectName})` : ''}`
+      }
+      return `Auto: ${sourceLabel} • Rule deleted`
+    }
+    return `Auto: ${sourceLabel}`
+  }
+  return 'Manual'
 }
 
 function DetailMetric({ label, value }: { label: string; value: string }): React.JSX.Element {
@@ -234,21 +266,19 @@ function describeStepConfig(step: Step): string {
     }
     case 'run-command': {
       const config = step.config as RunCommandConfig
-      if (config.source === 'review') return 'Review'
-      if (config.source === 'create-pr') return 'Create PR'
+      if (config.source === 'review') {
+        return 'Review'
+      }
+      if (config.source === 'create-pr') {
+        return 'Create PR'
+      }
       const custom = (config as RunCommandConfig & { customCommand?: string }).customCommand
       return firstNonEmptyLine(custom ?? '') || 'Custom command'
     }
   }
 }
 
-function ChainStepRow({
-  step,
-  index
-}: {
-  step: Step
-  index: number
-}): React.JSX.Element {
+function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX.Element {
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
       <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
@@ -278,8 +308,7 @@ function StepRunRow({
   // `pending` step is the active edge of the chain; retrying it would race
   // the in-flight tick. `succeeded`/`skipped` are valid retry targets too —
   // operators sometimes want to re-run a successful step against fresh state.
-  const canRetry =
-    onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
+  const canRetry = onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -364,7 +393,8 @@ export function AutomationDetail({
   onToggle,
   onDelete,
   onCancelRun,
-  onRetryRunFromStep
+  onRetryRunFromStep,
+  repos
 }: AutomationDetailProps): React.JSX.Element {
   if (!automation) {
     return (
@@ -492,7 +522,9 @@ export function AutomationDetail({
                 }
               />
               <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase text-muted-foreground">Prompt</div>
+                <div className="text-[11px] font-medium uppercase text-muted-foreground">
+                  Prompt
+                </div>
                 <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-foreground">
                   {automation.prompt}
                 </p>
@@ -520,9 +552,8 @@ export function AutomationDetail({
             // on. Terminal rows show an empty action slot so the grid stays
             // aligned without an enabled-but-pointless button.
             const isInFlight =
-              run.status === 'running' ||
-              run.status === 'pending' ||
-              run.status === 'dispatching'
+              run.status === 'running' || run.status === 'pending' || run.status === 'dispatching'
+            const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
             const rowClassName =
               'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_2rem] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
@@ -531,6 +562,7 @@ export function AutomationDetail({
                   <div className="flex flex-wrap items-center gap-2">
                     <span>{formatAutomationDateTime(run.scheduledFor)}</span>
                     {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
+                    <span className="text-xs text-muted-foreground">{triggerBadge}</span>
                   </div>
                   {run.error ? (
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>

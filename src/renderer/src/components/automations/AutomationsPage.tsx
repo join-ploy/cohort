@@ -604,6 +604,7 @@ export default function AutomationsPage(): React.JSX.Element {
             onDelete={requestDeleteAutomation}
             onCancelRun={(run) => void cancelRun(run)}
             onRetryRunFromStep={(run, stepIndex) => void retryRunFromStep(run, stepIndex)}
+            repos={repos}
           />
         </section>
       </div>
