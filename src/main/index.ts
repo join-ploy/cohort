@@ -651,6 +651,11 @@ app.whenReady().then(async () => {
   // TODO(persist): in-memory until we add a per-source watermark table to the
   // settings store; restart falls back to enabledAt and re-polls any backlog.
   const autoTriggerWatermarks = new Map<string, number>()
+  // Why: the engine is constructed so the Linear source is available to the
+  // renderer (via Phase 9's IPC), but it is NOT yet passed to AutomationService.
+  // Phase 7 will wire dispatchAutoRun to the real auto-run dispatch path and
+  // activate the engine. Activating before Phase 7 would silently burn dedup
+  // rows on every matched issue.
   const autoTriggerEngine = new AutoTriggerEngine({
     registry: triggerSourceRegistry,
     listAutomations: () => storeRef.listAutomations(),
@@ -682,8 +687,10 @@ app.whenReady().then(async () => {
     hostId: AUTO_TRIGGER_HOST_ID,
     now: () => Date.now()
   })
+  // Why: reference the engine to keep it alive without activating it. Phase 7
+  // will replace this with `autoTriggerEngine,` once dispatchAutoRun is wired.
+  void autoTriggerEngine
   automations = new AutomationService(store, {
-    autoTriggerEngine,
     getAutoTriggerPollIntervalSeconds: () => storeRef.getAutomationsPollIntervalSeconds(),
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
