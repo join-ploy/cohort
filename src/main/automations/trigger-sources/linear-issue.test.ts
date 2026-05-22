@@ -1,6 +1,24 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { makeLinearIssueSource } from './linear-issue'
 import type { CandidateEvent } from './types'
+
+// Why: stub the linear client module so the source's auth-error path is
+// observable without standing up the real safeStorage/Keychain stack.
+vi.mock('../../linear/client', () => ({
+  acquire: vi.fn().mockResolvedValue(undefined),
+  release: vi.fn(),
+  isAuthError: vi.fn(),
+  clearToken: vi.fn()
+}))
+
+import { acquire, release, isAuthError, clearToken } from '../../linear/client'
+
+beforeEach(() => {
+  vi.mocked(acquire).mockClear()
+  vi.mocked(release).mockClear()
+  vi.mocked(isAuthError).mockReset().mockReturnValue(false)
+  vi.mocked(clearToken).mockClear()
+})
 
 function makeFakeIssue(overrides: Record<string, unknown> = {}): unknown {
   return {
@@ -43,41 +61,41 @@ function makeFakeClient(opts: { pages: FakePage[] }): unknown {
 
 describe('linearIssueSource.fieldCatalog', () => {
   it('exposes the four expected fields in order', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const fields = source.fieldCatalog.map((d) => d.field)
     expect(fields).toEqual(['linear.assignee', 'linear.tag', 'linear.state', 'linear.priority'])
   })
 
   it('priority field exposes eq / is-any-of / gte / lte', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const p = source.fieldCatalog.find((d) => d.field === 'linear.priority')!
     expect(p.ops).toEqual(expect.arrayContaining(['eq', 'is-any-of', 'gte', 'lte']))
     expect(p.valueKind).toBe('priority')
   })
 
   it('assignee field exposes is / is-not / is-any-of / is-none-of', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const a = source.fieldCatalog.find((d) => d.field === 'linear.assignee')!
     expect(a.ops).toEqual(expect.arrayContaining(['is', 'is-not', 'is-any-of', 'is-none-of']))
     expect(a.valueKind).toBe('user')
   })
 
   it('tag field exposes contains-any / contains-all / contains-none', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const t = source.fieldCatalog.find((d) => d.field === 'linear.tag')!
     expect(t.ops).toEqual(expect.arrayContaining(['contains-any', 'contains-all', 'contains-none']))
     expect(t.valueKind).toBe('label')
   })
 
   it('state field exposes is / is-any-of / is-none-of', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const s = source.fieldCatalog.find((d) => d.field === 'linear.state')!
     expect(s.ops).toEqual(expect.arrayContaining(['is', 'is-any-of', 'is-none-of']))
     expect(s.valueKind).toBe('state')
   })
 
   it('id is "linear-issue" and displayName is "Linear issue"', () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     expect(source.id).toBe('linear-issue')
     expect(source.displayName).toBe('Linear issue')
   })
@@ -88,7 +106,7 @@ describe('linearIssueSource.poll', () => {
     const client = makeFakeClient({
       pages: [{ nodes: [makeFakeIssue()], endCursor: null, hasNextPage: false }]
     })
-    const source = makeLinearIssueSource({ client: client as never })
+    const source = makeLinearIssueSource({ getClient: () => client as never })
     const out: CandidateEvent[] = []
     for await (const ev of source.poll({ since: 0, hostId: 'h' })) {
       out.push(ev)
@@ -105,6 +123,10 @@ describe('linearIssueSource.poll', () => {
     expect(payload.issue.identifier).toBe('ORC-1')
     expect(payload.issue.assigneeEmail).toBe('me@x.com')
     expect(payload.issue.stateName).toBe('Todo')
+    // Why: the poll must share the SDK's concurrency limiter — acquire/release
+    // should each fire exactly once per public poll() call.
+    expect(acquire).toHaveBeenCalledTimes(1)
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   it('paginates via cursor across multiple pages', async () => {
@@ -122,17 +144,22 @@ describe('linearIssueSource.poll', () => {
         }
       ]
     })
-    const source = makeLinearIssueSource({ client: client as never })
+    const source = makeLinearIssueSource({ getClient: () => client as never })
     const ids: string[] = []
     for await (const ev of source.poll({ since: 0, hostId: 'h' })) {
       ids.push(ev.entityId)
     }
     expect(ids).toEqual(['iss-1', 'iss-2'])
-    expect((client as { issues: { mock: { calls: unknown[] } } }).issues.mock.calls.length).toBe(2)
+    const calls = (client as { issues: { mock: { calls: { 0: Record<string, unknown> }[] } } })
+      .issues.mock.calls
+    expect(calls.length).toBe(2)
+    // Why: deterministic oldest-first ordering keeps the MAX_PAGES truncation
+    // from dropping random older events.
+    expect(calls[0][0].orderBy).toBe('updatedAt')
   })
 
   it('yields zero events when client is null', async () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const out: CandidateEvent[] = []
     for await (const ev of source.poll({ since: 0, hostId: 'h' })) {
       out.push(ev)
@@ -144,7 +171,7 @@ describe('linearIssueSource.poll', () => {
     const client = {
       issues: vi.fn().mockRejectedValue(new Error('boom'))
     }
-    const source = makeLinearIssueSource({ client: client as never })
+    const source = makeLinearIssueSource({ getClient: () => client as never })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const out: CandidateEvent[] = []
     for await (const ev of source.poll({ since: 0, hostId: 'h' })) {
@@ -152,6 +179,26 @@ describe('linearIssueSource.poll', () => {
     }
     expect(out).toEqual([])
     expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('clears the stored token when client.issues rejects with an auth error', async () => {
+    // Why: a rotated/revoked token would otherwise silently 401-loop every
+    // tick — confirm the source recognizes the auth error and clears state so
+    // the renderer can prompt for re-auth on the next status read.
+    vi.mocked(isAuthError).mockReturnValue(true)
+    const client = {
+      issues: vi.fn().mockRejectedValue(new Error('401'))
+    }
+    const source = makeLinearIssueSource({ getClient: () => client as never })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const out: CandidateEvent[] = []
+    for await (const ev of source.poll({ since: 0, hostId: 'h' })) {
+      out.push(ev)
+    }
+    expect(out).toEqual([])
+    expect(clearToken).toHaveBeenCalledTimes(1)
+    expect(release).toHaveBeenCalledTimes(1)
     warn.mockRestore()
   })
 
@@ -165,7 +212,7 @@ describe('linearIssueSource.poll', () => {
         pageInfo: { endCursor: 'c', hasNextPage: true }
       }))
     }
-    const source = makeLinearIssueSource({ client: client as never })
+    const source = makeLinearIssueSource({ getClient: () => client as never })
     let count = 0
     for await (const _ev of source.poll({ since: 0, hostId: 'h' })) {
       count++
@@ -182,7 +229,7 @@ describe('linearIssueSource.fetchOptions', () => {
       viewer: Promise.resolve({ id: viewerId, email: 'v@x.com', displayName: 'V' })
     }
     const source = makeLinearIssueSource({
-      client: client as never,
+      getClient: () => client as never,
       listTeams: async () => [{ id: 't1', name: 'T1', key: 'T1' }],
       getTeamMembers: async () => [
         { id: 'u1', displayName: 'Alice' },
@@ -198,7 +245,7 @@ describe('linearIssueSource.fetchOptions', () => {
 
   it('tag returns deduped label names across teams', async () => {
     const source = makeLinearIssueSource({
-      client: null,
+      getClient: () => null,
       listTeams: async () => [
         { id: 't1', name: '', key: '' },
         { id: 't2', name: '', key: '' }
@@ -222,7 +269,7 @@ describe('linearIssueSource.fetchOptions', () => {
 
   it('state returns deduped state names across teams', async () => {
     const source = makeLinearIssueSource({
-      client: null,
+      getClient: () => null,
       listTeams: async () => [{ id: 't1', name: '', key: '' }],
       getTeamStates: async () => [
         { id: 's1', name: 'Todo', type: 'started', color: '', position: 0 },
@@ -235,14 +282,14 @@ describe('linearIssueSource.fetchOptions', () => {
   })
 
   it('assignee returns empty array when client is null', async () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const assignee = source.fieldCatalog.find((d) => d.field === 'linear.assignee')!
     const opts = await assignee.fetchOptions!({ since: 0, hostId: 'h' })
     expect(opts).toEqual([])
   })
 
   it('priority returns the static 5 levels', async () => {
-    const source = makeLinearIssueSource({ client: null })
+    const source = makeLinearIssueSource({ getClient: () => null })
     const p = source.fieldCatalog.find((d) => d.field === 'linear.priority')!
     const opts = await p.fetchOptions!({ since: 0, hostId: 'h' })
     expect(opts.map((o) => o.label)).toEqual(['No priority', 'Urgent', 'High', 'Medium', 'Low'])

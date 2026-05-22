@@ -5,6 +5,7 @@ import type {
   LinearTeam,
   LinearWorkflowState
 } from '../../../shared/types'
+import { acquire, release, isAuthError, clearToken } from '../../linear/client'
 import {
   listTeams as defaultListTeams,
   getTeamLabels as defaultGetTeamLabels,
@@ -14,7 +15,10 @@ import {
 import type { CandidateEvent, FieldDescriptor, PollCtx, TriggerSource } from './types'
 
 export type LinearIssueSourceDeps = {
-  client: LinearClient | null
+  /** Returns the current Linear client, or null if not authenticated. Called
+   *  fresh at each poll / fetchOptions invocation so a sign-in after app
+   *  startup is observed on the next tick without restart. */
+  getClient: () => LinearClient | null
   // Injectable for tests; defaults call the real `src/main/linear/teams.ts` helpers.
   listTeams?: () => Promise<LinearTeam[]>
   getTeamMembers?: (teamId: string) => Promise<LinearMember[]>
@@ -45,7 +49,7 @@ export function makeLinearIssueSource(deps: LinearIssueSourceDeps): TriggerSourc
       label: 'Assignee',
       valueKind: 'user',
       ops: ['is', 'is-not', 'is-any-of', 'is-none-of'],
-      fetchOptions: () => fetchAssigneeOptions(deps.client, listTeams, getTeamMembers)
+      fetchOptions: () => fetchAssigneeOptions(deps.getClient(), listTeams, getTeamMembers)
     },
     {
       field: 'linear.tag',
@@ -74,7 +78,7 @@ export function makeLinearIssueSource(deps: LinearIssueSourceDeps): TriggerSourc
     id: 'linear-issue',
     displayName: 'Linear issue',
     fieldCatalog,
-    poll: (ctx) => pollLinearIssues(deps.client, ctx)
+    poll: (ctx) => pollLinearIssues(deps.getClient(), ctx)
   }
 }
 
@@ -90,13 +94,22 @@ async function* pollLinearIssues(
   if (!client) {
     return
   }
+  // Why: share the SDK's 4-way concurrency limiter with the rest of the app
+  // so a high-churn workspace can't flood Linear and starve unrelated UI calls.
+  // The try/finally ensures release() runs even when the consumer breaks out
+  // of the for-await-of early (Node calls iterator.return() on the generator).
+  await acquire()
   try {
     let after: string | undefined = undefined
     for (let page = 0; page < MAX_PAGES; page++) {
       const conn = await client.issues({
         first: PAGE_SIZE,
         after,
-        filter: { updatedAt: { gte: new Date(ctx.since) } }
+        filter: { updatedAt: { gte: new Date(ctx.since) } },
+        // Why: deterministic oldest-first ordering so a MAX_PAGES truncation
+        // drops the newest events (which the next tick will re-observe via the
+        // updatedAt watermark) rather than randomly losing older ones.
+        orderBy: 'updatedAt' as never
       })
       for (const issue of conn.nodes) {
         const event = await mapIssueToEvent(issue as unknown as IssueLike)
@@ -110,7 +123,15 @@ async function* pollLinearIssues(
       after = conn.pageInfo.endCursor
     }
   } catch (err) {
+    // Why: a rotated/revoked token would otherwise silently 401-loop every
+    // tick forever — match `src/main/linear/teams.ts` and clear the token so
+    // the renderer's status check flips to disconnected on the next read.
+    if (isAuthError(err)) {
+      clearToken()
+    }
     console.warn('[linear-issue source] poll failed:', err)
+  } finally {
+    release()
   }
 }
 
@@ -171,14 +192,29 @@ async function fetchAssigneeOptions(
   if (!client) {
     return []
   }
-  // Why: a synthetic "me" entry resolves to the viewer's user id at lookup
-  // time so the rule editor never persists a stale viewer id when a user
-  // switches Linear accounts — the value is whatever client.viewer.id is now.
-  const viewer = await client.viewer
+  // Why: the synthetic "me" entry is resolved to the authenticated viewer's
+  // id AT EDITOR-PICK TIME. A user who later switches Linear accounts will
+  // still see the prior viewer's id in the saved rule — v1 limitation; a
+  // follow-up will introduce a sentinel-based eval-time resolver to match
+  // the design's "follow me across accounts" intent.
+  let viewerId: string
+  await acquire()
+  try {
+    const viewer = await client.viewer
+    viewerId = viewer.id
+  } catch (err) {
+    if (isAuthError(err)) {
+      clearToken()
+    }
+    console.warn('[linear-issue source] fetchAssigneeOptions failed:', err)
+    return []
+  } finally {
+    release()
+  }
   const teams = await listTeams()
   const memberLists = await Promise.all(teams.map((t) => getTeamMembers(t.id)))
-  const seen = new Set<string>([viewer.id])
-  const options: { value: string; label: string }[] = [{ value: viewer.id, label: 'me' }]
+  const seen = new Set<string>([viewerId])
+  const options: { value: string; label: string }[] = [{ value: viewerId, label: 'me' }]
   for (const list of memberLists) {
     for (const m of list) {
       if (seen.has(m.id)) {

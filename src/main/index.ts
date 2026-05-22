@@ -641,11 +641,11 @@ app.whenReady().then(async () => {
   }
   // Why: assemble the auto-trigger engine alongside the AutomationService so
   // both share a single store/lifecycle. The Linear source pulls its client
-  // lazily from getLinearClient() — an unauthenticated launch still wires the
-  // source (poll() returns zero events) and a later connect/disconnect is
-  // observed on the next tick without rebuilding the registry.
+  // lazily via getClient (called fresh on each poll / fetchOptions) so a
+  // connect/disconnect after app boot is observed on the next tick without
+  // rebuilding the registry.
   const triggerSourceRegistry = new TriggerSourceRegistry()
-  triggerSourceRegistry.register(makeLinearIssueSource({ client: getLinearClient() }))
+  triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
   // TODO(SSH): hostId varies per remote target once SSH execution lands.
   const AUTO_TRIGGER_HOST_ID = 'local'
   // TODO(persist): in-memory until we add a per-source watermark table to the
