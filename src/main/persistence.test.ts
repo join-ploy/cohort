@@ -2197,6 +2197,12 @@ describe('Store', () => {
     expect(store.getAutomationsPollIntervalSeconds()).toBe(120)
   })
 
+  it('getAutomationsPollIntervalSeconds returns 60 when state has NaN', async () => {
+    const store = await createStore()
+    store.setAutomationsPollIntervalSeconds(Number.NaN)
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
   it('round-trips autoTriggers through create/update/list', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'p1' }))
@@ -2226,5 +2232,33 @@ describe('Store', () => {
 
     const after = store.listAutomations().find((a) => a.id === created.id)
     expect(after?.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+  })
+
+  it('createAutomation persists autoTriggers when provided in the input', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+
+    const created = store.createAutomation({
+      name: 'x',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 1,
+          rules: [{ id: 'rl1', conditions: [], projectId: 'p1' }]
+        }
+      ]
+    })
+    expect(created.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+    const reloaded = store.listAutomations().find((a) => a.id === created.id)
+    expect(reloaded?.autoTriggers?.[0]?.id).toBe('at1')
   })
 })

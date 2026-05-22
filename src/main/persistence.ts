@@ -861,7 +861,8 @@ export class Store {
       createdAt: now,
       updatedAt: now,
       ...(input.trigger ? { trigger: input.trigger } : {}),
-      ...(input.steps ? { steps: input.steps } : {})
+      ...(input.steps ? { steps: input.steps } : {}),
+      ...(input.autoTriggers ? { autoTriggers: input.autoTriggers } : {})
     }
     this.state.automations = [...(this.state.automations ?? []), automation]
     this.flush()
@@ -1077,16 +1078,20 @@ export class Store {
   }
 
   getAutomationsPollIntervalSeconds(): number {
-    // Why: clamp on read so a corrupt persisted value (e.g. 0 or negative)
-    // can't starve the poller or hammer rate limits.
-    const v = this.state.settings.automationsPollIntervalSeconds ?? 60
+    // Why: clamp on read so a corrupt persisted value (0/negative/NaN) can't
+    // starve the poller — Math.min/max with NaN returns NaN, which would make
+    // setTimeout fall back to a 1ms loop.
+    const raw = this.state.settings.automationsPollIntervalSeconds
+    const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 60
     return Math.max(15, Math.min(600, v))
   }
 
   setAutomationsPollIntervalSeconds(value: number): void {
+    // Why: guard against NaN at the boundary so it never lands in persisted state.
+    const v = typeof value === 'number' && Number.isFinite(value) ? value : 60
     this.state.settings = {
       ...this.state.settings,
-      automationsPollIntervalSeconds: Math.max(15, Math.min(600, value))
+      automationsPollIntervalSeconds: Math.max(15, Math.min(600, v))
     }
     this.flush()
   }
