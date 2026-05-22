@@ -158,6 +158,35 @@ export type GitPushTarget = {
   remoteUrl?: string
 }
 
+// ─── WorkspaceGroup ─────────────────────────────────────────────────
+/**
+ * A workspace that owns N worktrees from N distinct repos, co-located under
+ * a shared parent folder. Members share a branch name (set at create time);
+ * card-level state (pin, sort, activity, archive) lives on the group, not
+ * the members. See docs/plans/2026-05-22-grouped-workspaces-design.md.
+ */
+export type WorkspaceGroup = {
+  id: string // 'group:<uuid>'
+  workspaceName: string // also the parent folder name
+  displayName: string
+  parentPath: string // workspaces/<workspaceName>/
+  memberWorktreeIds: string[] // ordered; max one worktree per repo
+  branchName: string
+
+  isArchived: boolean
+  archivedAt: number | null
+  archiveCleanupError?: string | null
+  isPinned: boolean
+  sortOrder: number
+  lastActivityAt: number
+  isUnread: boolean
+  comment: string
+  createdAt: number
+  createdByAutomationRunId?: string
+  linkedIssue: number | null
+  linkedLinearIssue: string | null
+}
+
 // ─── Worktree metadata (persisted user-authored fields only) ─────────
 export type WorktreeMeta = {
   displayName: string
