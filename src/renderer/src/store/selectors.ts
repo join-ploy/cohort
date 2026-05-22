@@ -1,6 +1,6 @@
 import { useAppStore } from './index'
 import { useShallow } from 'zustand/react/shallow'
-import type { Repo, Worktree, TerminalTab } from '../../../shared/types'
+import type { Repo, Worktree, TerminalTab, WorkspaceGroup } from '../../../shared/types'
 import type { AppState } from './types'
 
 const EMPTY_WORKTREES: Worktree[] = []
@@ -123,3 +123,50 @@ export const useFilterRepoIds = () => useAppStore((s) => s.filterRepoIds)
 // ─── GitHub ─────────────────────────────────────────────────────────
 export const usePRCache = () => useAppStore((s) => s.prCache)
 export const useIssueCache = () => useAppStore((s) => s.issueCache)
+
+// ─── Workspace Groups ───────────────────────────────────────────────
+export function getGroupById(
+  state: Pick<AppState, 'workspaceGroups'>,
+  groupId: string
+): WorkspaceGroup | null {
+  return state.workspaceGroups.find((g) => g.id === groupId) ?? null
+}
+
+export function getGroupByWorktreeId(
+  state: Pick<AppState, 'workspaceGroups'>,
+  worktreeId: string
+): WorkspaceGroup | null {
+  return state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(worktreeId)) ?? null
+}
+
+export function getMemberWorktreesForGroup(
+  state: Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+  groupId: string
+): Worktree[] {
+  const group = getGroupById(state, groupId)
+  if (!group) {
+    return []
+  }
+  // Why: defensive — a member id may not resolve to a live worktree mid-fetch
+  // or after an out-of-band cleanup; drop the gap rather than emit holes.
+  const worktreeMap = getCachedWorktreeMap(state.worktreesByRepo)
+  const members: Worktree[] = []
+  for (const id of group.memberWorktreeIds) {
+    const worktree = worktreeMap.get(id)
+    if (worktree) {
+      members.push(worktree)
+    }
+  }
+  return members
+}
+
+export function isWorktreeGrouped(
+  state: Pick<AppState, 'workspaceGroups'>,
+  worktreeId: string
+): boolean {
+  return state.workspaceGroups.some((g) => g.memberWorktreeIds.includes(worktreeId))
+}
+
+export const useWorkspaceGroups = () => useAppStore((s) => s.workspaceGroups)
+export const useGroupById = (groupId: string | null) =>
+  useAppStore((s) => (groupId ? getGroupById(s, groupId) : null))
