@@ -2261,6 +2261,18 @@ describe('Store', () => {
     expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
   })
 
+  it('updateSettings clamps automationsPollIntervalSeconds via the generic IPC path', async () => {
+    const store = await createStore()
+    store.updateSettings({ automationsPollIntervalSeconds: 5 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(15)
+    store.updateSettings({ automationsPollIntervalSeconds: 900 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(600)
+    store.updateSettings({ automationsPollIntervalSeconds: 120 })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(120)
+    store.updateSettings({ automationsPollIntervalSeconds: Number.NaN })
+    expect(store.getAutomationsPollIntervalSeconds()).toBe(60)
+  })
+
   it('round-trips autoTriggers through create/update/list', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'p1' }))

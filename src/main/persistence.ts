@@ -237,6 +237,14 @@ function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
   }
 }
 
+// Why: poll interval is read and written from multiple paths (dedicated
+// setter, generic updateSettings merge, getter clamp-on-read). Centralizing
+// the NaN guard + [15, 600] bounds keeps the three sites in lockstep.
+function clampAutomationsPollIntervalSeconds(value: unknown): number {
+  const v = typeof value === 'number' && Number.isFinite(value) ? value : 60
+  return Math.max(15, Math.min(600, v))
+}
+
 export class Store {
   private state: PersistedState
   private writeTimer: ReturnType<typeof setTimeout> | null = null
@@ -1098,17 +1106,13 @@ export class Store {
     // Why: clamp on read so a corrupt persisted value (0/negative/NaN) can't
     // starve the poller — Math.min/max with NaN returns NaN, which would make
     // setTimeout fall back to a 1ms loop.
-    const raw = this.state.settings.automationsPollIntervalSeconds
-    const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 60
-    return Math.max(15, Math.min(600, v))
+    return clampAutomationsPollIntervalSeconds(this.state.settings.automationsPollIntervalSeconds)
   }
 
   setAutomationsPollIntervalSeconds(value: number): void {
-    // Why: guard against NaN at the boundary so it never lands in persisted state.
-    const v = typeof value === 'number' && Number.isFinite(value) ? value : 60
     this.state.settings = {
       ...this.state.settings,
-      automationsPollIntervalSeconds: Math.max(15, Math.min(600, v))
+      automationsPollIntervalSeconds: clampAutomationsPollIntervalSeconds(value)
     }
     this.flush()
   }
@@ -1170,6 +1174,13 @@ export class Store {
       updates.telemetry !== undefined
         ? { ...this.state.settings.telemetry, ...updates.telemetry }
         : this.state.settings.telemetry
+    // Why: apply the [15, 600] clamp + NaN guard for the poll interval here
+    // too so it holds regardless of which IPC path the renderer uses
+    // (dedicated setter vs generic settings:set merge).
+    const pollIntervalOverride =
+      updates.automationsPollIntervalSeconds !== undefined
+        ? clampAutomationsPollIntervalSeconds(updates.automationsPollIntervalSeconds)
+        : undefined
     this.state.settings = {
       ...this.state.settings,
       ...updates,
@@ -1177,7 +1188,10 @@ export class Store {
         ...this.state.settings.notifications,
         ...updates.notifications
       },
-      ...(mergedTelemetry !== undefined ? { telemetry: mergedTelemetry } : {})
+      ...(mergedTelemetry !== undefined ? { telemetry: mergedTelemetry } : {}),
+      ...(pollIntervalOverride !== undefined
+        ? { automationsPollIntervalSeconds: pollIntervalOverride }
+        : {})
     }
     this.scheduleSave()
     return this.state.settings
