@@ -141,6 +141,8 @@ describe('AutomationDetail step states', () => {
         onEdit={noop}
         onToggle={noop}
         onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
       />
     )
     expect(markup).toContain('create-wt')
@@ -168,6 +170,8 @@ describe('AutomationDetail step states', () => {
         onEdit={noop}
         onToggle={noop}
         onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
       />
     )
     // Step-row identifiers from the chain run must not appear in the legacy
@@ -216,6 +220,8 @@ describe('AutomationDetail step states', () => {
         onEdit={noop}
         onToggle={noop}
         onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
       />
     )
     expect(markup).toContain('ORC-42')
@@ -239,6 +245,8 @@ describe('AutomationDetail step states', () => {
         onEdit={noop}
         onToggle={noop}
         onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
       />
     )
     expect(markup).not.toContain('ORC-')
