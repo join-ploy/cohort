@@ -1,0 +1,211 @@
+/* Why: end-to-end integration test for the auto-trigger pipeline. Unlike
+   `auto-trigger-engine.test.ts` (which stubs dispatchAutoRun and the store),
+   this file wires a real Store + AutomationService and only fakes the
+   TriggerSource. The goal is to lock the cross-module contract: an event
+   yielded by a source results in a persisted run with the full provenance
+   metadata and a dedup row, and restart-of-auto reuses that metadata without
+   adding a new dedup row. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { AutoTriggerEngine } from './auto-trigger-engine'
+import { TriggerSourceRegistry } from './trigger-sources/registry'
+import { AutomationService } from './service'
+import type { CandidateEvent, TriggerSource } from './trigger-sources/types'
+import type { Repo } from '../../shared/types'
+import type { Store } from '../persistence'
+
+const testState = { dir: '' }
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => testState.dir
+  },
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    encryptString: (plaintext: string) => Buffer.from(`encrypted:${plaintext}`, 'utf-8'),
+    decryptString: (ciphertext: Buffer) => ciphertext.toString('utf-8').slice('encrypted:'.length)
+  }
+}))
+
+vi.mock('../git/repo', () => ({
+  getGitUsername: vi.fn().mockReturnValue('testuser')
+}))
+
+async function createStore(): Promise<Store> {
+  vi.resetModules()
+  const { Store: StoreCtor, initDataPath } = await import('../persistence')
+  initDataPath()
+  return new StoreCtor()
+}
+
+const makeRepo = (overrides: Partial<Repo> = {}): Repo => ({
+  id: 'p1',
+  path: '/repo',
+  displayName: 'test',
+  badgeColor: '#fff',
+  addedAt: 1,
+  ...overrides
+})
+
+const makeEvent = (overrides: Partial<CandidateEvent> = {}): CandidateEvent => ({
+  entityId: 'iss-1',
+  entityIdentifier: 'ORC-1',
+  updatedAt: 1000,
+  payload: {
+    issue: {
+      id: 'iss-1',
+      identifier: 'ORC-1',
+      title: 'Test issue',
+      description: '',
+      url: 'https://example/ORC-1',
+      assigneeEmail: 'me@example.com',
+      stateName: 'Todo',
+      priority: 2
+    }
+  },
+  fields: {
+    'linear.assignee': 'u1',
+    'linear.tag': [],
+    'linear.state': 'Todo',
+    'linear.priority': 2
+  },
+  ...overrides
+})
+
+type SetupOpts = {
+  events: CandidateEvent[]
+  enabledAt?: number
+}
+
+type Harness = {
+  store: Store
+  service: AutomationService
+  engine: AutoTriggerEngine
+  automationId: string
+  autoTriggerId: string
+}
+
+async function setup(opts: SetupOpts): Promise<Harness> {
+  const store = await createStore()
+  store.addRepo(makeRepo())
+  const automation = store.createAutomation({
+    name: 'auto-x',
+    prompt: '',
+    agentId: 'claude',
+    projectId: 'p1',
+    workspaceMode: 'new_per_run',
+    timezone: 'UTC',
+    rrule: '',
+    dtstart: 0,
+    trigger: { kind: 'manual' },
+    // Why: wait-for-setup with no registered setup-script entry short-circuits
+    // to `done`, so the fire-and-forget chain tick completes cleanly without
+    // requiring any runner deps wired up.
+    steps: [
+      {
+        id: 'step-1',
+        kind: 'wait-for-setup',
+        config: { worktreeRef: 'dummy', requireSuccess: false },
+        onFailure: 'continue',
+        timeoutSeconds: null
+      }
+    ]
+  })
+  const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+  const autoTriggerId = 'at1'
+  stored.autoTriggers = [
+    {
+      id: autoTriggerId,
+      source: 'linear-issue',
+      enabled: true,
+      enabledAt: opts.enabledAt ?? 0,
+      rules: [{ id: 'rl1', projectId: 'p1', conditions: [] }]
+    }
+  ]
+
+  const events = opts.events
+  const fakeSource: TriggerSource = {
+    id: 'linear-issue',
+    displayName: 'Linear',
+    fieldCatalog: [],
+    async *poll() {
+      for (const e of events) {
+        yield e
+      }
+    }
+  }
+  const registry = new TriggerSourceRegistry()
+  registry.register(fakeSource)
+
+  const service = new AutomationService(store, { tickMs: 60_000 })
+  const engine = new AutoTriggerEngine({
+    registry,
+    listAutomations: () => store.listAutomations(),
+    dispatchAutoRun: async (args) => {
+      await service.dispatchAutoRun(args)
+    },
+    dedupHas: (a, t, e) => store.hasAutomationAutoDedup(a, t, e),
+    dedupInsert: (a, t, s, e, ei, firedAt) =>
+      store.insertAutomationAutoDedup({
+        automationId: a,
+        autoTriggerId: t,
+        sourceId: s,
+        entityId: e,
+        entityIdentifier: ei,
+        firedAt
+      }),
+    lastPoll: () => 0,
+    lastPollSet: () => undefined,
+    hostId: 'test',
+    now: () => Date.now()
+  })
+  return { store, service, engine, automationId: automation.id, autoTriggerId }
+}
+
+describe('AutoTriggerEngine end-to-end (real service + store, fake source)', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-auto-e2e-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  it('matching event yields a run with trigger=auto and full context', async () => {
+    const { store, engine, automationId, autoTriggerId } = await setup({
+      events: [makeEvent()]
+    })
+    await engine.tick()
+    const runs = store.listAutomationRuns(automationId)
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    expect(run.trigger).toBe('auto')
+    expect(run.triggerSource).toBe('linear-issue')
+    expect(run.triggerEntityId).toBe('iss-1')
+    expect(run.triggerAutoTriggerId).toBe(autoTriggerId)
+    expect(run.triggerRuleId).toBe('rl1')
+    const ctx = run.context as { trigger?: { linear?: { issue: { identifier: string } } } }
+    expect(ctx.trigger?.linear?.issue.identifier).toBe('ORC-1')
+    expect(store.hasAutomationAutoDedup(automationId, autoTriggerId, 'iss-1')).toBe(true)
+  })
+
+  it('second tick on the same event does NOT create a second run', async () => {
+    const { store, engine, automationId } = await setup({
+      events: [makeEvent()]
+    })
+    await engine.tick()
+    await engine.tick()
+    expect(store.listAutomationRuns(automationId)).toHaveLength(1)
+  })
+
+  it('event with updatedAt < trigger.enabledAt is ignored', async () => {
+    const { store, engine, automationId } = await setup({
+      events: [makeEvent({ updatedAt: 100 })],
+      enabledAt: 100_000
+    })
+    await engine.tick()
+    expect(store.listAutomationRuns(automationId)).toHaveLength(0)
+  })
+})
