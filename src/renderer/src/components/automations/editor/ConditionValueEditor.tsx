@@ -63,11 +63,13 @@ export function MultiValuePicker(props: ValueEditorProps): React.JSX.Element {
   const [refreshing, setRefreshing] = React.useState(false)
   // Why: position panel as `fixed` from trigger rect so ancestor
   // `overflow-hidden` (AutoTriggerCard / AutoTriggerRuleRow) doesn't clip it.
-  const [position, setPosition] = React.useState<{
+  type DropdownPosition = {
     top: number
     left: number
     minWidth: number
-  } | null>(null)
+    maxHeight: number
+  }
+  const [position, setPosition] = React.useState<DropdownPosition | null>(null)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const panelRef = React.useRef<HTMLDivElement>(null)
 
@@ -132,10 +134,29 @@ export function MultiValuePicker(props: ValueEditorProps): React.JSX.Element {
     if (willOpen) {
       const rect = triggerRef.current?.getBoundingClientRect()
       if (rect) {
+        const VIEWPORT_PADDING = 8
+        const GAP = 4
+        const PREFERRED_MAX = 320
+        const MIN_USABLE = 160
+
+        const spaceBelow = window.innerHeight - rect.bottom - GAP - VIEWPORT_PADDING
+        const spaceAbove = rect.top - GAP - VIEWPORT_PADDING
+
+        // Why: flip above only when below is too small and above has more room.
+        const placeBelow = spaceBelow >= MIN_USABLE || spaceBelow >= spaceAbove
+
+        const maxHeight = Math.max(
+          MIN_USABLE,
+          Math.min(PREFERRED_MAX, placeBelow ? spaceBelow : spaceAbove)
+        )
+
         setPosition({
-          top: rect.bottom + 4,
+          top: placeBelow
+            ? rect.bottom + GAP
+            : Math.max(VIEWPORT_PADDING, rect.top - GAP - maxHeight),
           left: rect.left,
-          minWidth: Math.max(rect.width, 160)
+          minWidth: Math.max(rect.width, 160),
+          maxHeight
         })
       }
     }
@@ -187,37 +208,48 @@ export function MultiValuePicker(props: ValueEditorProps): React.JSX.Element {
         <div
           ref={panelRef}
           role="menu"
-          style={position ?? undefined}
-          className="fixed z-50 rounded-md border border-border bg-popover p-1 shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+          style={
+            position
+              ? {
+                  top: position.top,
+                  left: position.left,
+                  minWidth: position.minWidth,
+                  maxHeight: position.maxHeight
+                }
+              : undefined
+          }
+          className="fixed z-50 flex flex-col rounded-md border border-border bg-popover p-1 shadow-[0_10px_24px_rgba(0,0,0,0.18)] overflow-hidden"
         >
           {refreshing ? (
-            <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-muted-foreground">
+            <div className="flex shrink-0 items-center gap-1.5 px-2 py-1 text-[11px] text-muted-foreground">
               <Loader2 className="size-3 animate-spin" />
               Refreshing…
             </div>
           ) : null}
-          {options.length === 0 ? (
-            <div className="p-2 text-xs text-muted-foreground">No options available.</div>
-          ) : (
-            options.map((opt) => {
-              const isSelected = selected.includes(opt.value)
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={isSelected}
-                  onClick={() => toggle(opt.value)}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-                >
-                  <span className="flex size-3 items-center justify-center">
-                    {isSelected ? <Check className="size-3" /> : null}
-                  </span>
-                  <span>{opt.label}</span>
-                </button>
-              )
-            })
-          )}
+          <div className="flex-1 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="px-2 py-2 text-xs text-muted-foreground">No options available.</div>
+            ) : (
+              options.map((opt) => {
+                const isSelected = selected.includes(opt.value)
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={isSelected}
+                    onClick={() => toggle(opt.value)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <span className="flex size-3 items-center justify-center">
+                      {isSelected ? <Check className="size-3" /> : null}
+                    </span>
+                    <span>{opt.label}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
         </div>
       ) : null}
     </div>
