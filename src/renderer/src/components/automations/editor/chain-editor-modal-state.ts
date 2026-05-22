@@ -42,7 +42,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
 // groups "creation" kinds together visually. ChainEditorModal filters this list
-// further when the experimentalGroupedWorkspaces flag is off.
+// down by removing `create-workspace-group` when settings.experimentalGroupedWorkspaces
+// is false.
 export const STEP_KIND_ORDER: StepKind[] = [
   'create-worktree',
   'create-workspace-group',

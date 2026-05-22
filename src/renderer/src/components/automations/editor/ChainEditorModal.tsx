@@ -5,6 +5,7 @@ import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { useAppStore } from '@/store'
 
 // Why: the editor renders as a fullscreen overlay covering the native macOS
 // traffic lights. Reserve the same 80px pad used by .titlebar-left so the
@@ -81,6 +82,18 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [addOpen, setAddOpen] = React.useState(false)
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
   const [triggersModalOpen, setTriggersModalOpen] = React.useState(false)
+
+  // Why: hide the `create-workspace-group` step from the picker when the
+  // experimental flag is off so the rest of the chain editor matches the
+  // pre-feature surface exactly.
+  const groupedEnabled = useAppStore((s) => s.settings?.experimentalGroupedWorkspaces === true)
+  const availableStepKinds = React.useMemo<StepKind[]>(
+    () =>
+      groupedEnabled
+        ? STEP_KIND_ORDER
+        : STEP_KIND_ORDER.filter((k) => k !== 'create-workspace-group'),
+    [groupedEnabled]
+  )
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
     const base = computeAllErrors(draft)
@@ -303,7 +316,12 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
             />
           ))}
 
-          <AddStepControl open={addOpen} onToggle={setAddOpen} onPick={addStep} />
+          <AddStepControl
+            open={addOpen}
+            kinds={availableStepKinds}
+            onToggle={setAddOpen}
+            onPick={addStep}
+          />
 
           <AvailableVariablesPanel available={availableAtEnd} className="mt-2" />
         </div>
@@ -433,6 +451,7 @@ function ChainEditorFooter(props: ChainEditorFooterProps): React.JSX.Element {
 
 type AddStepControlProps = {
   open: boolean
+  kinds: StepKind[]
   onToggle: (next: boolean) => void
   onPick: (kind: StepKind) => void
 }
@@ -456,7 +475,7 @@ function AddStepControl(props: AddStepControlProps): React.JSX.Element {
           aria-label="Step kinds"
           className="absolute top-full z-10 mt-1 flex flex-col rounded-md border border-border bg-background shadow-md"
         >
-          {STEP_KIND_ORDER.map((kind) => (
+          {props.kinds.map((kind) => (
             <button
               key={kind}
               type="button"
