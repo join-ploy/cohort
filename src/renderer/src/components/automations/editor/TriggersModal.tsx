@@ -12,6 +12,9 @@ import { AutoTriggerCard } from './AutoTriggerCard'
 
 export type TriggersModalProps = {
   open: boolean
+  /** Owning automation id — forwarded to AutoTriggerCard so it can query the
+   *  dedup IPC. Empty string for unsaved automations. */
+  automationId: string
   trigger: TriggerConfig
   autoTriggers: AutoTrigger[]
   /** Registered source ids the user can add. Phase 13 will wire this to the
@@ -220,6 +223,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                 <li key={t.id}>
                   <AutoTriggerCard
                     trigger={t}
+                    automationId={props.automationId}
                     onChange={(next) =>
                       setDraftAutoTriggers((arr) => arr.map((x) => (x.id === t.id ? next : x)))
                     }

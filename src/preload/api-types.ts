@@ -191,6 +191,7 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
+  AutoDedupEntry,
   RunNowPayload,
   SerializableTriggerSource,
   TriggerSourceId
@@ -1330,6 +1331,15 @@ export type PreloadApi = {
     runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
     cancelRun: (args: { runId: string }) => Promise<AutomationRun | null>
     retryRunFromStep: (args: { runId: string; stepIndex: number }) => Promise<AutomationRun | null>
+    listAutoDedup: (args?: {
+      automationId?: string
+      autoTriggerId?: string
+    }) => Promise<AutoDedupEntry[]>
+    clearAutoDedup: (args: {
+      automationId: string
+      autoTriggerId: string
+      entityId?: string
+    }) => Promise<void>
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     rendererReady: () => Promise<void>
     onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void

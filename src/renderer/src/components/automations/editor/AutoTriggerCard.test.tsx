@@ -47,6 +47,7 @@ describe('AutoTriggerCard rendering', () => {
     const html = renderToStaticMarkup(
       <AutoTriggerCard
         trigger={mkTrigger()}
+        automationId=""
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
@@ -62,6 +63,7 @@ describe('AutoTriggerCard rendering', () => {
     const html = renderToStaticMarkup(
       <AutoTriggerCard
         trigger={mkTrigger()}
+        automationId=""
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
@@ -76,6 +78,7 @@ describe('AutoTriggerCard rendering', () => {
     const html = renderToStaticMarkup(
       <AutoTriggerCard
         trigger={mkTrigger()}
+        automationId=""
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
@@ -93,6 +96,7 @@ describe('AutoTriggerCard rendering', () => {
     const html = renderToStaticMarkup(
       <AutoTriggerCard
         trigger={trig}
+        automationId=""
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
@@ -109,6 +113,37 @@ describe('AutoTriggerCard rendering', () => {
     expect(html).toContain('No conditions')
   })
 
+  it('renders dedup footer with zero entries and a View button', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger()}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Fired for 0 issues')
+    expect(html).toMatch(/aria-label="View fired issues"/i)
+  })
+
+  it('disables the View button when automationId is empty', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger()}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(/aria-label="View fired issues"[^>]*disabled/i.test(html)).toBe(true)
+  })
+
   it('disables Move up on first rule and Move down on last rule', () => {
     const trig = mkTrigger({
       rules: [
@@ -119,6 +154,7 @@ describe('AutoTriggerCard rendering', () => {
     const html = renderToStaticMarkup(
       <AutoTriggerCard
         trigger={trig}
+        automationId=""
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}

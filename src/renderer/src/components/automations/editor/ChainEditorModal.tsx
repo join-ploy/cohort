@@ -268,6 +268,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
 
       <TriggersModal
         open={triggersModalOpen}
+        automationId={props.automation?.id ?? ''}
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
         availableSources={AVAILABLE_TRIGGER_SOURCES}

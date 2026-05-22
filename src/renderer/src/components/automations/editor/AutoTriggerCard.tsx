@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type {
+  AutoDedupEntry,
   AutoTrigger,
   Condition,
   ConditionOp,
@@ -8,11 +9,15 @@ import type {
   TriggerSourceId
 } from '../../../../../shared/automations-types'
 import { ConditionRow } from './ConditionRow'
+import { DedupListPopover } from './DedupListPopover'
 
 export type AutoTriggerCardProps = {
   trigger: AutoTrigger
   onChange: (next: AutoTrigger) => void
   onRemove: () => void
+  /** Owning automation id — required for dedup IPC. Empty string when the
+   *  automation hasn't been saved yet; the footer renders 0 and disables View. */
+  automationId: string
   /** Used for the per-rule project picker. */
   projects: { id: string; displayName: string }[]
   /** Catalog of fields the trigger's source can match on. Empty array is safe —
@@ -135,7 +140,7 @@ export function updateCondition(
 }
 
 export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element {
-  const { trigger, onChange, onRemove, projects, fieldCatalog, loadOptions } = props
+  const { trigger, onChange, onRemove, automationId, projects, fieldCatalog, loadOptions } = props
 
   const onToggle = (): void => {
     onChange(toggleEnabled(trigger))
@@ -143,6 +148,27 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
   const onAddRule = (): void => {
     onChange(addRule(trigger))
   }
+
+  // Why: unsaved automations have no id so there's nothing to query; bail and
+  // render the footer with zero entries + a disabled View button.
+  const [dedupEntries, setDedupEntries] = React.useState<AutoDedupEntry[]>([])
+  const [dedupOpen, setDedupOpen] = React.useState(false)
+  const refresh = React.useCallback(async (): Promise<void> => {
+    if (!automationId) {
+      setDedupEntries([])
+      return
+    }
+    const entries = await window.api.automations.listAutoDedup({
+      automationId,
+      autoTriggerId: trigger.id
+    })
+    setDedupEntries(entries)
+  }, [automationId, trigger.id])
+  React.useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const hasAutomationId = automationId !== ''
 
   return (
     <div aria-label={`auto trigger ${trigger.id}`} className="rounded border bg-card p-2 text-xs">
@@ -197,6 +223,42 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
       >
         + Add rule
       </button>
+
+      {/* Dedup management footer */}
+      <div className="relative mt-3 flex items-center justify-between border-t pt-2 text-xs">
+        <span className="text-muted-foreground">Fired for {dedupEntries.length} issues</span>
+        <button
+          type="button"
+          aria-label="View fired issues"
+          disabled={!hasAutomationId}
+          onClick={() => setDedupOpen(true)}
+          className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          View
+        </button>
+        <DedupListPopover
+          entries={dedupEntries}
+          open={dedupOpen}
+          onClearOne={(entityId) => {
+            void window.api.automations
+              .clearAutoDedup({
+                automationId,
+                autoTriggerId: trigger.id,
+                entityId
+              })
+              .then(refresh)
+          }}
+          onClearAll={() => {
+            void window.api.automations
+              .clearAutoDedup({
+                automationId,
+                autoTriggerId: trigger.id
+              })
+              .then(refresh)
+          }}
+          onClose={() => setDedupOpen(false)}
+        />
+      </div>
     </div>
   )
 }

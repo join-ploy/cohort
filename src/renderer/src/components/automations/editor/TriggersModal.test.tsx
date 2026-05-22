@@ -10,6 +10,7 @@ describe('TriggersModal', () => {
     const html = renderToStaticMarkup(
       <TriggersModal
         open={false}
+        automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
         availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
@@ -24,6 +25,7 @@ describe('TriggersModal', () => {
     const html = renderToStaticMarkup(
       <TriggersModal
         open={true}
+        automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
         availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
@@ -39,6 +41,7 @@ describe('TriggersModal', () => {
     const html = renderToStaticMarkup(
       <TriggersModal
         open={true}
+        automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
         availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
@@ -55,6 +58,7 @@ describe('TriggersModal', () => {
     const html = renderToStaticMarkup(
       <TriggersModal
         open={true}
+        automationId="auto-1"
         trigger={baseTrigger}
         autoTriggers={[
           { id: 'at1', source: 'linear-issue', enabled: true, enabledAt: 0, rules: [] }
@@ -72,6 +76,7 @@ describe('TriggersModal', () => {
     const html = renderToStaticMarkup(
       <TriggersModal
         open={true}
+        automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
         availableSources={[]}
