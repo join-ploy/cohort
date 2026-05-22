@@ -63,6 +63,35 @@ function toVisibleTabType(contentType: string): WorkspaceVisibleTabType {
   return contentType === 'browser' ? 'browser' : contentType === 'terminal' ? 'terminal' : 'editor'
 }
 
+// Why (M1): activity bumps on a member worktree must roll up to the owning
+// group's lastActivityAt so the Groups sidebar section / Cmd+J group entries
+// reorder immediately. Max-merge so an older bump cannot regress a newer
+// group activity. Returns the updated slice (or the original array if no
+// change) so callers can preserve referential equality on no-op.
+function rollupGroupActivity(
+  workspaceGroups: AppState['workspaceGroups'] | undefined,
+  worktreeId: string,
+  activityAt: number
+): AppState['workspaceGroups'] | undefined {
+  // Why: defensive — the worktree slice is reused in isolated test stores
+  // (worktrees.test.ts) that may not seed workspaceGroups state. Treat
+  // missing/empty as "no groups to roll up to".
+  if (!workspaceGroups || workspaceGroups.length === 0) {
+    return workspaceGroups
+  }
+  const index = workspaceGroups.findIndex((g) => g.memberWorktreeIds.includes(worktreeId))
+  if (index === -1) {
+    return workspaceGroups
+  }
+  const group = workspaceGroups[index]
+  if (activityAt <= group.lastActivityAt) {
+    return workspaceGroups
+  }
+  const next = workspaceGroups.slice()
+  next[index] = { ...group, lastActivityAt: activityAt }
+  return next
+}
+
 export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> = (set, get) => ({
   worktreesByRepo: {},
   activeWorktreeId: null,
@@ -561,9 +590,21 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
     set((s) => {
       const nextWorktrees = applyWorktreeUpdates(s.worktreesByRepo, worktreeId, enriched)
-      return nextWorktrees === s.worktreesByRepo
-        ? {}
-        : { worktreesByRepo: nextWorktrees, sortEpoch: s.sortEpoch + 1 }
+      // Why (M1): mirror the main-process group activity rollup in renderer
+      // memory so the Groups section reorders on the same tick as the meta bump.
+      const nextGroups =
+        typeof enriched.lastActivityAt === 'number'
+          ? rollupGroupActivity(s.workspaceGroups, worktreeId, enriched.lastActivityAt)
+          : s.workspaceGroups
+      if (nextWorktrees === s.worktreesByRepo && nextGroups === s.workspaceGroups) {
+        return {}
+      }
+      return {
+        ...(nextWorktrees !== s.worktreesByRepo
+          ? { worktreesByRepo: nextWorktrees, sortEpoch: s.sortEpoch + 1 }
+          : {}),
+        ...(nextGroups !== s.workspaceGroups ? { workspaceGroups: nextGroups } : {})
+      }
     })
 
     try {
@@ -588,12 +629,16 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         return {}
       }
       shouldPersist = true
+      // Why (M1): roll the unread bump up to the owning group so the group's
+      // sort position tracks the same activity that flips the worktree dot.
+      const nextGroups = rollupGroupActivity(s.workspaceGroups, worktreeId, now)
       return {
         worktreesByRepo: applyWorktreeUpdates(s.worktreesByRepo, worktreeId, {
           isUnread: true,
           lastActivityAt: now
         }),
-        sortEpoch: s.sortEpoch + 1
+        sortEpoch: s.sortEpoch + 1,
+        ...(nextGroups !== s.workspaceGroups ? { workspaceGroups: nextGroups } : {})
       }
     })
 
@@ -657,11 +702,17 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       // meaningful sortEpoch bump (from a background worktree event) will
       // include this worktree's updated smart-sort score.
       const isActive = s.activeWorktreeId === worktreeId
+      // Why (M1): an activity bump on a member rolls up to the owning group
+      // even when the worktree is active — group ordering uses lastActivityAt
+      // directly (GroupsSection sort), so this keeps the group's recency in
+      // sync with the member's.
+      const nextGroups = rollupGroupActivity(s.workspaceGroups, worktreeId, now)
       return {
         worktreesByRepo: applyWorktreeUpdates(s.worktreesByRepo, worktreeId, {
           lastActivityAt: now
         }),
-        ...(isActive ? {} : { sortEpoch: s.sortEpoch + 1 })
+        ...(isActive ? {} : { sortEpoch: s.sortEpoch + 1 }),
+        ...(nextGroups !== s.workspaceGroups ? { workspaceGroups: nextGroups } : {})
       }
     })
 

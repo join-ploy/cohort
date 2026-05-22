@@ -1,9 +1,9 @@
 /* oxlint-disable max-lines */
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Globe, Plus, Server, ServerOff } from 'lucide-react'
+import { Globe, Layers, Plus, Server, ServerOff } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { getRepoMapFromState, useAllWorktrees } from '@/store/selectors'
+import { getRepoMapFromState, useAllWorktrees, useWorkspaceGroups } from '@/store/selectors'
 import {
   CommandDialog,
   CommandInput,
@@ -28,6 +28,7 @@ import {
   type MatchRange,
   type PaletteSearchResult
 } from '@/lib/worktree-palette-search'
+import { searchGroups, type GroupPaletteSearchResult } from '@/lib/group-palette-search'
 import {
   isBlankBrowserUrl,
   searchBrowserPages,
@@ -38,7 +39,7 @@ import {
   ORCA_BROWSER_FOCUS_REQUEST_EVENT,
   queueBrowserFocusRequest
 } from '@/components/browser-pane/browser-focus'
-import type { BrowserPage, BrowserWorkspace, Worktree } from '../../../shared/types'
+import type { BrowserPage, BrowserWorkspace, WorkspaceGroup, Worktree } from '../../../shared/types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 
 type WorktreePaletteItem = {
@@ -54,6 +55,13 @@ type BrowserPaletteItem = {
   result: BrowserPaletteSearchResult
 }
 
+type GroupPaletteItem = {
+  id: string
+  type: 'group'
+  match: GroupPaletteSearchResult
+  group: WorkspaceGroup
+}
+
 type SectionHeader = {
   id: string
   type: 'section-header'
@@ -66,7 +74,7 @@ type HintRow = {
   label: string
 }
 
-type PaletteItem = WorktreePaletteItem | BrowserPaletteItem
+type PaletteItem = WorktreePaletteItem | BrowserPaletteItem | GroupPaletteItem
 
 type PaletteListEntry = PaletteItem | SectionHeader | HintRow
 
@@ -166,6 +174,13 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const lastVisitedAtByWorktreeId = useAppStore((s) => s.lastVisitedAtByWorktreeId)
+  const workspaceGroups = useWorkspaceGroups()
+  // Why: groups are an experimental surface — guard the palette entries by
+  // the same flag that gates the sidebar GroupsSection so toggling the flag
+  // gives one consistent UI.
+  const groupedWorkspacesEnabled = useAppStore(
+    (s) => s.settings?.experimentalGroupedWorkspaces === true
+  )
 
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -354,6 +369,54 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     [browserMatches]
   )
 
+  // Why (M3): groups are surfaced behind the experimental flag so the palette
+  // mirrors the sidebar's gating. Empty-query ordering follows the same rule
+  // GroupsSection uses (sortOrder asc, then lastActivityAt desc), and queries
+  // route through `searchGroups` for displayName/branchName matching.
+  const groupsForPalette = useMemo<readonly WorkspaceGroup[]>(() => {
+    if (!groupedWorkspacesEnabled) {
+      return []
+    }
+    if (hasQuery) {
+      return workspaceGroups
+    }
+    // Empty-query ordering: same comparator as GroupsSection.
+    return [...workspaceGroups]
+      .filter((g) => !g.isArchived)
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) {
+          return a.sortOrder - b.sortOrder
+        }
+        return b.lastActivityAt - a.lastActivityAt
+      })
+  }, [groupedWorkspacesEnabled, hasQuery, workspaceGroups])
+
+  const groupMatches = useMemo(
+    () => searchGroups(groupsForPalette, deferredQuery.trim()),
+    [groupsForPalette, deferredQuery]
+  )
+
+  const groupItems = useMemo<GroupPaletteItem[]>(() => {
+    const groupById = new Map(workspaceGroups.map((g) => [g.id, g]))
+    return groupMatches
+      .map((match) => {
+        const group = groupById.get(match.groupId)
+        if (!group) {
+          return null
+        }
+        // Why: group.id already carries the `group:` prefix (see
+        // WorkspaceGroup.id), so we use it as-is for the cmdk row id without
+        // double-prefixing.
+        return {
+          id: group.id,
+          type: 'group' as const,
+          match,
+          group
+        }
+      })
+      .filter((item): item is GroupPaletteItem => item !== null)
+  }, [groupMatches, workspaceGroups])
+
   // Why: on empty query we cap the worktree section (not browser tabs) so the
   // BROWSER TABS header + ≥1 page row stays visible above the fold — users
   // with 30+ worktrees would otherwise never see browser pages. The cap is
@@ -378,21 +441,38 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       ? browserItems
       : browserItems.slice(0, EMPTY_QUERY_BROWSER_CAP)
 
+    // Why (M3): groups are a small, curated list — no cap. A header always
+    // shows when groups are present so they're visually distinct from the
+    // worktree rows below (group rows look similar but mean something else).
+    const visibleGroupItems = groupItems
+
     // Header rule: on empty query each section is categorically distinct
     // (worktrees vs. tabs), so a lone header is a useful signpost. On query,
     // suppress headers unless both sections are populated — otherwise a lone
     // header above one list is noise.
+    const hasWorktreesOrBrowser = visibleWorktreeItems.length > 0 || visibleBrowserItems.length > 0
     const showWorktreeHeader = hasQuery
       ? visibleWorktreeItems.length > 0 && visibleBrowserItems.length > 0
       : visibleWorktreeItems.length > 0
     const showBrowserHeader = hasQuery
       ? visibleWorktreeItems.length > 0 && visibleBrowserItems.length > 0
       : visibleBrowserItems.length > 0
+    const showGroupHeader = visibleGroupItems.length > 0 && hasWorktreesOrBrowser
 
     // Why: only surface the hint when there's actually something hidden,
     // otherwise the row would be a lie.
     const showWorktreeHint = !hasQuery && worktreeItems.length > worktreeCap
 
+    if (visibleGroupItems.length > 0) {
+      if (showGroupHeader) {
+        entries.push({
+          id: '__header_groups__',
+          type: 'section-header',
+          label: hasQuery ? 'Groups' : 'Recent Groups'
+        })
+      }
+      entries.push(...visibleGroupItems)
+    }
     if (visibleWorktreeItems.length > 0) {
       if (showWorktreeHeader) {
         entries.push({
@@ -421,7 +501,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       entries.push(...visibleBrowserItems)
     }
     return entries
-  }, [worktreeItems, browserItems, hasQuery])
+  }, [worktreeItems, browserItems, groupItems, hasQuery])
 
   const selectableItems = useMemo<PaletteItem[]>(
     () =>
@@ -607,15 +687,43 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     [closeModal, requestBrowserFocus]
   )
 
+  const handleSelectGroup = useCallback(
+    (group: WorkspaceGroup) => {
+      // TODO(grouped-workspaces): replace member[0] activation with a real
+      // group-activation surface (track active group, render a group-scoped
+      // view) once the plan lands that work. Mirroring the F1–F3 submit
+      // handler's interim behavior keeps Cmd+J consistent with the rest of
+      // the experimental UI in the meantime.
+      const memberIds = group.memberWorktreeIds
+      if (memberIds.length === 0) {
+        toast.error('Group has no members')
+        return
+      }
+      const firstMember = findWorktreeById(useAppStore.getState().worktreesByRepo, memberIds[0])
+      if (!firstMember) {
+        toast.error('Group members are not available')
+        return
+      }
+      activateAndRevealWorktree(firstMember.id)
+      skipRestoreFocusRef.current = true
+      closeModal()
+      setSelectedItemId('')
+      focusFallbackSurface()
+    },
+    [closeModal, focusFallbackSurface]
+  )
+
   const handleSelectItem = useCallback(
     (item: PaletteItem) => {
       if (item.type === 'worktree') {
         handleSelectWorktree(item.worktree.id)
+      } else if (item.type === 'group') {
+        handleSelectGroup(item.group)
       } else {
         handleSelectBrowserPage(item.result)
       }
     },
-    [handleSelectBrowserPage, handleSelectWorktree]
+    [handleSelectBrowserPage, handleSelectGroup, handleSelectWorktree]
   )
 
   const handleCreateWorktree = useCallback(() => {
@@ -975,6 +1083,70 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                               </span>
                             </span>
                           )}
+                        </div>
+                      </div>
+                    </div>
+                  </CommandItem>
+                )
+              }
+
+              if (entry.type === 'group') {
+                // Why (M3): a group row is visually distinct from a worktree
+                // row via the Layers leading icon + a "Group" pill, so a
+                // user scanning the palette knows selecting it activates a
+                // group (currently → member[0]) rather than a single worktree.
+                const group = entry.group
+                return (
+                  <CommandItem
+                    key={entry.id}
+                    value={entry.id}
+                    onSelect={() => handleSelectItem(entry)}
+                    className={cn(
+                      'group mx-0.5 flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left outline-none transition-[background-color,border-color,box-shadow]',
+                      'data-[selected=true]:border-border data-[selected=true]:bg-accent data-[selected=true]:text-foreground'
+                    )}
+                  >
+                    <div className="flex w-4 shrink-0 items-center justify-center self-start pt-0.5 text-muted-foreground/85">
+                      <Layers className="size-3.5" aria-hidden="true" />
+                      <span className="sr-only">Group</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground">
+                              {entry.match.displayNameRange ? (
+                                <HighlightedText
+                                  text={group.displayName}
+                                  matchRange={entry.match.displayNameRange}
+                                />
+                              ) : (
+                                group.displayName
+                              )}
+                            </span>
+                            <span className="shrink-0 self-center rounded border border-muted-foreground/30 bg-muted-foreground/5 px-1.5 py-px text-[9px] font-medium leading-normal text-muted-foreground">
+                              Group
+                            </span>
+                            <span className="shrink-0 text-muted-foreground/45">·</span>
+                            <span className="truncate text-[12px] font-medium text-muted-foreground/92">
+                              {entry.match.branchRange ? (
+                                <HighlightedText
+                                  text={group.branchName}
+                                  matchRange={entry.match.branchRange}
+                                />
+                              ) : (
+                                group.branchName
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
+                            <span className="truncate">
+                              {group.memberWorktreeIds.length}{' '}
+                              {group.memberWorktreeIds.length === 1 ? 'repo' : 'repos'}
+                            </span>
+                          </span>
                         </div>
                       </div>
                     </div>

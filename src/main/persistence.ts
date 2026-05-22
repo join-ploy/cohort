@@ -1177,6 +1177,16 @@ export class Store {
     const existing = this.state.worktreeMeta[worktreeId] || getDefaultWorktreeMeta()
     const updated = { ...existing, ...meta }
     this.state.worktreeMeta[worktreeId] = updated
+    // Why (M1): activity bumps on a member must roll up to the owning group's
+    // lastActivityAt so smart-sort / Cmd+J / "Recent" surfaces see the group
+    // as freshly active. Use max(new, existing) so out-of-order timestamps
+    // can't regress an already-newer group activity.
+    if (typeof meta.lastActivityAt === 'number') {
+      const group = this.state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(worktreeId))
+      if (group && meta.lastActivityAt > group.lastActivityAt) {
+        group.lastActivityAt = meta.lastActivityAt
+      }
+    }
     this.scheduleSave()
     return updated
   }
