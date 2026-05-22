@@ -1,3 +1,8 @@
+/* oxlint-disable max-lines -- Why: AutomationService aggregates runner
+   wiring, the rrule scheduler tick, run-now bookkeeping, and (now) the
+   auto-trigger engine controller. Splitting these concerns is a separate
+   refactor; this file was already over budget before the auto-triggers
+   work. */
 import { randomUUID } from 'crypto'
 import type { IpcMain, WebContents } from 'electron'
 import type { Store } from '../persistence'
@@ -24,6 +29,14 @@ import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
 
 const DEFAULT_TICK_MS = 60 * 1000
+const DEFAULT_AUTO_TRIGGER_POLL_SECONDS = 60
+
+// Why: structural type lets service.test.ts pass a tiny stub without depending
+// on the concrete AutoTriggerEngine class, keeping the engine an optional dep.
+type AutoTriggerEngineLike = {
+  start: (intervalMs: number) => void
+  stop: () => void
+}
 
 export type AutomationServiceOpts = {
   tickMs?: number
@@ -66,6 +79,14 @@ export type AutomationServiceOpts = {
   /** Lazy accessor for ipcMain. Wrapped in a factory only so tests can stub
    *  it; in production this returns the singleton from `electron`. */
   getIpcMain?: () => IpcMain
+  /** Optional AutoTriggerEngine that polls for event-based triggers (e.g.
+   *  Linear-issue auto). Started/stopped by start()/stop() alongside the
+   *  rrule scheduler. Service tests that don't exercise auto triggers can
+   *  omit it. */
+  autoTriggerEngine?: AutoTriggerEngineLike
+  /** Optional getter for the user-configured auto-trigger poll interval in
+   *  seconds. Defaults to 60s when omitted. Read at service.start() time. */
+  getAutoTriggerPollIntervalSeconds?: () => number
 }
 
 export class AutomationService {
@@ -78,6 +99,8 @@ export class AutomationService {
   private readonly getPtyIdForPaneKey: (paneKey: string) => string | undefined
   private readonly getWebContents: () => WebContents | null
   private readonly getIpcMain: (() => IpcMain) | null
+  private readonly autoTriggerEngine: AutoTriggerEngineLike | null
+  private readonly getAutoTriggerPollIntervalSeconds: () => number
   private timer: ReturnType<typeof setInterval> | null = null
   private webContents: WebContents | null = null
   private rendererReady = false
@@ -112,6 +135,9 @@ export class AutomationService {
     // through the existing setWebContents() path.
     this.getWebContents = opts.getWebContents ?? (() => this.webContents)
     this.getIpcMain = opts.getIpcMain ?? null
+    this.autoTriggerEngine = opts.autoTriggerEngine ?? null
+    this.getAutoTriggerPollIntervalSeconds =
+      opts.getAutoTriggerPollIntervalSeconds ?? (() => DEFAULT_AUTO_TRIGGER_POLL_SECONDS)
 
     // Why: resolve renderer/ipc lazily so a reload swap is picked up on the
     // next tick. A destroyed/null webContents throws a plain Error (transient)
@@ -243,6 +269,12 @@ export class AutomationService {
     if (this.rendererReady) {
       void this.evaluateDueRuns()
     }
+    // Why: auto-trigger engine runs alongside the rrule scheduler; its cadence
+    // is configured in seconds (user setting) but setInterval wants ms.
+    if (this.autoTriggerEngine) {
+      const intervalSec = this.getAutoTriggerPollIntervalSeconds()
+      this.autoTriggerEngine.start(intervalSec * 1000)
+    }
   }
 
   stop(): void {
@@ -250,11 +282,13 @@ export class AutomationService {
       clearTimeout(this.fastTickTimer)
       this.fastTickTimer = null
     }
-    if (!this.timer) {
-      return
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
     }
-    clearInterval(this.timer)
-    this.timer = null
+    if (this.autoTriggerEngine) {
+      this.autoTriggerEngine.stop()
+    }
   }
 
   async runNow(automationId: string, payload?: RunNowPayload): Promise<AutomationRun> {
@@ -440,9 +474,7 @@ export class AutomationService {
    *  Returns the updated run or undefined when the id doesn't exist / the
    *  run is already in a terminal state. */
   cancelRun(runId: string): AutomationRun | undefined {
-    const run = this.store
-      .listAutomationRuns()
-      .find((entry) => entry.id === runId)
+    const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
       return undefined
     }
@@ -480,15 +512,11 @@ export class AutomationService {
    *  steps' downstream context (`steps.<id>.…`) is preserved, so a retry of
    *  step N can still template against steps 0…N-1. */
   retryRunFromStep(runId: string, stepIndex: number): AutomationRun | undefined {
-    const run = this.store
-      .listAutomationRuns()
-      .find((entry) => entry.id === runId)
+    const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
       return undefined
     }
-    const automation = this.store
-      .listAutomations()
-      .find((entry) => entry.id === run.automationId)
+    const automation = this.store.listAutomations().find((entry) => entry.id === run.automationId)
     if (!automation || !automation.steps || stepIndex < 0 || stepIndex >= automation.steps.length) {
       return undefined
     }

@@ -165,3 +165,66 @@ describe('AutomationService', () => {
     expect(after?.stepStates?.[0].error).toMatch(/no runner registered/i)
   })
 })
+
+describe('AutomationService auto-trigger engine wiring', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-automations-test-'))
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  it('start() starts the engine with the configured interval; stop() stops it', async () => {
+    const store = await createStore()
+    const calls: string[] = []
+    const fakeEngine = {
+      start: (ms: number) => {
+        calls.push(`start:${ms}`)
+      },
+      stop: () => {
+        calls.push('stop')
+      }
+    }
+    const service = new AutomationService(store, {
+      autoTriggerEngine: fakeEngine,
+      getAutoTriggerPollIntervalSeconds: () => 30,
+      tickMs: 60_000
+    })
+    service.start()
+    expect(calls).toContain('start:30000')
+    service.stop()
+    expect(calls).toContain('stop')
+  })
+
+  it('defaults the engine interval to 60s when no getter is supplied', async () => {
+    const store = await createStore()
+    const calls: string[] = []
+    const fakeEngine = {
+      start: (ms: number) => {
+        calls.push(`start:${ms}`)
+      },
+      stop: () => {
+        calls.push('stop')
+      }
+    }
+    const service = new AutomationService(store, {
+      autoTriggerEngine: fakeEngine,
+      tickMs: 60_000
+    })
+    service.start()
+    expect(calls).toContain('start:60000')
+    service.stop()
+  })
+
+  it('omitting the engine is a no-op (existing tests keep working)', async () => {
+    const store = await createStore()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    expect(() => {
+      service.start()
+      service.stop()
+    }).not.toThrow()
+  })
+})
