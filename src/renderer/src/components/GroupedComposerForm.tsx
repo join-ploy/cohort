@@ -1,3 +1,7 @@
+/* eslint-disable max-lines -- Why: the grouped composer keeps form layout,
+   validation, and post-create launch wiring in one place so the agent
+   picker, per-repo controls, and group-create transaction can share the
+   same state without splitting into incidentally-coupled fragments. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LoaderCircle, RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'
@@ -6,10 +10,16 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import RepoDotLabel from '@/components/repo/RepoDotLabel'
 import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
+import AgentCombobox from '@/components/agent/AgentCombobox'
+import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import { useAppStore } from '@/store'
 import { useRepos, useWorkspaceGroups } from '@/store/selectors'
 import { basename } from '@/lib/path'
 import { cn } from '@/lib/utils'
+import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
+import { CLIENT_PLATFORM } from '@/lib/new-workspace'
+import { tuiAgentToAgentKind } from '@/lib/telemetry'
 import { generateUniqueWorkspaceName } from '../../../shared/workspace-name-generator'
 import { validateGroupName } from '../../../shared/workspace-group-namespace'
 import type {
@@ -17,7 +27,8 @@ import type {
   CreateWorkspaceGroupArgs,
   CreateWorkspaceGroupResult,
   Repo,
-  SetupDecision
+  SetupDecision,
+  TuiAgent
 } from '../../../shared/types'
 
 const SETUP_DECISIONS: { value: SetupDecision; label: string }[] = [
@@ -61,7 +72,65 @@ export default function GroupedComposerForm({
   const repos = useRepos()
   const existingGroups = useWorkspaceGroups()
   const createGroup = useAppStore((s) => s.createGroup)
-  const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
+  const settings = useAppStore((s) => s.settings)
+  const updateSettings = useAppStore((s) => s.updateSettings)
+  const detectedAgentList = useAppStore((s) => s.detectedAgentIds)
+  const ensureDetectedAgents = useAppStore((s) => s.ensureDetectedAgents)
+  const closeModal = useAppStore((s) => s.closeModal)
+
+  // Why: grouped composer is local-only in v1 (uniform-connection guard
+  // refuses mixed local+SSH members), so detectedAgentIds always comes from
+  // the local detector. Match the single-repo composer's set/null convention
+  // so AgentCombobox can dim agents the user hasn't installed yet.
+  useEffect(() => {
+    void ensureDetectedAgents()
+  }, [ensureDetectedAgents])
+  const detectedAgentIds = useMemo<Set<TuiAgent> | null>(
+    () => (detectedAgentList ? new Set(detectedAgentList) : null),
+    [detectedAgentList]
+  )
+  const visibleQuickAgents = useMemo(
+    () =>
+      AGENT_CATALOG.filter((agent) => detectedAgentIds === null || detectedAgentIds.has(agent.id)),
+    [detectedAgentIds]
+  )
+
+  // Why: default to the user's persisted last-used agent. 'blank' means
+  // explicit "no agent" — surface it as null so the combobox renders the
+  // "Blank terminal" sentinel, matching NewWorkspaceComposerCard's quick
+  // path. When no preference is set, fall through to the first installed
+  // agent in the catalog.
+  const preferredAgent = useMemo<TuiAgent | null>(() => {
+    const pref = settings?.defaultTuiAgent
+    if (pref === 'blank') {
+      return null
+    }
+    if (pref) {
+      return pref
+    }
+    return (
+      AGENT_CATALOG.find((agent) => detectedAgentIds === null || detectedAgentIds.has(agent.id))
+        ?.id ?? null
+    )
+  }, [detectedAgentIds, settings?.defaultTuiAgent])
+  const [agentOverride, setAgentOverride] = useState<TuiAgent | null | undefined>(undefined)
+  const selectedAgent = agentOverride === undefined ? preferredAgent : agentOverride
+  const handleAgentChange = useCallback((agent: TuiAgent | null) => {
+    setAgentOverride(agent)
+  }, [])
+  const handleSetDefaultAgent = useCallback(
+    (next: TuiAgent | 'blank' | null) => {
+      updateSettings({ defaultTuiAgent: next })
+    },
+    [updateSettings]
+  )
+  const handleOpenAgentSettings = useCallback(() => {
+    // Why: the inline AgentSettingsDialog used by the single-repo quick path
+    // is nested in NewWorkspaceComposerModal; reaching it from here would
+    // require lifting state. Close the composer so the user can open
+    // Settings → Agents from the main app without focus trapping.
+    closeModal()
+  }, [closeModal])
 
   // Why: precompute the taken-name set so name generation + validation share
   // one source of truth. Includes repo folder basenames and live group names.
@@ -178,7 +247,12 @@ export default function GroupedComposerForm({
         return {
           repoId: repo.id,
           baseRef: rawBase ? rawBase : null,
-          setupDecision: setupDecisions[repo.id] ?? 'inherit'
+          setupDecision: setupDecisions[repo.id] ?? 'inherit',
+          // Why: stamp the selected agent on every member so each worktree's
+          // reopen-path can resurrect the agent if the user later closes the
+          // shared terminal and re-activates a member. Members share an agent
+          // choice today; the single-repo composer applies the same rule.
+          ...(selectedAgent ? { createdWithAgent: selectedAgent } : {})
         }
       })
       const args: CreateWorkspaceGroupArgs = {
@@ -188,12 +262,41 @@ export default function GroupedComposerForm({
         telemetrySource: 'composer'
       }
       const result = await createGroup(args)
-      // Why: group activation is wired up in a later phase; for now we land
-      // the user on the first member worktree so the create flow at least
-      // navigates somewhere meaningful.
       const firstMember = result.memberWorktrees[0]
       if (firstMember) {
-        setActiveWorktree(firstMember.id)
+        // Why: build the same startup plan the single-repo quick path uses, so
+        // the initial terminal opens running the chosen agent. The Phase J1
+        // PTY override redirects CWD to the group's parentPath automatically
+        // when the member belongs to a group — see pty.ts.
+        const startupPlan = selectedAgent
+          ? buildAgentStartupPlan({
+              agent: selectedAgent,
+              prompt: '',
+              cmdOverrides: settings?.agentCmdOverrides ?? {},
+              platform: CLIENT_PLATFORM,
+              allowEmptyPromptLaunch: true
+            })
+          : null
+        activateAndRevealWorktree(
+          firstMember.id,
+          startupPlan
+            ? {
+                startup: {
+                  command: startupPlan.launchCommand,
+                  ...(startupPlan.env ? { env: startupPlan.env } : {}),
+                  ...(selectedAgent
+                    ? {
+                        telemetry: {
+                          agent_kind: tuiAgentToAgentKind(selectedAgent),
+                          launch_source: 'new_workspace_composer',
+                          request_kind: 'new'
+                        }
+                      }
+                    : {})
+                }
+              }
+            : undefined
+        )
       }
       onCreated(result)
     } catch (err) {
@@ -210,8 +313,9 @@ export default function GroupedComposerForm({
     createGroup,
     groupName,
     onCreated,
+    selectedAgent,
     selectedRepos,
-    setActiveWorktree,
+    settings?.agentCmdOverrides,
     setupDecisions
   ])
 
@@ -314,6 +418,22 @@ export default function GroupedComposerForm({
             {branchNameError}
           </p>
         )}
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">Agent</label>
+        <AgentCombobox
+          agents={visibleQuickAgents}
+          value={selectedAgent}
+          onValueChange={handleAgentChange}
+          onOpenManageAgents={handleOpenAgentSettings}
+          defaultAgent={settings?.defaultTuiAgent ?? null}
+          onSetDefault={handleSetDefaultAgent}
+          triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Launches in the first member&apos;s terminal at the group&apos;s parent folder.
+        </p>
       </div>
 
       {selectedRepos.length > 0 ? (

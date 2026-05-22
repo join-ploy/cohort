@@ -113,6 +113,11 @@ export async function createWorkspaceGroup(
       ...(args.displayName ? { displayName: args.displayName } : {}),
       ...(member.baseRef ? { baseBranch: member.baseRef } : {}),
       setupDecision: member.setupDecision,
+      // Why: stamp createdWithAgent per-member so the worktree-reopen flow
+      // (buildCreatedAgentReopenStartup) can re-seed the same agent if the
+      // user closes the terminal and re-activates the member later. Mirrors
+      // the single-repo CreateWorktreeArgs path.
+      ...(member.createdWithAgent ? { createdWithAgent: member.createdWithAgent } : {}),
       ...(args.createdByAutomationRunId
         ? { createdByAutomationRunId: args.createdByAutomationRunId }
         : {}),

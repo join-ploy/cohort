@@ -1041,6 +1041,10 @@ export type CreateGroupMemberSpec = {
   /** Base ref to branch from. null = use the repo's default base (worktreeBaseRef → main). */
   baseRef: string | null
   setupDecision: SetupDecision
+  /** Agent selected in the create surface. Stamped onto each member's
+   *  WorktreeMeta so reopening any member after the original terminal closes
+   *  re-seeds the same agent (mirrors the single-repo create flow). */
+  createdWithAgent?: TuiAgent
 }
 
 export type CreateWorkspaceGroupArgs = {

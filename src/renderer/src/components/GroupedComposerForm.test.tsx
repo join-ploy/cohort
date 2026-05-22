@@ -58,6 +58,11 @@ type StoreState = {
   workspaceGroups: WorkspaceGroup[]
   createGroup: ReturnType<typeof vi.fn>
   setActiveWorktree: ReturnType<typeof vi.fn>
+  settings: { defaultTuiAgent: string | null; agentCmdOverrides: Record<string, string> } | null
+  updateSettings: ReturnType<typeof vi.fn>
+  detectedAgentIds: string[]
+  ensureDetectedAgents: ReturnType<typeof vi.fn>
+  closeModal: ReturnType<typeof vi.fn>
 }
 
 const mocks = vi.hoisted(() => {
@@ -66,8 +71,14 @@ const mocks = vi.hoisted(() => {
       repos: [],
       workspaceGroups: [],
       createGroup: vi.fn(),
-      setActiveWorktree: vi.fn()
-    } as StoreState
+      setActiveWorktree: vi.fn(),
+      settings: { defaultTuiAgent: null, agentCmdOverrides: {} },
+      updateSettings: vi.fn(),
+      detectedAgentIds: [],
+      ensureDetectedAgents: vi.fn().mockResolvedValue(undefined),
+      closeModal: vi.fn()
+    } as StoreState,
+    activateAndRevealWorktree: vi.fn().mockReturnValue({ primaryTabId: 'tab-1' })
   }
 })
 
@@ -83,6 +94,12 @@ vi.mock('@/store/selectors', async () => {
     useWorkspaceGroups: () => mocks.state.workspaceGroups
   }
 })
+
+vi.mock('@/lib/worktree-activation', () => ({
+  activateAndRevealWorktree: (
+    ...args: Parameters<typeof mocks.activateAndRevealWorktree>
+  ): ReturnType<typeof mocks.activateAndRevealWorktree> => mocks.activateAndRevealWorktree(...args)
+}))
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn() }
@@ -165,6 +182,10 @@ describe('<GroupedComposerForm />', () => {
     mocks.state.workspaceGroups = []
     mocks.state.createGroup.mockReset()
     mocks.state.setActiveWorktree.mockReset()
+    mocks.state.ensureDetectedAgents.mockClear()
+    mocks.state.updateSettings.mockClear()
+    mocks.state.closeModal.mockClear()
+    mocks.activateAndRevealWorktree.mockClear()
     // Why: stable picks for generateUniqueWorkspaceName so the initial group
     // name doesn't drift between runs.
     Math.random = () => 0
@@ -186,7 +207,9 @@ describe('<GroupedComposerForm />', () => {
     renderForm()
 
     // Open the repo multi-combobox and pick two repos to clear the < 2 gate.
-    await user.click(screen.getByRole('combobox'))
+    // Why: both RepoMultiCombobox and AgentCombobox expose role="combobox";
+    // the first one in document order is the repo picker.
+    await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByRole('option', { name: /alpha/i }))
     await user.click(await screen.findByRole('option', { name: /beta/i }))
     await user.keyboard('{Escape}')
@@ -256,7 +279,9 @@ describe('<GroupedComposerForm />', () => {
     const onCreated = vi.fn()
     renderForm({ onCreated })
 
-    await user.click(screen.getByRole('combobox'))
+    // Why: both RepoMultiCombobox and AgentCombobox expose role="combobox";
+    // the first one in document order is the repo picker.
+    await user.click(screen.getAllByRole('combobox')[0])
     await user.click(await screen.findByRole('option', { name: /alpha/i }))
     await user.click(await screen.findByRole('option', { name: /beta/i }))
     await user.keyboard('{Escape}')
@@ -284,7 +309,71 @@ describe('<GroupedComposerForm />', () => {
     for (const member of args.members) {
       expect(member.setupDecision).toBe('inherit')
     }
-    expect(mocks.state.setActiveWorktree).toHaveBeenCalledWith(memberWorktree.id)
+    // Why: post-create activation now routes through activateAndRevealWorktree
+    // so the first member's terminal opens with the agent startup plan.
+    // setActiveWorktree is no longer called from this surface.
+    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledTimes(1)
+    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith(memberWorktree.id, undefined)
+    expect(mocks.state.setActiveWorktree).not.toHaveBeenCalled()
     expect(onCreated).toHaveBeenCalledTimes(1)
+  })
+
+  it('stamps createdWithAgent on each member and seeds the startup command for the first member', async () => {
+    const user = userEvent.setup()
+    mocks.state.detectedAgentIds = ['claude', 'codex']
+    mocks.state.settings = { defaultTuiAgent: 'claude', agentCmdOverrides: {} }
+    const memberA = makeWorktree('repo-a::/tmp/alpha/x', 'repo-a')
+    const memberB = makeWorktree('repo-b::/tmp/beta/x', 'repo-b')
+    mocks.state.createGroup.mockResolvedValue({
+      group: {
+        id: 'group:new',
+        workspaceName: 'team_build',
+        displayName: 'team_build',
+        parentPath: '/tmp/team_build',
+        memberWorktreeIds: [memberA.id, memberB.id],
+        branchName: 'team_build',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      } as WorkspaceGroup,
+      memberWorktrees: [memberA, memberB]
+    })
+
+    renderForm()
+
+    // Why: both RepoMultiCombobox and AgentCombobox expose role="combobox";
+    // the first one in document order is the repo picker.
+    await user.click(screen.getAllByRole('combobox')[0])
+    await user.click(await screen.findByRole('option', { name: /alpha/i }))
+    await user.click(await screen.findByRole('option', { name: /beta/i }))
+    await user.keyboard('{Escape}')
+
+    const nameInput = getGroupNameInput()
+    await user.clear(nameInput)
+    await user.type(nameInput, 'team_build')
+
+    await act(async () => {
+      await user.click(getSubmitButton())
+    })
+
+    const args = mocks.state.createGroup.mock.calls[0][0] as CreateWorkspaceGroupArgs
+    for (const member of args.members) {
+      expect(member.createdWithAgent).toBe('claude')
+    }
+    // activateAndRevealWorktree got a startup plan with a non-empty command.
+    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledTimes(1)
+    const [targetWorktreeId, opts] = mocks.activateAndRevealWorktree.mock.calls[0] as [
+      string,
+      { startup?: { command: string } } | undefined
+    ]
+    expect(targetWorktreeId).toBe(memberA.id)
+    expect(opts?.startup?.command).toBeTruthy()
   })
 })
