@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Loader2 } from 'lucide-react'
 import { useAppStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import {
   getGroupByWorktreeId,
   getMemberWorktreesForGroup,
@@ -419,14 +420,22 @@ function FileExplorer(): React.JSX.Element {
   const group = useAppStore((s) =>
     activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
   )
-  const groupMembers = useAppStore((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  // Why: useShallow — getMemberWorktreesForGroup returns a fresh array each
+  // call. Without element-wise comparison, useSyncExternalStore re-enters on
+  // every state mutation and trips React's max-update-depth guard. Same for
+  // memberChangedCounts which maps over groupMembers.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
   const repoMap = useAppStore((s) => getRepoMapFromState(s))
-  const memberChangedCounts = useAppStore((s) => {
-    if (!groupMembers) {
-      return null
-    }
-    return groupMembers.map((wt) => (s.gitStatusByWorktree[wt.id] ?? []).length)
-  })
+  const memberChangedCounts = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => (s.gitStatusByWorktree[wt.id] ?? []).length)
+    })
+  )
 
   if (group && groupMembers && groupMembers.length > 0) {
     return (

@@ -276,6 +276,34 @@ describe('mergeWorktree', () => {
     const result = mergeWorktree('repo1', bareGit, undefined)
     expect(result.displayName).toBe('bare-repo')
   })
+
+  it('threads groupId from metadata to the runtime worktree', () => {
+    // Why: visible-worktrees filters group members via `!w.groupId`. If
+    // mergeWorktree silently drops meta.groupId, members re-appear under
+    // their repo section after every worktrees:list refresh.
+    const meta = {
+      displayName: 'member',
+      workspaceName: 'daring_tiger',
+      comment: '',
+      linkedIssue: null,
+      linkedPR: null,
+      linkedLinearIssue: null,
+      isArchived: false,
+      archivedAt: null,
+      isUnread: false,
+      isPinned: false,
+      sortOrder: 0,
+      lastActivityAt: 0,
+      groupId: 'group:abc'
+    }
+    const result = mergeWorktree('repo1', baseGit, meta)
+    expect(result.groupId).toBe('group:abc')
+  })
+
+  it('omits groupId when metadata does not set it', () => {
+    const result = mergeWorktree('repo1', baseGit, undefined)
+    expect(result.groupId).toBeUndefined()
+  })
 })
 
 describe('parseWorktreeId', () => {

@@ -3,6 +3,7 @@ import { Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import {
   getGroupByWorktreeId,
   getMemberWorktreesForGroup,
@@ -196,14 +197,22 @@ export default function RunPanel(): React.JSX.Element {
   const group = useAppStore((s) =>
     activeWorktree ? getGroupByWorktreeId(s, activeWorktree.id) : null
   )
-  const groupMembers = useAppStore((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  // Why: useShallow — getMemberWorktreesForGroup returns a freshly-built
+  // array each call (it iterates memberWorktreeIds). Without element-wise
+  // comparison, useSyncExternalStore sees a new reference every render and
+  // re-enters → infinite update loop. Same applies to memberRunStates below.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
   const repoMap = useAppStore((s) => getRepoMapFromState(s))
-  const memberRunStates = useAppStore((s) => {
-    if (!groupMembers) {
-      return null
-    }
-    return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.run ?? null)
-  })
+  const memberRunStates = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.run ?? null)
+    })
+  )
   // Why: `orca.yaml` is parsed in the main process; we read it via the
   // existing hooks:check IPC and cache the trimmed run script in local state.
   // Re-fetched whenever the active repo changes so switching repos picks up

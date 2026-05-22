@@ -3,6 +3,7 @@ import { Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
+import { useShallow } from 'zustand/react/shallow'
 import {
   getGroupByWorktreeId,
   getMemberWorktreesForGroup,
@@ -219,14 +220,22 @@ export default function SetupPanel(): React.JSX.Element {
   const group = useAppStore((s) =>
     activeWorktree ? getGroupByWorktreeId(s, activeWorktree.id) : null
   )
-  const groupMembers = useAppStore((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  // Why: useShallow — getMemberWorktreesForGroup returns a fresh array each
+  // call. Without element-wise comparison, useSyncExternalStore re-enters on
+  // every state mutation and trips React's max-update-depth guard. Same for
+  // memberSetupStates which maps over groupMembers.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
   const repoMap = useAppStore((s) => getRepoMapFromState(s))
-  const memberSetupStates = useAppStore((s) => {
-    if (!groupMembers) {
-      return null
-    }
-    return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.setup ?? null)
-  })
+  const memberSetupStates = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.setup ?? null)
+    })
+  )
 
   // Why: `orca.yaml` is parsed in main; we read it via the existing
   // hooks:check IPC and cache the trimmed setup script in local state.

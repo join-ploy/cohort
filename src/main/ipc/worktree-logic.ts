@@ -259,6 +259,11 @@ export function mergeWorktree(
       : {}),
     ...(meta?.baseRef !== undefined ? { baseRef: meta.baseRef } : {}),
     ...(meta?.pushTarget !== undefined ? { pushTarget: meta.pushTarget } : {}),
+    // Why: groupId is the link from a member worktree back to its
+    // WorkspaceGroup. Without threading it here, the sidebar's
+    // computeVisibleWorktreeIds filter (!w.groupId) never fires and members
+    // re-appear under their repo section after every worktrees:list refresh.
+    ...(meta?.groupId !== undefined ? { groupId: meta.groupId } : {}),
     // Why: diff comments are persisted on WorktreeMeta (see `WorktreeMeta` in
     // shared/types) and forwarded verbatim so the renderer store mirrors
     // on-disk state. `undefined` here means the worktree has no comments yet.
