@@ -65,6 +65,11 @@ import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
+import { AutoTriggerEngine } from './automations/auto-trigger-engine'
+import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
+import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
+import { getClient as getLinearClient } from './linear/client'
+import type { TriggerSourceId } from '../shared/automations-types'
 import { AgentStatusRegistry } from './agent-status/registry'
 import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
@@ -634,7 +639,52 @@ app.whenReady().then(async () => {
       await archiveCleanup?.runOnce()
     })
   }
+  // Why: assemble the auto-trigger engine alongside the AutomationService so
+  // both share a single store/lifecycle. The Linear source pulls its client
+  // lazily from getLinearClient() — an unauthenticated launch still wires the
+  // source (poll() returns zero events) and a later connect/disconnect is
+  // observed on the next tick without rebuilding the registry.
+  const triggerSourceRegistry = new TriggerSourceRegistry()
+  triggerSourceRegistry.register(makeLinearIssueSource({ client: getLinearClient() }))
+  // TODO(SSH): hostId varies per remote target once SSH execution lands.
+  const AUTO_TRIGGER_HOST_ID = 'local'
+  // TODO(persist): in-memory until we add a per-source watermark table to the
+  // settings store; restart falls back to enabledAt and re-polls any backlog.
+  const autoTriggerWatermarks = new Map<string, number>()
+  const autoTriggerEngine = new AutoTriggerEngine({
+    registry: triggerSourceRegistry,
+    listAutomations: () => storeRef.listAutomations(),
+    dispatchAutoRun: ({ automation, trigger, rule, event }) => {
+      // TODO(Phase 7): wire to service.dispatchAutoRun
+      console.info('[auto-trigger] would dispatch', {
+        automationId: automation.id,
+        triggerId: trigger.id,
+        ruleId: rule.id,
+        entityId: event.entityId
+      })
+    },
+    dedupHas: (a, t, e) => storeRef.hasAutomationAutoDedup(a, t, e),
+    dedupInsert: (automationId, autoTriggerId, sourceId, entityId, entityIdentifier, firedAt) => {
+      storeRef.insertAutomationAutoDedup({
+        automationId,
+        autoTriggerId,
+        sourceId,
+        entityId,
+        ...(entityIdentifier !== undefined ? { entityIdentifier } : {}),
+        firedAt
+      })
+    },
+    lastPoll: (sourceId: TriggerSourceId, hostId) =>
+      autoTriggerWatermarks.get(`${sourceId}|${hostId}`) ?? 0,
+    lastPollSet: (sourceId: TriggerSourceId, hostId, value) => {
+      autoTriggerWatermarks.set(`${sourceId}|${hostId}`, value)
+    },
+    hostId: AUTO_TRIGGER_HOST_ID,
+    now: () => Date.now()
+  })
   automations = new AutomationService(store, {
+    autoTriggerEngine,
+    getAutoTriggerPollIntervalSeconds: () => storeRef.getAutomationsPollIntervalSeconds(),
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
     getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey),
