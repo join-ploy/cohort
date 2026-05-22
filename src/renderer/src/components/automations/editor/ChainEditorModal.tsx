@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: the chain editor modal co-locates its
+   header, body, footer, add-step picker, run-now confirm modal, and triggers
+   sub-modal so the full editor surface stays in one file as it evolves. */
 import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -12,11 +15,13 @@ const isMac =
   navigator.userAgent.includes('Mac')
 import type {
   Automation,
+  AutoTrigger,
   RunNowPayload,
   Step,
   StepConfig,
   StepKind,
-  TriggerConfig
+  TriggerConfig,
+  TriggerSourceId
 } from '../../../../../shared/automations-types'
 import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
@@ -39,6 +44,13 @@ import { AvailableVariablesPanel } from './AvailableVariablesPanel'
 import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
 import { RunNowConfirmModal } from './RunNowConfirmModal'
 import { TriggerPill } from './TriggerPill'
+import { TriggersModal } from './TriggersModal'
+
+// Why: Phase 13 will replace this with an IPC call to the source registry.
+// For now ChainEditorModal hardcodes the only registered source.
+const AVAILABLE_TRIGGER_SOURCES: { id: TriggerSourceId; label: string }[] = [
+  { id: 'linear-issue', label: 'Linear issue' }
+]
 
 export type ChainEditorModalProps = {
   open: boolean
@@ -68,6 +80,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [saving, setSaving] = React.useState(false)
   const [addOpen, setAddOpen] = React.useState(false)
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
+  const [triggersModalOpen, setTriggersModalOpen] = React.useState(false)
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
     const base = computeAllErrors(draft)
@@ -173,6 +186,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         enabled: draft.enabled,
         trigger: draft.trigger,
         steps: draft.steps,
+        autoTriggers: draft.autoTriggers,
         updatedAt: now,
         createdAt: base.createdAt || now
       }
@@ -217,11 +231,12 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         repos={props.repos}
         enabled={draft.enabled}
         trigger={draft.trigger}
+        autoTriggers={draft.autoTriggers}
         canRunNow={canRunNow}
         onNameChange={(name) => updateDraft({ name })}
         onProjectChange={(projectId) => updateDraft({ projectId })}
         onEnabledChange={(enabled) => updateDraft({ enabled })}
-        onTriggerChange={(trigger) => updateDraft({ trigger })}
+        onOpenTriggers={() => setTriggersModalOpen(true)}
         onRunNow={() => {
           if (!props.automation || !props.onRunNow) {
             return
@@ -250,6 +265,19 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
           }}
         />
       ) : null}
+
+      <TriggersModal
+        open={triggersModalOpen}
+        automationId={props.automation?.id ?? ''}
+        trigger={draft.trigger}
+        autoTriggers={draft.autoTriggers}
+        availableSources={AVAILABLE_TRIGGER_SOURCES}
+        onSave={(next) => {
+          updateDraft({ trigger: next.trigger, autoTriggers: next.autoTriggers })
+          setTriggersModalOpen(false)
+        }}
+        onCancel={() => setTriggersModalOpen(false)}
+      />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
@@ -297,11 +325,12 @@ type ChainEditorHeaderProps = {
   repos: Repo[]
   enabled: boolean
   trigger: TriggerConfig
+  autoTriggers: AutoTrigger[]
   canRunNow: boolean
   onNameChange: (name: string) => void
   onProjectChange: (projectId: string) => void
   onEnabledChange: (enabled: boolean) => void
-  onTriggerChange: (trigger: TriggerConfig) => void
+  onOpenTriggers: () => void
   onRunNow: () => void
   onClose: () => void
 }
@@ -346,7 +375,11 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
         />
         Enabled
       </label>
-      <TriggerPill trigger={props.trigger} onTriggerChange={props.onTriggerChange} />
+      <TriggerPill
+        trigger={props.trigger}
+        autoTriggers={props.autoTriggers}
+        onOpenTriggers={props.onOpenTriggers}
+      />
       <Button
         variant="outline"
         size="sm"

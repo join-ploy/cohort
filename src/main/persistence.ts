@@ -8,12 +8,14 @@ import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import type {
+  AutoDedupEntry,
   Automation,
   AutomationCreateInput,
   AutomationDispatchResult,
   AutomationRun,
   AutomationRunTrigger,
-  AutomationUpdateInput
+  AutomationUpdateInput,
+  TriggerSourceId
 } from '../shared/automations-types'
 import {
   latestAutomationOccurrenceAtOrBefore,
@@ -235,6 +237,14 @@ function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
   }
 }
 
+// Why: poll interval is read and written from multiple paths (dedicated
+// setter, generic updateSettings merge, getter clamp-on-read). Centralizing
+// the NaN guard + [15, 600] bounds keeps the three sites in lockstep.
+function clampAutomationsPollIntervalSeconds(value: unknown): number {
+  const v = typeof value === 'number' && Number.isFinite(value) ? value : 60
+  return Math.max(15, Math.min(600, v))
+}
+
 export class Store {
   private state: PersistedState
   private writeTimer: ReturnType<typeof setTimeout> | null = null
@@ -422,6 +432,9 @@ export class Store {
             ? parsed.automations.map(upgradeLegacyAutomation)
             : [],
           automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
+          automationAutoDedup: Array.isArray(parsed.automationAutoDedup)
+            ? parsed.automationAutoDedup
+            : [],
           onboarding: (() => {
             // Why: if we successfully parsed an existing orca-data.json that
             // lacks an onboarding block, this is an upgrade-cohort user —
@@ -857,7 +870,8 @@ export class Store {
       createdAt: now,
       updatedAt: now,
       ...(input.trigger ? { trigger: input.trigger } : {}),
-      ...(input.steps ? { steps: input.steps } : {})
+      ...(input.steps ? { steps: input.steps } : {}),
+      ...(input.autoTriggers ? { autoTriggers: input.autoTriggers } : {})
     }
     this.state.automations = [...(this.state.automations ?? []), automation]
     this.flush()
@@ -928,7 +942,14 @@ export class Store {
   createAutomationRun(
     automation: Automation,
     scheduledFor: number,
-    trigger: AutomationRunTrigger = 'scheduled'
+    trigger: AutomationRunTrigger = 'scheduled',
+    metadata?: {
+      triggerSource?: TriggerSourceId
+      triggerAutoTriggerId?: string
+      triggerRuleId?: string
+      triggerEntityId?: string
+      restartedFromRunId?: string
+    }
   ): AutomationRun {
     const existing = (this.state.automationRuns ?? []).find(
       (run) => run.automationId === automation.id && run.scheduledFor === scheduledFor
@@ -940,6 +961,8 @@ export class Store {
     const runNumber =
       (this.state.automationRuns ?? []).filter((run) => run.automationId === automation.id).length +
       1
+    // Why: spread only defined metadata keys so the persisted JSON stays tidy
+    // for scheduled/manual runs that have no auto-trigger provenance.
     const run: AutomationRun = {
       id: randomUUID(),
       automationId: automation.id,
@@ -954,7 +977,14 @@ export class Store {
       error: null,
       startedAt: null,
       dispatchedAt: null,
-      createdAt: now
+      createdAt: now,
+      ...(metadata?.triggerSource ? { triggerSource: metadata.triggerSource } : {}),
+      ...(metadata?.triggerAutoTriggerId
+        ? { triggerAutoTriggerId: metadata.triggerAutoTriggerId }
+        : {}),
+      ...(metadata?.triggerRuleId ? { triggerRuleId: metadata.triggerRuleId } : {}),
+      ...(metadata?.triggerEntityId ? { triggerEntityId: metadata.triggerEntityId } : {}),
+      ...(metadata?.restartedFromRunId ? { restartedFromRunId: metadata.restartedFromRunId } : {})
     }
     this.state.automationRuns = [...(this.state.automationRuns ?? []), run]
     this.flush()
@@ -1026,6 +1056,67 @@ export class Store {
     return latestAutomationOccurrenceAtOrBefore(automation.rrule, automation.dtstart, now)
   }
 
+  // ── Auto-trigger dedup + poll interval ─────────────────────────────
+
+  listAutomationAutoDedup(automationId?: string, autoTriggerId?: string): AutoDedupEntry[] {
+    const all = this.state.automationAutoDedup ?? []
+    return all.filter(
+      (e) =>
+        (automationId == null || e.automationId === automationId) &&
+        (autoTriggerId == null || e.autoTriggerId === autoTriggerId)
+    )
+  }
+
+  hasAutomationAutoDedup(automationId: string, autoTriggerId: string, entityId: string): boolean {
+    return (this.state.automationAutoDedup ?? []).some(
+      (e) =>
+        e.automationId === automationId &&
+        e.autoTriggerId === autoTriggerId &&
+        e.entityId === entityId
+    )
+  }
+
+  insertAutomationAutoDedup(entry: AutoDedupEntry): void {
+    // Why: keep the table append-only and idempotent on its natural key so a
+    // double-fire from the poller can't create a duplicate row.
+    if (this.hasAutomationAutoDedup(entry.automationId, entry.autoTriggerId, entry.entityId)) {
+      return
+    }
+    this.state.automationAutoDedup = [...(this.state.automationAutoDedup ?? []), entry]
+    this.flush()
+  }
+
+  clearAutomationAutoDedup(automationId: string, autoTriggerId: string, entityId?: string): void {
+    this.state.automationAutoDedup = (this.state.automationAutoDedup ?? []).filter((e) => {
+      if (e.automationId !== automationId) {
+        return true
+      }
+      if (e.autoTriggerId !== autoTriggerId) {
+        return true
+      }
+      if (entityId == null) {
+        return false
+      }
+      return e.entityId !== entityId
+    })
+    this.flush()
+  }
+
+  getAutomationsPollIntervalSeconds(): number {
+    // Why: clamp on read so a corrupt persisted value (0/negative/NaN) can't
+    // starve the poller — Math.min/max with NaN returns NaN, which would make
+    // setTimeout fall back to a 1ms loop.
+    return clampAutomationsPollIntervalSeconds(this.state.settings.automationsPollIntervalSeconds)
+  }
+
+  setAutomationsPollIntervalSeconds(value: number): void {
+    this.state.settings = {
+      ...this.state.settings,
+      automationsPollIntervalSeconds: clampAutomationsPollIntervalSeconds(value)
+    }
+    this.flush()
+  }
+
   // ── Worktree Meta ──────────────────────────────────────────────────
 
   getWorktreeMeta(worktreeId: string): WorktreeMeta | undefined {
@@ -1083,6 +1174,13 @@ export class Store {
       updates.telemetry !== undefined
         ? { ...this.state.settings.telemetry, ...updates.telemetry }
         : this.state.settings.telemetry
+    // Why: apply the [15, 600] clamp + NaN guard for the poll interval here
+    // too so it holds regardless of which IPC path the renderer uses
+    // (dedicated setter vs generic settings:set merge).
+    const pollIntervalOverride =
+      updates.automationsPollIntervalSeconds !== undefined
+        ? clampAutomationsPollIntervalSeconds(updates.automationsPollIntervalSeconds)
+        : undefined
     this.state.settings = {
       ...this.state.settings,
       ...updates,
@@ -1090,7 +1188,10 @@ export class Store {
         ...this.state.settings.notifications,
         ...updates.notifications
       },
-      ...(mergedTelemetry !== undefined ? { telemetry: mergedTelemetry } : {})
+      ...(mergedTelemetry !== undefined ? { telemetry: mergedTelemetry } : {}),
+      ...(pollIntervalOverride !== undefined
+        ? { automationsPollIntervalSeconds: pollIntervalOverride }
+        : {})
     }
     this.scheduleSave()
     return this.state.settings

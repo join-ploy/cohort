@@ -15,7 +15,8 @@ const baseDraft: ChainDraft = {
   projectId: 'p',
   trigger: { kind: 'manual' },
   enabled: true,
-  steps: []
+  steps: [],
+  autoTriggers: []
 }
 
 // Reference baseDraft so the unused-var lint stays quiet — the const is here

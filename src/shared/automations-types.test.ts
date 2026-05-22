@@ -1,6 +1,10 @@
-import { describe, it, expectTypeOf } from 'vitest'
+import { describe, it, expect, expectTypeOf } from 'vitest'
 import type {
   Automation,
+  AutomationRun,
+  AutoTrigger,
+  Rule,
+  Condition,
   TriggerConfig,
   Step,
   StepConfig,
@@ -125,5 +129,78 @@ describe('manual payload types', () => {
     expectTypeOf<LinearIssuePayload['assigneeEmail']>().toEqualTypeOf<string>()
     expectTypeOf<LinearIssuePayload['stateName']>().toEqualTypeOf<string>()
     expectTypeOf<LinearIssuePayload['priority']>().toEqualTypeOf<number>()
+  })
+})
+
+describe('AutoTrigger shape', () => {
+  it('accepts a minimal linear-issue auto trigger', () => {
+    const cond: Condition = {
+      field: 'linear.assignee',
+      op: 'is',
+      value: 'me@example.com'
+    }
+    const rule: Rule = {
+      id: 'r1',
+      conditions: [cond],
+      projectId: 'p1'
+    }
+    const trig: AutoTrigger = {
+      id: 'at1',
+      source: 'linear-issue',
+      enabled: true,
+      enabledAt: 1_700_000_000_000,
+      rules: [rule]
+    }
+    const a: Automation = {
+      id: 'a1',
+      name: 'x',
+      prompt: 'p',
+      agentId: 'claude',
+      projectId: 'p1',
+      executionTargetType: 'local',
+      executionTargetId: 'local',
+      schedulerOwner: 'local_host_service',
+      workspaceMode: 'new_per_run',
+      workspaceId: null,
+      baseBranch: 'main',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      enabled: true,
+      nextRunAt: 0,
+      missedRunPolicy: 'run_once_within_grace',
+      missedRunGraceMinutes: 5,
+      createdAt: 0,
+      updatedAt: 0,
+      autoTriggers: [trig]
+    }
+    expect(a.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+  })
+})
+
+describe('AutomationRun trigger metadata', () => {
+  it('AutomationRun records auto-trigger metadata', () => {
+    const r: AutomationRun = {
+      id: 'r1',
+      automationId: 'a1',
+      title: 't',
+      scheduledFor: 0,
+      status: 'pending',
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at1',
+      triggerRuleId: 'r1',
+      triggerEntityId: 'ORC-123',
+      restartedFromRunId: undefined,
+      workspaceId: null,
+      sessionKind: 'terminal',
+      chatSessionId: null,
+      terminalSessionId: null,
+      error: null,
+      startedAt: null,
+      dispatchedAt: null,
+      createdAt: 0
+    }
+    expect(r.trigger).toBe('auto')
   })
 })

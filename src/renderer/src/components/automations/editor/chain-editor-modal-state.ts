@@ -136,7 +136,8 @@ export function seedDraft(automation: Automation | null): ChainDraft {
       projectId: '',
       trigger: { kind: 'manual' },
       enabled: true,
-      steps: []
+      steps: [],
+      autoTriggers: []
     }
   }
   return {
@@ -145,7 +146,8 @@ export function seedDraft(automation: Automation | null): ChainDraft {
     projectId: automation.projectId,
     trigger: automation.trigger ?? { kind: 'manual' },
     enabled: automation.enabled,
-    steps: automation.steps ?? []
+    steps: automation.steps ?? [],
+    autoTriggers: automation.autoTriggers ?? []
   }
 }
 

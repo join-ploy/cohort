@@ -1,7 +1,17 @@
+/* oxlint-disable max-lines -- Why: this file covers step-state rendering,
+ * trigger-badge variants, restart-button gating, restart lineage links, and
+ * the isRestartable helper for AutomationDetail. Splitting would force
+ * shared fixtures (chainRun, worktreeMap, mocks) to be duplicated. */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect, vi } from 'vitest'
-import type { Automation, AutomationRun, StepRunState } from '../../../../shared/automations-types'
-import type { Worktree } from '../../../../shared/types'
+import type {
+  Automation,
+  AutomationRun,
+  AutomationRunStatus,
+  Step,
+  StepRunState
+} from '../../../../shared/automations-types'
+import type { Repo, Worktree } from '../../../../shared/types'
 
 // Why: AutomationDetail pulls in tooltip + agent-catalog icons. Mock the
 // boundaries so the test stays focused on the new step-states rendering.
@@ -251,5 +261,465 @@ describe('AutomationDetail step states', () => {
     )
     expect(markup).not.toContain('ORC-')
     expect(markup).not.toContain('linear.app')
+  })
+})
+
+const seededRepo: Repo = {
+  id: 'repo-1',
+  path: '/repo/orca-repo',
+  displayName: 'orca-repo',
+  badgeColor: '#000',
+  addedAt: 0
+}
+
+const automationWithAutoTrigger: Automation = {
+  ...baseAutomation,
+  autoTriggers: [
+    {
+      id: 'at-1',
+      source: 'linear-issue',
+      enabled: true,
+      enabledAt: 0,
+      rules: [
+        {
+          id: 'rule-1',
+          conditions: [],
+          projectId: 'repo-1'
+        }
+      ]
+    }
+  ]
+}
+
+describe('AutomationDetail trigger badge', () => {
+  it('shows "Auto: Linear issue • Rule 1 (orca-repo)" for an auto-triggered run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const autoRun: AutomationRun = {
+      ...chainRun,
+      id: 'r-auto',
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at-1',
+      triggerRuleId: 'rule-1'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={automationWithAutoTrigger}
+        runs={[autoRun]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    expect(markup).toContain('Auto: Linear issue • Rule 1 (orca-repo)')
+  })
+
+  it('shows "Manual" for a manually-triggered run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[{ ...chainRun, trigger: 'manual' }]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Manual')
+  })
+
+  it('shows "Scheduled" for a scheduled run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[{ ...chainRun, trigger: 'scheduled' }]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Scheduled')
+  })
+
+  it('shows "Auto: Linear issue • Rule deleted" when triggerRuleId no longer matches', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const autoRun: AutomationRun = {
+      ...chainRun,
+      trigger: 'auto',
+      triggerSource: 'linear-issue',
+      triggerAutoTriggerId: 'at-1',
+      triggerRuleId: 'rule-vanished'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={automationWithAutoTrigger}
+        runs={[autoRun]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    expect(markup).toContain('Auto: Linear issue • Rule deleted')
+  })
+})
+
+function makeRunWithStatus(
+  status: AutomationRunStatus,
+  overrides: Partial<AutomationRun> = {}
+): AutomationRun {
+  return { ...chainRun, ...overrides, status }
+}
+
+describe('AutomationDetail restart button', () => {
+  const restartableStatuses: AutomationRunStatus[] = [
+    'failed',
+    'dispatch_failed',
+    'cancelled',
+    'skipped_missed',
+    'skipped_unavailable',
+    'skipped_needs_interactive_auth'
+  ]
+
+  for (const status of restartableStatuses) {
+    it(`renders Restart run for status "${status}"`, async () => {
+      const { AutomationDetail } = await import('./AutomationDetail')
+      const markup = renderToStaticMarkup(
+        <AutomationDetail
+          automation={baseAutomation}
+          runs={[makeRunWithStatus(status)]}
+          projectName="repo"
+          workspaceName="feature-x"
+          projectDefaultBaseRef={null}
+          worktreeMap={worktreeMap}
+          now={0}
+          onRunNow={noop}
+          onOpenRunWorkspace={noop}
+          onEdit={noop}
+          onToggle={noop}
+          onDelete={noop}
+          onCancelRun={noop}
+          onRetryRunFromStep={noop}
+          onRestartRun={noop}
+        />
+      )
+      expect(markup).toContain('Restart run')
+    })
+  }
+
+  const nonRestartableStatuses: AutomationRunStatus[] = [
+    'completed',
+    'running',
+    'pending',
+    'dispatching',
+    'dispatched'
+  ]
+
+  for (const status of nonRestartableStatuses) {
+    it(`does NOT render Restart run for status "${status}"`, async () => {
+      const { AutomationDetail } = await import('./AutomationDetail')
+      const markup = renderToStaticMarkup(
+        <AutomationDetail
+          automation={baseAutomation}
+          runs={[makeRunWithStatus(status)]}
+          projectName="repo"
+          workspaceName="feature-x"
+          projectDefaultBaseRef={null}
+          worktreeMap={worktreeMap}
+          now={0}
+          onRunNow={noop}
+          onOpenRunWorkspace={noop}
+          onEdit={noop}
+          onToggle={noop}
+          onDelete={noop}
+          onCancelRun={noop}
+          onRetryRunFromStep={noop}
+          onRestartRun={noop}
+        />
+      )
+      expect(markup).not.toContain('Restart run')
+    })
+  }
+
+  it('hides Restart when onRestartRun is omitted', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[makeRunWithStatus('failed')]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).not.toContain('Restart run')
+  })
+})
+
+describe('AutomationDetail restart lineage', () => {
+  it('renders "Restarted from #..." when restartedFromRunId is set', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const child: AutomationRun = {
+      ...chainRun,
+      id: 'r-child-aaaaaaaa',
+      restartedFromRunId: 'r-parent-bbbbbbbb'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[child]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Restarted from #r-parent')
+  })
+
+  it('renders "Restarted as #..." when a sibling has restartedFromRunId pointing at this run', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const parent: AutomationRun = { ...chainRun, id: 'r-parent-cccccccc' }
+    const child: AutomationRun = {
+      ...chainRun,
+      id: 'r-child-dddddddd',
+      restartedFromRunId: 'r-parent-cccccccc'
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[parent, child]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Restarted as #r-child-')
+  })
+})
+
+describe('AutomationDetail auto-trigger overview', () => {
+  // Why: the new auto-trigger summary only renders in the `isChain` branch
+  // (trigger + steps present), so this fixture is a chain-shape automation
+  // distinct from the rrule-only `baseAutomation`.
+  const chainAutomationWithAutoTrigger: Automation = {
+    ...baseAutomation,
+    trigger: { kind: 'manual' },
+    steps: [
+      {
+        id: 'wt',
+        kind: 'create-worktree',
+        config: {
+          branchName: 'feature/x',
+          baseBranch: 'main',
+          workspaceMode: 'new_per_run'
+        }
+      } as unknown as Step
+    ],
+    autoTriggers: [
+      {
+        id: 'at-active',
+        source: 'linear-issue',
+        enabled: true,
+        enabledAt: 0,
+        rules: [
+          {
+            id: 'rule-empty',
+            conditions: [],
+            projectId: 'repo-1'
+          },
+          {
+            id: 'rule-detailed',
+            conditions: [
+              {
+                field: 'linear.assignee',
+                op: 'is',
+                value: 'me@example.com'
+              },
+              {
+                field: 'linear.priority',
+                op: 'gte',
+                value: 2
+              }
+            ],
+            projectId: 'repo-missing'
+          }
+        ]
+      },
+      {
+        id: 'at-disabled',
+        source: 'linear-issue',
+        enabled: false,
+        enabledAt: 0,
+        rules: []
+      }
+    ]
+  }
+
+  it('surfaces auto triggers with source, badge state, rule count, and rule preview', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={chainAutomationWithAutoTrigger}
+        runs={[]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        repos={[seededRepo]}
+      />
+    )
+    // Section title and chrome
+    expect(markup).toContain('Manual trigger')
+    expect(markup).toContain('Automatic triggers')
+    expect(markup).toContain('2 configured')
+    // Source label + state badges
+    expect(markup).toContain('Linear issue')
+    expect(markup).toContain('Active')
+    expect(markup).toContain('Disabled')
+    // Rule preview (empty conditions → project name)
+    expect(markup).toContain('Matches every event')
+    expect(markup).toContain('orca-repo')
+    // Conditions formatted with field + op + values
+    expect(markup).toContain('assignee')
+    expect(markup).toContain('me@example.com')
+    expect(markup).toContain('priority')
+    expect(markup).toContain('≥')
+    expect(markup).toContain('High')
+    // Deleted project chip when projectId is missing from repos
+    expect(markup).toContain('project deleted')
+    // Empty-rules trigger renders the explanatory line
+    expect(markup).toContain('No rules')
+  })
+
+  it('omits the auto-triggers card when none are configured', async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const chainOnly: Automation = {
+      ...chainAutomationWithAutoTrigger,
+      autoTriggers: undefined
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={chainOnly}
+        runs={[]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+      />
+    )
+    expect(markup).toContain('Manual trigger')
+    expect(markup).not.toContain('Automatic triggers')
+  })
+})
+
+describe('isRestartable', () => {
+  it('returns true for all 6 restartable statuses', async () => {
+    const { isRestartable } = await import('./AutomationDetail')
+    const restartable: AutomationRunStatus[] = [
+      'failed',
+      'dispatch_failed',
+      'cancelled',
+      'skipped_missed',
+      'skipped_unavailable',
+      'skipped_needs_interactive_auth'
+    ]
+    for (const status of restartable) {
+      expect(isRestartable(status)).toBe(true)
+    }
+  })
+
+  it('returns false for completed/running/pending/dispatching/dispatched', async () => {
+    const { isRestartable } = await import('./AutomationDetail')
+    const nonRestartable: AutomationRunStatus[] = [
+      'completed',
+      'running',
+      'pending',
+      'dispatching',
+      'dispatched'
+    ]
+    for (const status of nonRestartable) {
+      expect(isRestartable(status)).toBe(false)
+    }
   })
 })

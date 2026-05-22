@@ -100,7 +100,10 @@ import type {
   AutomationDispatchResult,
   AutomationRun,
   AutomationUpdateInput,
-  RunNowPayload
+  AutoDedupEntry,
+  RunNowPayload,
+  SerializableTriggerSource,
+  TriggerSourceId
 } from '../shared/automations-types'
 import {
   ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT,
@@ -2468,6 +2471,17 @@ const api = {
       ipcRenderer.invoke('automations:cancelRun', args),
     retryRunFromStep: (args: { runId: string; stepIndex: number }): Promise<AutomationRun | null> =>
       ipcRenderer.invoke('automations:retryRunFromStep', args),
+    restartRun: (args: { runId: string }): Promise<AutomationRun> =>
+      ipcRenderer.invoke('automations:restartRun', args),
+    listAutoDedup: (args?: {
+      automationId?: string
+      autoTriggerId?: string
+    }): Promise<AutoDedupEntry[]> => ipcRenderer.invoke('automations:listAutoDedup', args),
+    clearAutoDedup: (args: {
+      automationId: string
+      autoTriggerId: string
+      entityId?: string
+    }): Promise<void> => ipcRenderer.invoke('automations:clearAutoDedup', args),
     markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:markDispatchResult', result),
     rendererReady: (): Promise<void> => ipcRenderer.invoke('automations:rendererReady'),
@@ -2624,6 +2638,16 @@ const api = {
     ): void => {
       ipcRenderer.send(`automations:sendCommandToPane:reply:${requestId}`, result)
     }
+  },
+
+  triggerSources: {
+    list: (): Promise<SerializableTriggerSource[]> => ipcRenderer.invoke('triggerSources:list'),
+    fetchOptions: (args: {
+      sourceId: TriggerSourceId
+      field: string
+      hostId?: string
+    }): Promise<{ value: string; label: string }[]> =>
+      ipcRenderer.invoke('triggerSources:fetchOptions', args)
   },
 
   e2e: {

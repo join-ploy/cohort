@@ -65,6 +65,12 @@ import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
+import { AutoTriggerEngine } from './automations/auto-trigger-engine'
+import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
+import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
+import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
+import { getClient as getLinearClient } from './linear/client'
+import type { TriggerSourceId } from '../shared/automations-types'
 import { AgentStatusRegistry } from './agent-status/registry'
 import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
@@ -634,7 +640,61 @@ app.whenReady().then(async () => {
       await archiveCleanup?.runOnce()
     })
   }
+  // Why: assemble the auto-trigger engine alongside the AutomationService so
+  // both share a single store/lifecycle. The Linear source pulls its client
+  // lazily via getClient (called fresh on each poll / fetchOptions) so a
+  // connect/disconnect after app boot is observed on the next tick without
+  // rebuilding the registry.
+  const triggerSourceRegistry = new TriggerSourceRegistry()
+  triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
+  // Why: bridge the source catalog + fetchOptions to the renderer before any
+  // window is opened so the first TriggersModal mount has the handlers ready.
+  registerTriggerSourceHandlers(triggerSourceRegistry)
+  // TODO(SSH): hostId varies per remote target once SSH execution lands.
+  const AUTO_TRIGGER_HOST_ID = 'local'
+  // TODO(persist): in-memory until we add a per-source watermark table to the
+  // settings store; restart falls back to enabledAt and re-polls any backlog.
+  const autoTriggerWatermarks = new Map<string, number>()
+  // Why: dispatchAutoRun lives on AutomationService but the engine needs it as
+  // a ctor dep — late-bind via serviceRef so both can coexist. The engine's
+  // start/stop lifecycle is owned by AutomationService.start()/stop() so the
+  // service receives the engine as an opt below.
+  let serviceRef: AutomationService | null = null
+  const autoTriggerEngine = new AutoTriggerEngine({
+    registry: triggerSourceRegistry,
+    listAutomations: () => storeRef.listAutomations(),
+    dispatchAutoRun: async ({ automation, trigger, rule, event }) => {
+      if (!serviceRef) {
+        // Why: defensive — the engine is started by service.start() so this
+        // branch should be unreachable in practice. Log and skip rather than
+        // throw so a single missed wiring doesn't crash the tick loop.
+        console.warn('[auto-trigger] dispatchAutoRun called before service init')
+        return
+      }
+      await serviceRef.dispatchAutoRun({ automation, trigger, rule, event })
+    },
+    dedupHas: (a, t, e) => storeRef.hasAutomationAutoDedup(a, t, e),
+    dedupInsert: (automationId, autoTriggerId, sourceId, entityId, entityIdentifier, firedAt) => {
+      storeRef.insertAutomationAutoDedup({
+        automationId,
+        autoTriggerId,
+        sourceId,
+        entityId,
+        ...(entityIdentifier !== undefined ? { entityIdentifier } : {}),
+        firedAt
+      })
+    },
+    lastPoll: (sourceId: TriggerSourceId, hostId) =>
+      autoTriggerWatermarks.get(`${sourceId}|${hostId}`) ?? 0,
+    lastPollSet: (sourceId: TriggerSourceId, hostId, value) => {
+      autoTriggerWatermarks.set(`${sourceId}|${hostId}`, value)
+    },
+    hostId: AUTO_TRIGGER_HOST_ID,
+    now: () => Date.now()
+  })
   automations = new AutomationService(store, {
+    autoTriggerEngine,
+    getAutoTriggerPollIntervalSeconds: () => storeRef.getAutomationsPollIntervalSeconds(),
     // Why: hand the registry's reader to the service so the chain executor
     // can construct RunPromptRunner with main-process status access.
     getAgentStatus: (paneKey) => agentStatusRegistry.get(paneKey),
@@ -706,6 +766,11 @@ app.whenReady().then(async () => {
     getWebContents: () => mainWindow?.webContents ?? null,
     getIpcMain: () => ipcMain
   })
+  // Why: complete the late-bind so the engine's dispatchAutoRun closure can
+  // route into the now-constructed AutomationService. start() may fire the
+  // engine timer immediately, but the first poll won't run until the engine's
+  // setInterval cadence elapses, so this assignment lands before any dispatch.
+  serviceRef = automations
   runtime.setAccountServices({ claudeAccounts, codexAccounts, rateLimits })
   starNag = new StarNagService(store, stats)
   starNag.start()
