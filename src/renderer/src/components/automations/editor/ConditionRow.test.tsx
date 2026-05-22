@@ -80,6 +80,9 @@ describe('ConditionRow rendering', () => {
     )
     expect(htmlUser).toMatch(/<select\s[^>]*aria-label="Value"/)
 
+    // Why: multi-ops switched from a native <select multiple> to a chip-based
+    // picker — assert on the picker's container + add-value affordance rather
+    // than the removed `multiple` HTML attribute.
     const condMulti: Condition = { field: 'linear.assignee', op: 'is-any-of', value: [] }
     const htmlMulti = renderToStaticMarkup(
       <ConditionRow
@@ -90,7 +93,8 @@ describe('ConditionRow rendering', () => {
         onRemove={() => {}}
       />
     )
-    expect(htmlMulti).toContain('multiple')
+    expect(htmlMulti).toMatch(/aria-label="Value"/)
+    expect(htmlMulti).toContain('Add value')
   })
 
   it('renders remove button', () => {
