@@ -1399,3 +1399,5 @@ it('restarting an auto-fired run preserves triggerSource/AutoTriggerId/EntityId 
 ## Risks reminder
 
 See the corresponding section of the design doc (`docs/plans/2026-05-22-auto-triggers-design.md`). The two most likely sources of subtle bugs during implementation: (a) clock skew around the `since`/`enabledAt` watermarks (use `gte`, not `gt`), and (b) the dedup-before-dispatch ordering — make sure tests exercise the crash-mid-dispatch scenario.
+
+**Known limitation (v1):** the synthetic "me" assignee entry in the Linear source resolves to the current viewer's user id **at editor-pick time**, not at evaluation time. A user who later switches Linear accounts will still see the prior viewer's id baked into the saved rule and must re-save the rule for "me" to track the new account. The design intent is "me follows the active account at evaluation time"; a follow-up will introduce a sentinel-based eval-time resolver.
