@@ -31,6 +31,7 @@ import { createDetectedAgentsSlice } from './detected-agents'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
 import { createScriptsSlice } from './scripts'
 import { createAutomationRunsSlice } from './automation-runs'
+import { createWorkspaceGroupsSlice } from './workspace-groups'
 
 export const TEST_REPO = {
   id: 'repo1',
@@ -64,7 +65,8 @@ export function createTestStore() {
     ...createDetectedAgentsSlice(...a),
     ...createWorktreeNavHistorySlice(...a),
     ...createScriptsSlice(...a),
-    ...createAutomationRunsSlice(...a)
+    ...createAutomationRunsSlice(...a),
+    ...createWorkspaceGroupsSlice(...a)
   }))
 }
 

@@ -28,6 +28,7 @@ import type {
   OnboardingState,
   FloatingTerminalCwdRequest,
   SearchResult,
+  WorkspaceGroup,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
@@ -493,6 +494,10 @@ const api = {
       ipcRenderer.on('worktree:remoteBranchConflict', listener)
       return () => ipcRenderer.removeListener('worktree:remoteBranchConflict', listener)
     }
+  },
+
+  workspaceGroups: {
+    list: (): Promise<WorkspaceGroup[]> => ipcRenderer.invoke('workspace-groups:list')
   },
 
   pty: {

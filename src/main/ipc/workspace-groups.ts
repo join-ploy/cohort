@@ -34,6 +34,9 @@ export function registerWorkspaceGroupHandlers(
   // Why: idempotent re-registration matches the pattern used by other IPC
   // modules (registerWorktreeHandlers) so macOS app re-activation, which
   // rebuilds the main window, can re-attach handlers without throwing.
+  ipcMain.removeHandler('workspace-groups:list')
+  ipcMain.handle('workspace-groups:list', (): WorkspaceGroup[] => store.getWorkspaceGroups())
+
   ipcMain.removeHandler('workspace-groups:create')
 
   ipcMain.handle(

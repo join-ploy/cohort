@@ -64,6 +64,7 @@ import type {
   StatsSummary,
   MemorySnapshot,
   UpdateStatus,
+  WorkspaceGroup,
   Worktree,
   WorktreeBaseStatusEvent,
   WorktreeMeta,
@@ -501,6 +502,9 @@ export type PreloadApi = {
     onRemoteBranchConflict: (
       callback: (data: WorktreeRemoteBranchConflictEvent) => void
     ) => () => void
+  }
+  workspaceGroups: {
+    list: () => Promise<WorkspaceGroup[]>
   }
   pty: {
     spawn: (opts: {
