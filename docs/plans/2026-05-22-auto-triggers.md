@@ -1,5 +1,7 @@
 # Automation Auto-Triggers Implementation Plan
 
+**Status:** Complete (Phases 1–17 implemented). See commit history for details.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add automatic Linear-polled triggers to automations (alongside existing manual Run Now), plus an explicit Restart action for terminal-failed runs. v1 ships a Linear-issue source behind a pluggable source registry so future integrations slot in without editor changes.
