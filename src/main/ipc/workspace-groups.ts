@@ -319,4 +319,37 @@ export function registerWorkspaceGroupHandlers(
     async (_event, args: CreateWorkspaceGroupArgs): Promise<CreateWorkspaceGroupResult> =>
       createWorkspaceGroup(args, { store, runtime, mainWindow })
   )
+
+  // Why: small allow-list of mutable group fields so the renderer can rename,
+  // edit comments, and toggle pin without growing a separate IPC per field.
+  // Mirrors the single-worktree `worktrees:updateMeta` allow-list pattern —
+  // never trust the renderer to write archive flags or memberWorktreeIds
+  // through this seam; those have their own dedicated flows.
+  ipcMain.removeHandler('workspace-groups:update')
+  ipcMain.handle(
+    'workspace-groups:update',
+    async (
+      _event,
+      args: {
+        groupId: string
+        partial: { displayName?: string; comment?: string; isPinned?: boolean }
+      }
+    ): Promise<WorkspaceGroup> => {
+      const existing = store.getWorkspaceGroups().find((g) => g.id === args.groupId)
+      if (!existing) {
+        throw new Error(`Workspace group not found: ${args.groupId}`)
+      }
+      const next: WorkspaceGroup = {
+        ...existing,
+        ...(typeof args.partial.displayName === 'string' &&
+        args.partial.displayName.trim().length > 0
+          ? { displayName: args.partial.displayName.trim() }
+          : {}),
+        ...(typeof args.partial.comment === 'string' ? { comment: args.partial.comment } : {}),
+        ...(typeof args.partial.isPinned === 'boolean' ? { isPinned: args.partial.isPinned } : {})
+      }
+      store.setWorkspaceGroup(next)
+      return next
+    }
+  )
 }

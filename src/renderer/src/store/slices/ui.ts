@@ -262,6 +262,7 @@ export type UISlice = {
     | 'none'
     | 'create-worktree'
     | 'edit-meta'
+    | 'edit-group-meta'
     | 'delete-worktree'
     | 'confirm-non-git-folder'
     | 'confirm-remove-folder'

@@ -15,6 +15,8 @@ type StoreState = {
   prCache: Record<string, CacheEntry<PRInfo>>
   scriptsByWorktree: Record<string, WorktreeScriptsEntry>
   setActiveWorktree: ReturnType<typeof vi.fn>
+  openModal: ReturnType<typeof vi.fn>
+  updateWorkspaceGroup: ReturnType<typeof vi.fn>
 }
 
 const mocks = vi.hoisted(() => {
@@ -25,8 +27,11 @@ const mocks = vi.hoisted(() => {
       workspaceGroups: [],
       prCache: {},
       scriptsByWorktree: {},
-      setActiveWorktree: vi.fn()
-    } as StoreState
+      setActiveWorktree: vi.fn(),
+      openModal: vi.fn(),
+      updateWorkspaceGroup: vi.fn().mockResolvedValue(undefined)
+    } as StoreState,
+    shellOpenPath: vi.fn()
   }
 })
 
@@ -38,6 +43,12 @@ const runGroupArchiveMock = vi.fn()
 vi.mock('./archive-group-flow', () => ({
   runGroupArchive: (id: string, name: string) => runGroupArchiveMock(id, name)
 }))
+
+// Why: jsdom does not stub window.api. Mount only the surfaces GroupCard
+// touches (shell.openPath for the Open Folder action).
+;(window as unknown as { api: { shell: { openPath: (path: string) => void } } }).api = {
+  shell: { openPath: (path: string) => mocks.shellOpenPath(path) }
+}
 
 import GroupCard from './GroupCard'
 
@@ -132,6 +143,9 @@ describe('<GroupCard />', () => {
   beforeEach(() => {
     cleanup()
     mocks.state.setActiveWorktree.mockClear()
+    mocks.state.openModal.mockClear()
+    mocks.state.updateWorkspaceGroup.mockClear()
+    mocks.shellOpenPath.mockClear()
     runGroupArchiveMock.mockClear()
     seed({ worktrees: [], repos: [], groups: [] })
   })
@@ -242,6 +256,146 @@ describe('<GroupCard />', () => {
 
     const errorRow = screen.getByTestId('group-archive-cleanup-error')
     expect(errorRow.textContent).toContain('repo-b refused')
+  })
+
+  it('right-click → Rename opens the edit-group-meta modal focused on displayName', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      displayName: 'daring_tiger',
+      comment: 'shared notes',
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+    fireEvent.click(screen.getByTestId('group-card-rename-action'))
+
+    expect(mocks.state.openModal).toHaveBeenCalledWith('edit-group-meta', {
+      groupId: 'group:1',
+      currentDisplayName: 'daring_tiger',
+      currentComment: 'shared notes',
+      focus: 'displayName'
+    })
+  })
+
+  it('right-click → Edit Comment opens the edit-group-meta modal focused on comment', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      displayName: 'daring_tiger',
+      comment: 'existing',
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+    const commentItem = screen.getByTestId('group-card-comment-action')
+    expect(commentItem.textContent).toContain('Edit Comment')
+    fireEvent.click(commentItem)
+
+    expect(mocks.state.openModal).toHaveBeenCalledWith('edit-group-meta', {
+      groupId: 'group:1',
+      currentDisplayName: 'daring_tiger',
+      currentComment: 'existing',
+      focus: 'comment'
+    })
+  })
+
+  it('Add Comment label is shown when the group has no comment yet', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      comment: '',
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+
+    expect(screen.getByTestId('group-card-comment-action').textContent).toContain('Add Comment')
+  })
+
+  it('right-click → Pin toggles isPinned via updateWorkspaceGroup', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      isPinned: false,
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+    const pinItem = screen.getByTestId('group-card-pin-action')
+    expect(pinItem.textContent).toContain('Pin')
+    fireEvent.click(pinItem)
+
+    expect(mocks.state.updateWorkspaceGroup).toHaveBeenCalledWith('group:1', { isPinned: true })
+  })
+
+  it('Unpin label is shown when the group is already pinned', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      isPinned: true,
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+
+    expect(screen.getByTestId('group-card-pin-action').textContent).toContain('Unpin')
+  })
+
+  it('right-click → Open in Finder dispatches shell.openPath with parentPath', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      parentPath: '/some/workspaces/daring_tiger',
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    fireEvent.contextMenu(screen.getByTestId('group-card'))
+    fireEvent.click(screen.getByTestId('group-card-open-folder'))
+
+    expect(mocks.shellOpenPath).toHaveBeenCalledWith('/some/workspaces/daring_tiger')
+  })
+
+  it('double-clicking the card opens the rename modal', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({
+      id: 'group:1',
+      displayName: 'daring_tiger',
+      memberWorktreeIds: [wt.id]
+    })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    fireEvent.doubleClick(screen.getByTestId('group-card'))
+
+    expect(mocks.state.openModal).toHaveBeenCalledWith(
+      'edit-group-meta',
+      expect.objectContaining({ groupId: 'group:1', focus: 'displayName' })
+    )
   })
 
   it('shows a running indicator when at least one member has a running run script', () => {

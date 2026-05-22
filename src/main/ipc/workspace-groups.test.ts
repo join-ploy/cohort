@@ -640,3 +640,143 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:archive', () => {
     expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
   })
 })
+
+describe('registerWorkspaceGroupHandlers — workspace-groups:update', () => {
+  const mainWindow = {
+    isDestroyed: () => false,
+    webContents: { send: vi.fn() }
+  } as never
+  const runtime = {} as never
+  const handlers: Record<string, AnyHandler> = {}
+
+  const store = {
+    getRepo: vi.fn(),
+    getRepos: vi.fn(),
+    getSettings: vi.fn(),
+    setWorktreeMeta: vi.fn(),
+    setWorkspaceGroup: vi.fn(),
+    getWorkspaceGroups: vi.fn()
+  }
+
+  function makeGroup(overrides: Partial<WorkspaceGroup>): WorkspaceGroup {
+    return {
+      id: 'group:abc',
+      workspaceName: 'daring_tiger',
+      displayName: 'daring_tiger',
+      parentPath: '/workspace/daring_tiger',
+      memberWorktreeIds: [],
+      branchName: 'daring_tiger',
+      isArchived: false,
+      archivedAt: null,
+      isPinned: false,
+      sortOrder: 0,
+      lastActivityAt: 0,
+      isUnread: false,
+      comment: '',
+      createdAt: 0,
+      linkedIssue: null,
+      linkedLinearIssue: null,
+      ...overrides
+    }
+  }
+
+  beforeEach(() => {
+    handleMock.mockReset()
+    removeHandlerMock.mockReset()
+    store.setWorkspaceGroup.mockReset()
+    store.getWorkspaceGroups.mockReset()
+    for (const key of Object.keys(handlers)) {
+      delete handlers[key]
+    }
+
+    handleMock.mockImplementation((channel: string, handler: AnyHandler) => {
+      handlers[channel] = handler
+    })
+
+    store.setWorkspaceGroup.mockImplementation((group) => group)
+  })
+
+  it('applies displayName, comment, and isPinned changes via the allow-list', async () => {
+    const group = makeGroup({ displayName: 'old', comment: '', isPinned: false })
+    store.getWorkspaceGroups.mockReturnValue([group])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:update']
+    expect(handler).toBeDefined()
+
+    const result = (await handler(
+      {},
+      {
+        groupId: group.id,
+        partial: { displayName: 'new label', comment: 'hello', isPinned: true }
+      }
+    )) as WorkspaceGroup
+
+    expect(result.displayName).toBe('new label')
+    expect(result.comment).toBe('hello')
+    expect(result.isPinned).toBe(true)
+    // Unmodified fields stay intact.
+    expect(result.id).toBe(group.id)
+    expect(result.workspaceName).toBe(group.workspaceName)
+    expect(result.parentPath).toBe(group.parentPath)
+
+    expect(store.setWorkspaceGroup).toHaveBeenCalledWith(result)
+  })
+
+  it('ignores empty/whitespace displayName (treats it as a no-op for that field)', async () => {
+    // Why: matches the WorktreeMeta allow-list — blank displayName falls back
+    // to the persisted value so the user can't accidentally erase the label
+    // by submitting the rename dialog with an empty input.
+    const group = makeGroup({ displayName: 'kept', comment: 'kept comment' })
+    store.getWorkspaceGroups.mockReturnValue([group])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:update']
+
+    const result = (await handler(
+      {},
+      { groupId: group.id, partial: { displayName: '   ', comment: 'updated comment' } }
+    )) as WorkspaceGroup
+
+    expect(result.displayName).toBe('kept')
+    expect(result.comment).toBe('updated comment')
+  })
+
+  it('rejects when the group id is unknown', async () => {
+    store.getWorkspaceGroups.mockReturnValue([])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:update']
+
+    await expect(
+      handler({}, { groupId: 'group:missing', partial: { displayName: 'x' } })
+    ).rejects.toThrowError(/Workspace group not found: group:missing/)
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+  })
+
+  it('ignores keys outside the allow-list (e.g. memberWorktreeIds, isArchived)', async () => {
+    const group = makeGroup({ displayName: 'old', isArchived: false })
+    store.getWorkspaceGroups.mockReturnValue([group])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:update']
+
+    const result = (await handler(
+      {},
+      {
+        groupId: group.id,
+        // Cast through unknown — the handler signature constrains callers, but
+        // a misbehaving renderer could send extra keys at runtime.
+        partial: {
+          displayName: 'new',
+          isArchived: true,
+          memberWorktreeIds: ['x']
+        } as unknown as { displayName?: string }
+      }
+    )) as WorkspaceGroup
+
+    expect(result.displayName).toBe('new')
+    expect(result.isArchived).toBe(false)
+    expect(result.memberWorktreeIds).toEqual(group.memberWorktreeIds)
+  })
+})

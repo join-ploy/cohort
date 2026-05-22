@@ -11,9 +11,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Trash2 } from 'lucide-react'
+import { FolderOpen, MessageSquare, Pencil, Pin, PinOff, Trash2 } from 'lucide-react'
 import { runGroupArchive } from './archive-group-flow'
 
 export type GroupCardProps = {
@@ -33,6 +34,8 @@ const PR_STATE_CLASSES: Record<PRState, string> = {
 
 const GroupCard = React.memo(function GroupCard({ group, isActive = false }: GroupCardProps) {
   const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
+  const openModal = useAppStore((s) => s.openModal)
+  const updateWorkspaceGroup = useAppStore((s) => s.updateWorkspaceGroup)
 
   const members = useAppStore(useShallow((s) => getMemberWorktreesForGroup(s, group.id)))
   const repoMap = useAppStore((s) => getRepoMapFromState(s))
@@ -69,11 +72,10 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
   }, [group.memberWorktreeIds, setActiveWorktree])
 
   // Why: GroupCard owns its own right-click context menu rather than reusing
-  // WorktreeContextMenu — the worktree menu pulls in pin/rename/comment/issue
-  // actions that don't map to a group in v1, and the design doc lists only
-  // "Archive group" as the v1 group-level action. Keeping the menu small here
-  // means we can grow it (rename, pin) later without entangling the worktree
-  // menu's multi-select machinery.
+  // WorktreeContextMenu — the worktree menu carries linked-issue/PR rows and
+  // multi-select machinery that don't apply to a group in v1. Keeping the
+  // menu local lets us add only the affordances that map to a group
+  // (rename, edit comment, pin/unpin, open folder, archive).
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPoint, setMenuPoint] = useState({ x: 0, y: 0 })
 
@@ -81,6 +83,39 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
     setMenuOpen(false)
     runGroupArchive(group.id, group.displayName)
   }, [group.id, group.displayName])
+
+  const handleRename = useCallback(() => {
+    setMenuOpen(false)
+    openModal('edit-group-meta', {
+      groupId: group.id,
+      currentDisplayName: group.displayName,
+      currentComment: group.comment,
+      focus: 'displayName'
+    })
+  }, [group.comment, group.displayName, group.id, openModal])
+
+  const handleEditComment = useCallback(() => {
+    setMenuOpen(false)
+    openModal('edit-group-meta', {
+      groupId: group.id,
+      currentDisplayName: group.displayName,
+      currentComment: group.comment,
+      focus: 'comment'
+    })
+  }, [group.comment, group.displayName, group.id, openModal])
+
+  const handleTogglePin = useCallback(() => {
+    setMenuOpen(false)
+    void updateWorkspaceGroup(group.id, { isPinned: !group.isPinned })
+  }, [group.id, group.isPinned, updateWorkspaceGroup])
+
+  const handleOpenInFinder = useCallback(() => {
+    setMenuOpen(false)
+    // Why: WorktreeContextMenu uses the same shell.openPath helper for its
+    // "Open in Finder" row — reuse it so platform differences (Finder, File
+    // Explorer, GNOME Files) stay routed through Electron's shell module.
+    window.api.shell.openPath(group.parentPath)
+  }, [group.parentPath])
 
   const hasCleanupError = group.archiveCleanupError != null && group.archiveCleanupError !== ''
 
@@ -97,6 +132,7 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
           : 'border border-transparent hover:bg-sidebar-accent/40'
       )}
       onClick={handleClick}
+      onDoubleClick={handleRename}
       onContextMenu={(e) => {
         e.preventDefault()
         const bounds = e.currentTarget.getBoundingClientRect()
@@ -196,6 +232,28 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-52" sideOffset={0} align="start">
+          <DropdownMenuItem onSelect={handleOpenInFinder} data-testid="group-card-open-folder">
+            <FolderOpen className="size-3.5" />
+            Open in Finder
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={handleTogglePin} data-testid="group-card-pin-action">
+            {group.isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+            {group.isPinned ? 'Unpin' : 'Pin'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={handleRename} data-testid="group-card-rename-action">
+            <Pencil className="size-3.5" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={handleEditComment} data-testid="group-card-comment-action">
+            <MessageSquare className="size-3.5" />
+            {group.comment ? 'Edit Comment' : 'Add Comment'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* Why: v1 intentionally skips "Set as primary", "Sleep/wake", and
+              "Delete now" — see plan §"Issue 3 scope": neither maps cleanly
+              onto a group today (no primary member concept, no sleep/wake
+              at group scope, no out-of-band delete flow). */}
           <DropdownMenuItem
             variant="destructive"
             onSelect={handleArchive}

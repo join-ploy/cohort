@@ -6,6 +6,12 @@ import type {
   WorkspaceGroup
 } from '../../../../shared/types'
 
+export type UpdateWorkspaceGroupPartial = {
+  displayName?: string
+  comment?: string
+  isPinned?: boolean
+}
+
 export type WorkspaceGroupsSlice = {
   workspaceGroups: WorkspaceGroup[]
   fetchWorkspaceGroups: () => Promise<void>
@@ -14,6 +20,10 @@ export type WorkspaceGroupsSlice = {
   removeWorkspaceGroup: (id: string) => void
   createGroup: (args: CreateWorkspaceGroupArgs) => Promise<CreateWorkspaceGroupResult>
   archiveGroup: (groupId: string) => Promise<WorkspaceGroup>
+  updateWorkspaceGroup: (
+    groupId: string,
+    partial: UpdateWorkspaceGroupPartial
+  ) => Promise<WorkspaceGroup>
 }
 
 export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], WorkspaceGroupsSlice> = (
@@ -71,6 +81,17 @@ export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], Workspac
       }
       throw err
     }
+  },
+
+  // Why: optimistic upsert keeps the rename/pin UI snappy — main echoes back
+  // the canonical record so any allow-list clamping (e.g. blank displayName)
+  // converges before the user sees a stale value.
+  updateWorkspaceGroup: async (groupId, partial) => {
+    const updated = await window.api.workspaceGroups.update({ groupId, partial })
+    set((s) => ({
+      workspaceGroups: s.workspaceGroups.map((g) => (g.id === updated.id ? updated : g))
+    }))
+    return updated
   },
 
   createGroup: async (args) => {

@@ -503,7 +503,11 @@ const api = {
     create: (args: CreateWorkspaceGroupArgs): Promise<CreateWorkspaceGroupResult> =>
       ipcRenderer.invoke('workspace-groups:create', args),
     archive: (args: { groupId: string }): Promise<WorkspaceGroup> =>
-      ipcRenderer.invoke('workspace-groups:archive', args)
+      ipcRenderer.invoke('workspace-groups:archive', args),
+    update: (args: {
+      groupId: string
+      partial: { displayName?: string; comment?: string; isPinned?: boolean }
+    }): Promise<WorkspaceGroup> => ipcRenderer.invoke('workspace-groups:update', args)
   },
 
   pty: {

@@ -7,6 +7,7 @@ import SidebarNav from './SidebarNav'
 import WorktreeList from './WorktreeList'
 import SidebarToolbar from './SidebarToolbar'
 import WorktreeMetaDialog from './WorktreeMetaDialog'
+import GroupMetaDialog from './GroupMetaDialog'
 import DeleteWorktreeDialog from './DeleteWorktreeDialog'
 import NonGitFolderDialog from './NonGitFolderDialog'
 import RemoveFolderDialog from './RemoveFolderDialog'
@@ -84,6 +85,7 @@ function Sidebar(): React.JSX.Element {
 
       {/* Dialog (rendered outside sidebar to avoid clipping) */}
       <WorktreeMetaDialog />
+      <GroupMetaDialog />
       <DeleteWorktreeDialog />
       <NonGitFolderDialog />
       <RemoveFolderDialog />
