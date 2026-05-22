@@ -14,6 +14,7 @@ import type {
   Worktree
 } from '../../shared/types'
 import { memberWorktreePath, resolveGroupParentPath } from '../../shared/workspace-group-paths'
+import { validateGroupName } from '../../shared/workspace-group-namespace'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { runWorktreeRemoval } from '../worktree-removal/run-worktree-removal'
 import { createLocalWorktree, createRemoteWorktree } from './worktree-remote'
@@ -38,31 +39,61 @@ export function registerWorkspaceGroupHandlers(
   ipcMain.handle(
     'workspace-groups:create',
     async (_event, args: CreateWorkspaceGroupArgs): Promise<CreateWorkspaceGroupResult> => {
+      // Why (C7/C8): validate up front so invalid inputs reject cleanly with no
+      // filesystem side effects. Each rule throws a distinct, user-readable
+      // message so the renderer can surface specific guidance.
       if (!Array.isArray(args.members) || args.members.length < 2) {
-        throw new Error('A workspace group needs at least two members.')
+        throw new Error('A workspace group needs at least 2 member repos.')
       }
 
-      const seenRepoIds = new Set<string>()
+      const repoIds = args.members.map((m) => m.repoId)
+      const seen = new Set<string>()
+      for (const repoId of repoIds) {
+        if (seen.has(repoId)) {
+          throw new Error(`A repo can appear at most once in a group: ${repoId} listed twice.`)
+        }
+        seen.add(repoId)
+      }
+
       const repos: Repo[] = []
       for (const member of args.members) {
-        if (seenRepoIds.has(member.repoId)) {
-          throw new Error(`Duplicate member repo: ${member.repoId}`)
-        }
-        seenRepoIds.add(member.repoId)
         const repo = store.getRepo(member.repoId)
         if (!repo) {
-          throw new Error(`Repo not found: ${member.repoId}`)
+          throw new Error(`Repo not found: ${member.repoId}.`)
         }
         repos.push(repo)
       }
 
-      // Why: full connection-uniformity validation lands in C8; this stub keeps
-      // the happy path honest by rejecting obviously-mixed targets so the
-      // path-derivation below can assume a single workspace root.
+      // Why: namespace check uses on-disk folder names of every existing repo +
+      // all persisted group workspaceNames so the new group can never collide
+      // with a sibling that already occupies the workspaces/<name> slot.
+      const namespaceResult = validateGroupName(args.workspaceName, {
+        repoFolderNames: store.getRepos().map(repoFolderName),
+        existingGroupNames: store.getWorkspaceGroups().map((g) => g.workspaceName)
+      })
+      if (!namespaceResult.ok) {
+        switch (namespaceResult.reason) {
+          case 'empty':
+            throw new Error('Group name cannot be empty.')
+          case 'invalid-chars':
+            throw new Error(`Group name "${args.workspaceName}" contains invalid characters.`)
+          case 'collides-with-repo':
+            throw new Error(
+              `Group name "${args.workspaceName}" collides with an existing repo folder.`
+            )
+          case 'collides-with-group':
+            throw new Error(`Group name "${args.workspaceName}" collides with an existing group.`)
+        }
+      }
+
+      // Why: a single group cannot span local + SSH because the worktree layout
+      // and create paths differ per connection target. Treat null/undefined as
+      // the same "local" value so older persisted Repos without an explicit
+      // connectionId still match local-to-local.
       const firstConnectionId = repos[0].connectionId ?? null
       for (const repo of repos) {
         if ((repo.connectionId ?? null) !== firstConnectionId) {
-          throw new Error('All members of a workspace group must share the same connection target.')
+          throw new Error('A workspace group cannot mix local and SSH repos.')
         }
       }
 

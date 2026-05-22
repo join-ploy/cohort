@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: happy path, rollback, and the six pre-create
+   validation specs share the same hoisted mock harness; splitting them would
+   force duplication of the electron/fs mocks without adding clarity. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { handleMock, removeHandlerMock, mkdirSyncMock, rmSyncMock, runWorktreeRemovalMock } =
@@ -90,6 +93,7 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
   // captures the calls we want to assert without dragging in real persistence.
   const store = {
     getRepo: vi.fn(),
+    getRepos: vi.fn(),
     getSettings: vi.fn(),
     setWorktreeMeta: vi.fn(),
     setWorkspaceGroup: vi.fn(),
@@ -104,6 +108,7 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
     runWorktreeRemovalMock.mockReset()
     runWorktreeRemovalMock.mockResolvedValue(undefined)
     store.getRepo.mockReset()
+    store.getRepos.mockReset()
     store.getSettings.mockReset()
     store.setWorktreeMeta.mockReset()
     store.setWorkspaceGroup.mockReset()
@@ -122,6 +127,7 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
     store.setWorkspaceGroup.mockImplementation((group) => group)
     store.setWorktreeMeta.mockReturnValue({})
     store.getWorkspaceGroups.mockReturnValue([])
+    store.getRepos.mockReturnValue([])
   })
 
   it('creates members in parallel and persists the group with stamped memberWorktreeIds', async () => {
@@ -254,5 +260,195 @@ describe('registerWorkspaceGroupHandlers — workspace-groups:create', () => {
       recursive: true,
       force: true
     })
+  })
+
+  it('rejects when fewer than 2 members', async () => {
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'daring_tiger',
+          branchName: 'daring_tiger',
+          members: [{ repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' }]
+        }
+      )
+    ).rejects.toThrowError(/at least 2 member repos/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects when members include duplicate repoIds', async () => {
+    const repoA = buildRepo('repo-a', '/workspace/repo-a')
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoA : undefined))
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'daring_tiger',
+          branchName: 'daring_tiger',
+          members: [
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' },
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/repo-a.*(twice|once)|appear at most once/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown repoId', async () => {
+    const repoA = buildRepo('repo-a', '/workspace/repo-a')
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoA : undefined))
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'daring_tiger',
+          branchName: 'daring_tiger',
+          members: [
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' },
+            { repoId: 'repo-missing', baseRef: null, setupDecision: 'inherit' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/Repo not found: repo-missing/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a name that collides with a repo folder', async () => {
+    // Repo folder name is derived from basename(path); use `/workspace/orca`
+    // so the folder name is `orca` regardless of `displayName`.
+    const repoA = buildRepo('repo-a', '/workspace/orca')
+    const repoB = buildRepo('repo-b', '/workspace/repo-b')
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoA : repoB))
+    store.getRepos.mockReturnValue([repoA, repoB])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'orca',
+          branchName: 'orca',
+          members: [
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' },
+            { repoId: 'repo-b', baseRef: null, setupDecision: 'inherit' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/collides with an existing repo folder/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a name that collides with an existing group', async () => {
+    const repoA = buildRepo('repo-a', '/workspace/repo-a')
+    const repoB = buildRepo('repo-b', '/workspace/repo-b')
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoA : repoB))
+    store.getRepos.mockReturnValue([repoA, repoB])
+    store.getWorkspaceGroups.mockReturnValue([
+      {
+        id: 'group:existing',
+        workspaceName: 'cozy_leopard',
+        displayName: 'cozy_leopard',
+        parentPath: '/workspace/cozy_leopard',
+        memberWorktreeIds: [],
+        branchName: 'cozy_leopard',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+    ])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'cozy_leopard',
+          branchName: 'cozy_leopard',
+          members: [
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' },
+            { repoId: 'repo-b', baseRef: null, setupDecision: 'inherit' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/collides with an existing group/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects mixed local and SSH members', async () => {
+    const repoLocal: Repo = {
+      ...buildRepo('repo-a', '/workspace/repo-a'),
+      connectionId: null
+    }
+    const repoRemote: Repo = {
+      ...buildRepo('repo-b', '/workspace/repo-b'),
+      connectionId: 'ssh-host-1'
+    }
+    store.getRepo.mockImplementation((id: string) => (id === 'repo-a' ? repoLocal : repoRemote))
+    store.getRepos.mockReturnValue([repoLocal, repoRemote])
+
+    registerWorkspaceGroupHandlers(mainWindow, store as never, runtime)
+    const handler = handlers['workspace-groups:create']
+
+    await expect(
+      handler(
+        {},
+        {
+          workspaceName: 'daring_tiger',
+          branchName: 'daring_tiger',
+          members: [
+            { repoId: 'repo-a', baseRef: null, setupDecision: 'inherit' },
+            { repoId: 'repo-b', baseRef: null, setupDecision: 'inherit' }
+          ]
+        }
+      )
+    ).rejects.toThrowError(/cannot mix local and SSH repos/i)
+
+    expect(createLocalWorktree).not.toHaveBeenCalled()
+    expect(createRemoteWorktree).not.toHaveBeenCalled()
+    expect(store.setWorkspaceGroup).not.toHaveBeenCalled()
+    expect(mkdirSyncMock).not.toHaveBeenCalled()
   })
 })
