@@ -170,3 +170,11 @@ export function isWorktreeGrouped(
 export const useWorkspaceGroups = () => useAppStore((s) => s.workspaceGroups)
 export const useGroupById = (groupId: string | null) =>
   useAppStore((s) => (groupId ? getGroupById(s, groupId) : null))
+
+// Why: GroupCard's active style needs the *group* that owns the active
+// worktree, not the worktree itself. Returning a string|null keeps the
+// shallow-equality check trivial — no need for useShallow.
+export const useActiveGroupId = (): string | null =>
+  useAppStore((s) =>
+    s.activeWorktreeId ? (getGroupByWorktreeId(s, s.activeWorktreeId)?.id ?? null) : null
+  )

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { useWorkspaceGroups } from '@/store/selectors'
+import { useActiveGroupId, useWorkspaceGroups } from '@/store/selectors'
 import GroupCard from './GroupCard'
 
 // Why: matches the "Workspaces" caption chrome in SidebarHeader so the
@@ -9,6 +9,11 @@ const SECTION_HEADER_CLASS =
 
 export function GroupsSection(): React.JSX.Element | null {
   const workspaceGroups = useWorkspaceGroups()
+  // Why: derive the active group from the active worktree so clicking any
+  // member (or any other surface that flips activeWorktreeId to a group
+  // member) paints the owning group as selected. The selector returns a
+  // primitive, so it short-circuits re-renders cleanly.
+  const activeGroupId = useActiveGroupId()
 
   const visibleGroups = useMemo(() => {
     return workspaceGroups
@@ -26,11 +31,6 @@ export function GroupsSection(): React.JSX.Element | null {
   if (visibleGroups.length === 0) {
     return null
   }
-
-  // TODO(phase-f/g/h): wire the real active-group selection. Until then the
-  // section renders nothing as "selected" so the active style is reserved for
-  // the actual group-activation surface.
-  const activeGroupId: string | null = null
 
   return (
     <section aria-label="Groups" className="flex flex-col gap-0.5 pb-1">

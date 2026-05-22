@@ -126,9 +126,15 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
         </span>
       </div>
 
-      {/* Body: one row per member repo */}
+      {/* Body: one row per member repo.
+          Why: pl-3 + a left border bar communicates "these are members of THIS
+          group, not top-level repos" — matches how WorktreeList nests cards
+          under repo headers visually without reusing that scaffolding. */}
       {members.length > 0 && (
-        <div className="flex flex-col gap-0.5 pl-0.5">
+        <div
+          className="ml-1 flex flex-col gap-0.5 border-l border-border/50 pl-2"
+          data-testid="group-members"
+        >
           {members.map((member) => {
             const repo = repoMap.get(member.repoId)
             const repoName = repo?.displayName ?? member.repoId

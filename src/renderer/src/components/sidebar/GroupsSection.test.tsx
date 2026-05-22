@@ -16,6 +16,7 @@ type StoreState = {
   prCache: Record<string, CacheEntry<PRInfo>>
   scriptsByWorktree: Record<string, WorktreeScriptsEntry>
   setActiveWorktree: ReturnType<typeof vi.fn>
+  activeWorktreeId: string | null
 }
 
 const mocks = vi.hoisted(() => {
@@ -26,7 +27,8 @@ const mocks = vi.hoisted(() => {
       workspaceGroups: [],
       prCache: {},
       scriptsByWorktree: {},
-      setActiveWorktree: vi.fn()
+      setActiveWorktree: vi.fn(),
+      activeWorktreeId: null
     } as StoreState
   }
 })
@@ -39,7 +41,15 @@ vi.mock('@/store/selectors', async () => {
   const actual = await vi.importActual<typeof SelectorsModule>('@/store/selectors')
   return {
     ...actual,
-    useWorkspaceGroups: () => mocks.state.workspaceGroups
+    useWorkspaceGroups: () => mocks.state.workspaceGroups,
+    useActiveGroupId: () => {
+      const id = mocks.state.activeWorktreeId
+      if (!id) {
+        return null
+      }
+      const group = mocks.state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(id))
+      return group?.id ?? null
+    }
   }
 })
 
@@ -119,6 +129,7 @@ function seed({
   mocks.state.workspaceGroups = groups
   mocks.state.prCache = {}
   mocks.state.scriptsByWorktree = {}
+  mocks.state.activeWorktreeId = null
 }
 
 describe('<GroupsSection />', () => {
@@ -233,5 +244,37 @@ describe('<GroupsSection />', () => {
       'Group newer',
       'Group older'
     ])
+  })
+
+  it('marks the owning group as active when activeWorktreeId is a member', () => {
+    const wtA = makeWorktree({ id: 'wt-a', repoId: 'repo-a' })
+    const wtB = makeWorktree({ id: 'wt-b', repoId: 'repo-b' })
+    const repos = [
+      makeRepo({ id: 'repo-a', displayName: 'a' }),
+      makeRepo({ id: 'repo-b', displayName: 'b' })
+    ]
+    const groupOne = makeGroup({
+      id: 'group:1',
+      displayName: 'alpha',
+      memberWorktreeIds: [wtA.id]
+    })
+    const groupTwo = makeGroup({
+      id: 'group:2',
+      displayName: 'beta',
+      memberWorktreeIds: [wtB.id]
+    })
+    seed({ worktrees: [wtA, wtB], repos, groups: [groupOne, groupTwo] })
+    mocks.state.activeWorktreeId = wtB.id
+
+    render(<GroupsSection />)
+
+    const cards = screen.getAllByTestId('group-card')
+    // Why: aria-pressed mirrors isActive on the card root.
+    const pressedByLabel: Record<string, string | null> = {}
+    for (const card of cards) {
+      pressedByLabel[card.getAttribute('aria-label') ?? ''] = card.getAttribute('aria-pressed')
+    }
+    expect(pressedByLabel['Group alpha']).toBe('false')
+    expect(pressedByLabel['Group beta']).toBe('true')
   })
 })
