@@ -53,6 +53,7 @@ export type Automation = {
   haltOnFailure?: boolean
   maxConcurrentRuns?: number
   deduplicationKey?: string | null
+  autoTriggers?: AutoTrigger[]
 }
 
 export type AutomationRun = {
@@ -96,6 +97,7 @@ export type AutomationCreateInput = {
   // (rrule-only) create call sites stay unchanged.
   trigger?: TriggerConfig
   steps?: Step[]
+  autoTriggers?: AutoTrigger[]
 }
 
 export type AutomationUpdateInput = Partial<
@@ -154,6 +156,44 @@ export type TriggerConfig = {
   // automation carrying a fixed projectId — the picked project becomes the
   // run's automation.projectId for downstream steps (e.g. create-worktree).
   acceptsProjectSelection?: boolean
+}
+
+// Auto-trigger source identifiers. Each source has its own poller wiring;
+// extra sources will be added here as they come online.
+export type TriggerSourceId = 'linear-issue'
+
+export type ConditionOp =
+  | 'is'
+  | 'is-not'
+  | 'is-any-of'
+  | 'is-none-of'
+  | 'contains-any'
+  | 'contains-all'
+  | 'contains-none'
+  | 'gte'
+  | 'lte'
+  | 'eq'
+
+export type ConditionValue = string | number | string[] | number[]
+
+export type Condition = {
+  field: string
+  op: ConditionOp
+  value: ConditionValue
+}
+
+export type Rule = {
+  id: string
+  conditions: Condition[]
+  projectId: string
+}
+
+export type AutoTrigger = {
+  id: string
+  source: TriggerSourceId
+  enabled: boolean
+  enabledAt: number
+  rules: Rule[]
 }
 
 export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
