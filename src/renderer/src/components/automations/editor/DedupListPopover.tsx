@@ -1,4 +1,6 @@
 import * as React from 'react'
+import { Trash2, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import type { AutoDedupEntry } from '../../../../../shared/automations-types'
 
 export type DedupListPopoverProps = {
@@ -21,35 +23,37 @@ export function DedupListPopover(props: DedupListPopoverProps): React.JSX.Elemen
     <div
       role="dialog"
       aria-label="Fired issues"
-      className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border bg-popover p-3 text-xs shadow-md"
+      className="absolute right-0 top-full z-30 mt-1 w-80 overflow-hidden rounded-lg border border-border bg-popover shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
     >
-      <div className="flex items-center justify-between">
-        <h4 className="font-medium">Fired for {entries.length} issues</h4>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onClose}
-          className="rounded px-1 hover:bg-accent hover:text-foreground"
-        >
-          ✕
-        </button>
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <h4 className="text-sm font-semibold">Fired for {entries.length} issues</h4>
+        <Button type="button" variant="ghost" size="icon-xs" aria-label="Close" onClick={onClose}>
+          <X className="size-3.5" />
+        </Button>
       </div>
       {entries.length === 0 ? (
-        <p className="mt-2 text-muted-foreground">No fired issues recorded.</p>
+        <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+          No fired issues recorded.
+        </p>
       ) : (
-        <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+        <ul className="max-h-72 divide-y divide-border overflow-y-auto">
           {entries.map((e) => {
             const label = e.entityIdentifier ?? e.entityId
             return (
-              <li key={e.entityId} className="flex items-center justify-between gap-2">
-                <span>
-                  {label}
-                  <span className="ml-1 text-muted-foreground">
+              <li
+                key={e.entityId}
+                className="flex items-center justify-between gap-2 px-3 py-2 hover:bg-accent/50"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="font-mono text-xs">{label}</span>
+                  <span className="text-[11px] text-muted-foreground">
                     {new Date(e.firedAt).toLocaleString()}
                   </span>
-                </span>
-                <button
+                </div>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label={`Clear ${label}`}
                   onClick={() => {
                     if (!window.confirm(`Clear ${label}?`)) {
@@ -57,18 +61,19 @@ export function DedupListPopover(props: DedupListPopoverProps): React.JSX.Elemen
                     }
                     onClearOne(e.entityId)
                   }}
-                  className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground"
                 >
-                  Clear
-                </button>
+                  <Trash2 className="size-3" />
+                </Button>
               </li>
             )
           })}
         </ul>
       )}
-      <div className="mt-3 flex justify-end">
-        <button
+      <div className="flex justify-end border-t border-border px-3 py-2">
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           disabled={entries.length === 0}
           onClick={() => {
             if (
@@ -80,10 +85,9 @@ export function DedupListPopover(props: DedupListPopoverProps): React.JSX.Elemen
             }
             onClearAll()
           }}
-          className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
           Clear all
-        </button>
+        </Button>
       </div>
     </div>
   )
