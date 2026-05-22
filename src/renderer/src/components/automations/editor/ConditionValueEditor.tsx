@@ -96,7 +96,16 @@ export function MultiValuePicker(props: ValueEditorProps): React.JSX.Element {
     if (!open) {
       return
     }
-    const close = (): void => setOpen(false)
+    const onResize = (): void => setOpen(false)
+    const onScroll = (e: Event): void => {
+      // Why: ignore scrolls that originate inside the dropdown panel itself —
+      // the user is scrolling the option list, not navigating the page underneath.
+      const target = e.target as Node | null
+      if (target && panelRef.current?.contains(target)) {
+        return
+      }
+      setOpen(false)
+    }
     const onDocMouseDown = (e: MouseEvent): void => {
       const target = e.target as Node
       if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) {
@@ -104,12 +113,12 @@ export function MultiValuePicker(props: ValueEditorProps): React.JSX.Element {
       }
     }
     // Capture-phase scroll catches every scroll container ancestor, not just window.
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
     document.addEventListener('mousedown', onDocMouseDown)
     return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
       document.removeEventListener('mousedown', onDocMouseDown)
     }
   }, [open])
