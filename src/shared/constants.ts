@@ -391,6 +391,7 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     repos: [],
     sparsePresetsByRepo: {},
     worktreeMeta: {},
+    workspaceGroups: [],
     settings: getDefaultSettings(homedir),
     ui: getDefaultUIState(),
     githubCache: { pr: {}, issue: {} },

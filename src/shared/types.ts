@@ -1817,6 +1817,7 @@ export type PersistedState = {
    *  presets are managed from the new-workspace composer and repo settings. */
   sparsePresetsByRepo: Record<string, SparsePreset[]>
   worktreeMeta: Record<string, WorktreeMeta>
+  workspaceGroups: WorkspaceGroup[]
   settings: GlobalSettings
   ui: PersistedUIState
   githubCache: {
