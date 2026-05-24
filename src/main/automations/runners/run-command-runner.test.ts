@@ -505,7 +505,11 @@ describe('RunCommandRunner', () => {
       worktreeId: 'repo-a::/workspaces/g/repo-a',
       source: 'review',
       commandId: 'cmd-review-1',
-      customCommand: undefined
+      customCommand: undefined,
+      // Why: forwards member-scoped intent so the renderer hook threads
+      // keepCwd:true to pty.spawn and the agent lands at the member's
+      // worktreePath, not the group parent.
+      memberScoped: true
     })
   })
 })

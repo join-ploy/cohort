@@ -1397,6 +1397,7 @@ export type PreloadApi = {
         source: 'review' | 'create-pr' | 'custom'
         commandId?: string
         customCommand?: string
+        memberScoped?: boolean
       }) => void
     ) => () => void
     replyOpenCommandPane: (

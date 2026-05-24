@@ -26,6 +26,11 @@ export type RunCommandDeps = {
     source: 'review' | 'create-pr' | 'custom'
     commandId?: string
     customCommand?: string
+    /** When the runner unwrapped a `member:<groupId>:<worktreeId>` ref, this
+     *  flag forwards to the renderer hook which threads `keepCwd: true` into
+     *  pty.spawn so Phase J1's CWD override is skipped and the agent runs at
+     *  the member's worktreePath. */
+    memberScoped?: boolean
   }) => Promise<{ ptyId: string; paneKey: string }>
   getPtyExit: (ptyId: string) => PtyExitEntry | undefined
   /** Subscribe to the main-process PTY data stream. Returns an unsubscribe
@@ -114,6 +119,7 @@ export class RunCommandRunner implements StepRunner {
       let worktreeId: string
       let customCommand: string | undefined
       let resolvedPaneRef = ''
+      let memberScoped = false
       try {
         worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
         // Why (grouped-workspaces parity with run-prompt-runner): a resolved
@@ -123,13 +129,14 @@ export class RunCommandRunner implements StepRunner {
         // worktreeId. The Phase J1 pty:spawn override then plants the CWD at
         // the group's parentPath automatically because the member carries
         // groupId. Member-scoped refs (`member:<groupId>:<worktreeId>`) are
-        // unwrapped to the inner worktreeId; the Phase J override will still
-        // bounce the CWD to parent — proper member-scoped command panes need
-        // keepCwd plumbing analogous to launch-agent-background-session, which
-        // is a follow-up.
+        // unwrapped to the inner worktreeId AND `memberScoped: true` is
+        // forwarded to the openCommandPane payload — the renderer hook then
+        // passes `keepCwd: true` to pty.spawn so Phase J1 skips the override
+        // and the agent runs at the member's path (not the group's parent).
         const memberScopedRef = parseMemberScopedRef(worktreeId)
         if (memberScopedRef) {
           worktreeId = memberScopedRef.worktreeId
+          memberScoped = true
         } else if (worktreeId.startsWith('group:')) {
           const groupSummary = this.deps.getGroupSummary?.(worktreeId)
           if (!groupSummary) {
@@ -243,7 +250,8 @@ export class RunCommandRunner implements StepRunner {
           worktreeId,
           source: config.source,
           commandId: config.commandId,
-          customCommand
+          customCommand,
+          ...(memberScoped ? { memberScoped: true } : {})
         })
         ptyId = result.ptyId
         paneKey = result.paneKey

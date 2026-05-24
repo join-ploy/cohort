@@ -29,7 +29,7 @@ import type { OrcaHooks, SidebarPromptCommand } from '../../../shared/types'
 export function useAutomationOpenCommandPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onOpenCommandPane(
-      async ({ requestId, worktreeId, source, commandId, customCommand }) => {
+      async ({ requestId, worktreeId, source, commandId, customCommand, memberScoped }) => {
         try {
           const store = useAppStore.getState()
           const worktree = findWorktreeById(store.worktreesByRepo, worktreeId)
@@ -123,7 +123,13 @@ export function useAutomationOpenCommandPaneEvents(): void {
             connectionId: repo?.connectionId ?? null,
             worktreeId,
             tabId,
-            leafId: 'pane:1'
+            leafId: 'pane:1',
+            // Why: when the runner unwrapped a member-scoped ref, the agent
+            // should run at the member's worktreePath — not the group's
+            // parent. Forward as `keepCwd: true` so Phase J1 skips the
+            // standard grouped-member CWD lift. Parity with run-prompt's
+            // launchAgentBackgroundSession.
+            ...(memberScoped ? { keepCwd: true } : {})
           })
           store.createTab(worktreeId, undefined, undefined, {
             activate: false,

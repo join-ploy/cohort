@@ -2598,6 +2598,7 @@ const api = {
         source: 'review' | 'create-pr' | 'custom'
         commandId?: string
         customCommand?: string
+        memberScoped?: boolean
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2608,6 +2609,7 @@ const api = {
           source: 'review' | 'create-pr' | 'custom'
           commandId?: string
           customCommand?: string
+          memberScoped?: boolean
         }
       ) => callback(request)
       ipcRenderer.on('automations:openCommandPane', listener)
