@@ -33,6 +33,7 @@ import {
   defaultConfigForKind,
   getAvailableVariablesAtStep,
   LEGACY_AUTOMATION_FIELDS,
+  pickDefaultWorktreeRef,
   seedDraft,
   STEP_KIND_LABELS,
   STEP_KIND_ORDER,
@@ -160,10 +161,22 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
 
   const addStep = React.useCallback((kind: StepKind) => {
     setDraft((current) => {
+      const config = defaultConfigForKind(kind)
+      // Why: if this new step has a worktreeRef slot AND there's a prior
+      // create-worktree / create-workspace-group step in the chain, prefill
+      // the ref with that step's output. Saves the user from retyping the
+      // same {{steps.<id>.worktreeId}} / {{steps.<id>.groupId}} template
+      // every time they add a run-prompt / wait-for-setup / run-command.
+      if ('worktreeRef' in config && (config as { worktreeRef: string }).worktreeRef === '') {
+        const ref = pickDefaultWorktreeRef(current.steps)
+        if (ref) {
+          ;(config as { worktreeRef: string }).worktreeRef = ref
+        }
+      }
       const newStep: Step = {
         id: generateDefaultStepId(kind, current.steps),
         kind,
-        config: defaultConfigForKind(kind),
+        config,
         onFailure: 'halt',
         timeoutSeconds: null
       }

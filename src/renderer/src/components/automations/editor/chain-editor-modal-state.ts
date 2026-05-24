@@ -158,6 +158,35 @@ export function seedDraft(automation: Automation | null): ChainDraft {
   }
 }
 
+/**
+ * When the user adds a new step that has a `worktreeRef` slot, pick a sensible
+ * default by walking the chain in reverse and referencing the most recent
+ * step whose output exposes a worktree-equivalent value:
+ *
+ * - `create-worktree` exports `worktreeId`
+ * - `create-workspace-group` exports `groupId` (the runner accepts either)
+ *
+ * Returns null when no such prior step exists — the consumer leaves the field
+ * blank in that case so the user knows to fill it in (referencing an existing
+ * workspace, a member-scoped group child, etc.).
+ *
+ * Why: the most common chain shape is "create something → run prompt against
+ * it"; making the user retype the same `{{steps.<id>.<output>}}` template on
+ * every new run-prompt is friction with zero upside.
+ */
+export function pickDefaultWorktreeRef(steps: Step[]): string | null {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i]
+    if (s.kind === 'create-worktree') {
+      return `{{steps.${s.id}.worktreeId}}`
+    }
+    if (s.kind === 'create-workspace-group') {
+      return `{{steps.${s.id}.groupId}}`
+    }
+  }
+  return null
+}
+
 export function defaultConfigForKind(kind: StepKind): StepConfig {
   switch (kind) {
     case 'create-worktree': {
