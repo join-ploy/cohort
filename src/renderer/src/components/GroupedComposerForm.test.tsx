@@ -160,7 +160,7 @@ function renderForm(props?: { onCreated?: (result: CreateWorkspaceGroupResult) =
 }
 
 function getGroupNameInput(): HTMLInputElement {
-  return screen.getByLabelText('Group name') as HTMLInputElement
+  return screen.getByLabelText('Group slug') as HTMLInputElement
 }
 
 function getBranchInput(): HTMLInputElement {

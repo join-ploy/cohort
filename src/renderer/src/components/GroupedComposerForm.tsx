@@ -151,6 +151,11 @@ export default function GroupedComposerForm({
 
   const [selectedRepoIds, setSelectedRepoIds] = useState<ReadonlySet<string>>(() => new Set())
   const [groupName, setGroupName] = useState<string>(() => generateUniqueWorkspaceName(takenNames))
+  // Why: separate human label from the canonical slug — mirrors how single-
+  // repo workspaces have an editable display name plus an immutable
+  // workspaceName. Blank means "fall back to the slug" (the IPC handler at
+  // workspace-groups.ts defaults displayName to workspaceName when absent).
+  const [displayName, setDisplayName] = useState<string>('')
   const [branchName, setBranchName] = useState<string>(groupName)
   // Why: once the user touches the branch field, stop overwriting it when the
   // group name changes. A boolean ref-via-state keeps that latch simple.
@@ -251,11 +256,13 @@ export default function GroupedComposerForm({
           ...(selectedAgent ? { createdWithAgent: selectedAgent } : {})
         }
       })
+      const trimmedDisplayName = displayName.trim()
       const args: CreateWorkspaceGroupArgs = {
         workspaceName: groupName,
         branchName,
         members,
-        telemetrySource: 'composer'
+        telemetrySource: 'composer',
+        ...(trimmedDisplayName ? { displayName: trimmedDisplayName } : {})
       }
       const result = await createGroup(args)
       const firstMember = result.memberWorktrees[0]
@@ -307,6 +314,7 @@ export default function GroupedComposerForm({
     baseRefs,
     canSubmit,
     createGroup,
+    displayName,
     groupName,
     onCreated,
     selectedAgent,
@@ -340,9 +348,29 @@ export default function GroupedComposerForm({
         </p>
       </div>
 
+      {/* Why: label is the friendly name shown in the sidebar; group slug is
+          the immutable canonical id used for the folder name, branch name,
+          and templating context. Mirrors the Name + Workspace-name split in
+          the single-repo composer. */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="group-label-input">
+          Label <span className="text-muted-foreground/70">[Optional]</span>
+        </label>
+        <input
+          id="group-label-input"
+          type="text"
+          value={displayName}
+          onChange={(event) => setDisplayName(event.target.value)}
+          placeholder="e.g. PLO-4002 — Custom Luna fields"
+          spellCheck={false}
+          autoComplete="off"
+          className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+      </div>
+
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground" htmlFor="group-name-input">
-          Group name
+          Group slug
         </label>
         <div className="flex min-w-0 items-center gap-2">
           <input
