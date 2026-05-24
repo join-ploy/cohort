@@ -343,12 +343,15 @@ const GroupMemberRow = React.memo(function GroupMemberRow({
     >
       {/* Header line: repo name + [branch] + change count + CI icon + run indicator */}
       <div className="flex items-center justify-between min-w-0 gap-2">
-        {/* Why: repo name and bracketed branch share the left flex slot so
+        {/* Why: repo name + parenthesized branch share the left flex slot so
             they truncate as one unit when space runs short, preserving the
-            right-side change-count / CI / run indicators. */}
-        <span className="text-[12px] leading-tight truncate min-w-0 flex-1 text-foreground">
+            right-side change-count / CI / run indicators. Repo name is a
+            slightly muted grey to keep emphasis on the branch (which the
+            user is more likely to be working with).
+          */}
+        <span className="text-[12px] leading-tight truncate min-w-0 flex-1 text-foreground/70">
           {repoName}
-          {branch && <span className="text-foreground/80"> [{branch}]</span>}
+          {branch && <span className="text-foreground"> ({branch})</span>}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
           {changedFileCount > 0 && (

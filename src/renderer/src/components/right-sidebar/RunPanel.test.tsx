@@ -297,9 +297,10 @@ describe('RunPanelGroupView — segmented mode', () => {
 
   it('switching segments via activeRepoId shows that member’s run state', async () => {
     const { RunPanelGroupView } = await import('./RunPanelGroupView')
-    // Why: each member carries a distinct run state — header text "running…"
-    // vs "never run" disambiguates which segment's body is rendered below
-    // the segmented strip.
+    // Why: each member carries a distinct run state — the idle member shows
+    // the "Press Start" empty-state in its terminal area, while the running
+    // member mounts SidebarPtyTerminal instead, so the empty-state text is a
+    // clean discriminator for which segment's body is rendered.
     const members = [
       makeRunMember({
         worktreeId: 'wt-a',
@@ -325,7 +326,7 @@ describe('RunPanelGroupView — segmented mode', () => {
         isDispatching={false}
       />
     )
-    expect(htmlA).toMatch(/never run/i)
+    expect(htmlA).toMatch(/Press Start to launch/i)
     const htmlB = renderToStaticMarkup(
       <RunPanelGroupView
         members={members}
@@ -336,7 +337,7 @@ describe('RunPanelGroupView — segmented mode', () => {
         isDispatching={false}
       />
     )
-    expect(htmlB).toMatch(/running/i)
+    expect(htmlB).not.toMatch(/Press Start to launch/i)
   })
 
   it('renders a single Start-all button (not per-segment)', async () => {
