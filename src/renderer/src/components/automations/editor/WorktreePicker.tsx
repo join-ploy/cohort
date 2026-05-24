@@ -6,6 +6,10 @@ import type { Worktree } from '../../../../../shared/types'
 export type WorktreePickerProps = {
   projectId: string
   onSelect: (worktreeId: string) => void
+  /** When the consumer already has a chosen value, suppress the auto-prefill
+   *  side-effect — otherwise re-mounting after a manual change would clobber
+   *  it back to the (still-only) option. */
+  currentValue?: string
   onCancel?: () => void
   className?: string
 }
@@ -22,6 +26,27 @@ export function WorktreePicker(props: WorktreePickerProps): React.JSX.Element {
     }
     return byRepo[props.projectId] ?? []
   })
+
+  // Why: when the picker mounts with nothing chosen and there's exactly one
+  // worktree to pick, skip the manual click — there's nothing else the user
+  // could meaningfully choose. Guarded by `currentValue` (and by the fact
+  // that we only fire once via the ref) so a later worktree appearing or the
+  // user re-opening the picker after a change won't overwrite their value.
+  const { onSelect, currentValue } = props
+  const autoPrefilledRef = React.useRef(false)
+  React.useEffect(() => {
+    if (autoPrefilledRef.current) {
+      return
+    }
+    if (currentValue && currentValue.length > 0) {
+      return
+    }
+    if (worktrees.length !== 1) {
+      return
+    }
+    autoPrefilledRef.current = true
+    onSelect(worktrees[0].id)
+  }, [worktrees, currentValue, onSelect])
 
   if (worktrees.length === 0) {
     return (

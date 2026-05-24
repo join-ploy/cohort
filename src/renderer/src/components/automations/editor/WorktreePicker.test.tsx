@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@testing-library/react'
 import type { Worktree } from '../../../../../shared/types'
 
 // Why: the picker reads `worktreesByRepo[projectId]` from the store. Mock the
@@ -55,6 +57,10 @@ describe('WorktreePicker', () => {
     mockState = stateWith({})
   })
 
+  afterEach(() => {
+    cleanup()
+  })
+
   it('renders the empty message when projectId is blank', async () => {
     mockState = stateWith({ 'repo-1': [wtA] })
     const { WorktreePicker } = await import('./WorktreePicker')
@@ -81,5 +87,36 @@ describe('WorktreePicker', () => {
     // Each row exposes the worktree id for downstream selection wiring.
     expect(markup).toMatch(/data-worktree-id=["']repo-1::\/wt-a["']/)
     expect(markup).toMatch(/data-worktree-id=["']repo-1::\/wt-b["']/)
+  })
+
+  // Why: when the picker mounts with no current value and exactly one
+  // worktree is available, prefill it — there's nothing else the user could
+  // meaningfully click. Gated by currentValue + a one-shot ref so a later
+  // change can't be clobbered back to the only option.
+  it('auto-selects the only worktree on mount when there is no current value', async () => {
+    mockState = stateWith({ 'repo-1': [wtA] })
+    const { WorktreePicker } = await import('./WorktreePicker')
+    const onSelect = vi.fn()
+    render(<WorktreePicker projectId="repo-1" onSelect={onSelect} />)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(wtA.id)
+  })
+
+  it('does not auto-select when a current value is already set', async () => {
+    mockState = stateWith({ 'repo-1': [wtA] })
+    const { WorktreePicker } = await import('./WorktreePicker')
+    const onSelect = vi.fn()
+    render(
+      <WorktreePicker projectId="repo-1" onSelect={onSelect} currentValue="{{trigger.something}}" />
+    )
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('does not auto-select when multiple worktrees are available', async () => {
+    mockState = stateWith({ 'repo-1': [wtA, wtB] })
+    const { WorktreePicker } = await import('./WorktreePicker')
+    const onSelect = vi.fn()
+    render(<WorktreePicker projectId="repo-1" onSelect={onSelect} />)
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })
