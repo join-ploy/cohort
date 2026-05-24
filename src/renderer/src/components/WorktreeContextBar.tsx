@@ -177,15 +177,24 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
           {/* Why: breadcrumb uses text-xs (12px) so it sits visually below the
               tab strip's labels — it's identity metadata, not a primary action.
-              For grouped members, render "<group> > <repo>"; otherwise the
-              standard "<repo> > <worktree>" shape. */}
+              For grouped workspaces, the GROUP is the workspace identity; we
+              don't render a second segment because the per-repo position is
+              already surfaced by the segmented tabs in Setup/Run/Diff/Source/
+              Checks. Naming a specific member here was misleading (it locked
+              to the first member regardless of which segment the user was
+              viewing). Ungrouped worktrees keep the original
+              "<repo> > <worktree>" shape. */}
           <span className="shrink-0 truncate text-xs font-medium text-muted-foreground">
             {group ? group.displayName : (repo?.displayName ?? 'Workspace')}
           </span>
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-            {group ? (repo?.displayName ?? worktree.displayName) : worktree.displayName}
-          </span>
+          {!group && (
+            <>
+              <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                {worktree.displayName}
+              </span>
+            </>
+          )}
           <button
             type="button"
             aria-label="Worktree actions"
