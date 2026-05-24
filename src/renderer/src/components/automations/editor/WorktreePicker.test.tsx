@@ -2,7 +2,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import type { Worktree } from '../../../../../shared/types'
+import type { Worktree, WorkspaceGroup } from '../../../../../shared/types'
+import type { AutomationTarget } from '../../../../../shared/automations-types'
 
 // Why: the picker reads `worktreesByRepo[projectId]` from the store. Mock the
 // store so renderToStaticMarkup can verify the rendered branches without
@@ -48,8 +49,33 @@ const wtB: Worktree = {
   workspaceName: 'brave_otter'
 }
 
-function stateWith(worktreesByRepo: Record<string, Worktree[]>): StoreState {
-  return { worktreesByRepo }
+function stateWith(
+  worktreesByRepo: Record<string, Worktree[]>,
+  workspaceGroups: WorkspaceGroup[] = []
+): StoreState {
+  return { worktreesByRepo, workspaceGroups }
+}
+
+function makeGroup(overrides: Partial<WorkspaceGroup> = {}): WorkspaceGroup {
+  return {
+    id: 'group:demo-uuid',
+    workspaceName: 'demo',
+    displayName: 'Demo Group',
+    parentPath: '/workspaces/demo',
+    memberWorktreeIds: [],
+    branchName: 'feat-x',
+    isArchived: false,
+    archivedAt: null,
+    isPinned: false,
+    sortOrder: 0,
+    lastActivityAt: 0,
+    isUnread: false,
+    comment: '',
+    createdAt: 0,
+    linkedIssue: null,
+    linkedLinearIssue: null,
+    ...overrides
+  }
 }
 
 describe('WorktreePicker', () => {
@@ -118,5 +144,124 @@ describe('WorktreePicker', () => {
     const onSelect = vi.fn()
     render(<WorktreePicker projectId="repo-1" onSelect={onSelect} />)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  // ─── Grouped-workspaces extension (Phase L4) ────────────────────────────
+
+  // Why: a group-targeted automation needs to address either the whole group
+  // (worktreeRef = group:<id>) OR a specific member worktree (= worktreeId).
+  // The picker surfaces both alongside per-repo standalone worktrees.
+  describe('when target.kind is "group"', () => {
+    const wtRepoA: Worktree = { ...wtA, id: 'repo-a::/wt-x', repoId: 'repo-a' }
+    const wtRepoB: Worktree = { ...wtA, id: 'repo-b::/wt-x', repoId: 'repo-b', displayName: 'B' }
+    const groupTarget: AutomationTarget = {
+      kind: 'group',
+      projectIds: ['repo-a', 'repo-b']
+    }
+    const group = makeGroup({
+      id: 'group:abc',
+      memberWorktreeIds: [wtRepoA.id, wtRepoB.id]
+    })
+
+    it('renders the group row + each member row with a member-scoped row beneath', async () => {
+      mockState = stateWith({ 'repo-a': [wtRepoA], 'repo-b': [wtRepoB] }, [group])
+      const { WorktreePicker } = await import('./WorktreePicker')
+      const markup = renderToStaticMarkup(
+        <WorktreePicker projectId="" target={groupTarget} onSelect={() => {}} />
+      )
+      // Group row
+      expect(markup).toMatch(/data-group-id=["']group:abc["']/)
+      expect(markup).toContain('Demo Group')
+      // Member rows (one per worktree)
+      expect(markup).toMatch(/data-worktree-id=["']repo-a::\/wt-x["'][^>]*data-member-of-group/)
+      expect(markup).toMatch(/data-worktree-id=["']repo-b::\/wt-x["'][^>]*data-member-of-group/)
+      // Member-scoped rows
+      expect(markup).toMatch(/data-member-scoped-ref=["']member:group:abc:repo-a::\/wt-x["']/)
+      expect(markup).toMatch(/data-member-scoped-ref=["']member:group:abc:repo-b::\/wt-x["']/)
+    })
+
+    it('hides groups whose members include a repo outside the target projectIds', async () => {
+      const offGroup = makeGroup({
+        id: 'group:off',
+        memberWorktreeIds: [wtRepoA.id, 'repo-c::/wt-y']
+      })
+      mockState = stateWith(
+        {
+          'repo-a': [wtRepoA],
+          'repo-b': [wtRepoB],
+          'repo-c': [{ ...wtA, id: 'repo-c::/wt-y', repoId: 'repo-c' }]
+        },
+        [offGroup]
+      )
+      const { WorktreePicker } = await import('./WorktreePicker')
+      const markup = renderToStaticMarkup(
+        <WorktreePicker projectId="" target={groupTarget} onSelect={() => {}} />
+      )
+      // The off-group must not surface; its members would expand the run
+      // beyond the automation's declared target repos.
+      expect(markup).not.toMatch(/data-group-id=["']group:off["']/)
+    })
+
+    it('emits the group id when a group row is clicked', async () => {
+      mockState = stateWith({ 'repo-a': [wtRepoA], 'repo-b': [wtRepoB] }, [group])
+      const { WorktreePicker } = await import('./WorktreePicker')
+      const onSelect = vi.fn()
+      const { container } = render(
+        <WorktreePicker
+          projectId=""
+          target={groupTarget}
+          onSelect={onSelect}
+          currentValue="placeholder"
+        />
+      )
+      const groupBtn = container.querySelector('[data-group-id="group:abc"]') as HTMLButtonElement
+      groupBtn.click()
+      expect(onSelect).toHaveBeenCalledWith('group:abc')
+    })
+
+    it('emits a member-scoped ref when the scoped row is clicked', async () => {
+      mockState = stateWith({ 'repo-a': [wtRepoA], 'repo-b': [wtRepoB] }, [group])
+      const { WorktreePicker } = await import('./WorktreePicker')
+      const onSelect = vi.fn()
+      const { container } = render(
+        <WorktreePicker
+          projectId=""
+          target={groupTarget}
+          onSelect={onSelect}
+          currentValue="placeholder"
+        />
+      )
+      const scopedBtn = container.querySelector(
+        '[data-member-scoped-ref="member:group:abc:repo-a::/wt-x"]'
+      ) as HTMLButtonElement
+      scopedBtn.click()
+      expect(onSelect).toHaveBeenCalledWith('member:group:abc:repo-a::/wt-x')
+    })
+
+    // Why: auto-prefill rule for the group case — `member-scoped` rows never
+    // count as selectable defaults (opt-in semantics from Ask C). A group with
+    // a single member should still prefill to "the group itself" rather than
+    // "scoped to the only member".
+    it('auto-selects a sole group when no other candidate exists', async () => {
+      const singleMemberGroup = makeGroup({
+        id: 'group:solo',
+        memberWorktreeIds: [wtRepoA.id]
+      })
+      mockState = stateWith({ 'repo-a': [wtRepoA] }, [singleMemberGroup])
+      const { WorktreePicker } = await import('./WorktreePicker')
+      const onSelect = vi.fn()
+      render(
+        <WorktreePicker
+          projectId=""
+          target={{ kind: 'group', projectIds: ['repo-a'] }}
+          onSelect={onSelect}
+        />
+      )
+      // Two candidates: the group itself + the sole member. So no prefill —
+      // there's a real choice to make between scoping to the group (1 tab,
+      // group cwd) vs scoping to the member (still group-bound but member
+      // cwd). The auto-prefill only fires when there's truly one option.
+      expect(onSelect).not.toHaveBeenCalled()
+    })
   })
 })
