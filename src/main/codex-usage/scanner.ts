@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: Codex discovery, incremental parsing, attribution, and aggregation all depend on the same event-normalization rules. Keeping them together makes the duplicate-snapshot logic easier to audit when usage totals look wrong. */
 import { homedir } from 'os'
 import { basename, join, win32, posix } from 'path'
 import { createReadStream } from 'fs'

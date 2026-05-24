@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the preload contract is intentionally centralized in one declaration file so renderer and preload stay in lockstep when IPC surfaces change. */
 import type {
   BaseRefDefaultResult,
   BrowserCookieImportResult,

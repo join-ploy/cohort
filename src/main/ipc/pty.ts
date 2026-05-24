@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: PTY IPC is intentionally centralized in one
-main-process module so spawn-time environment scoping, lifecycle cleanup,
-foreground-process inspection, and renderer IPC stay behind a single audited
-boundary. Splitting it by line count would scatter tightly coupled terminal
-process behavior across files without a cleaner ownership seam. */
 import { join, delimiter } from 'path'
 import { randomUUID } from 'crypto'
 import { type BrowserWindow, ipcMain, app } from 'electron'

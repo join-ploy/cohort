@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: persistence keeps schema defaults, migration,
-load/save, and flush logic in one file so the full storage contract is reviewable
-as a unit instead of being scattered across modules. */
 import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from 'fs'
 import { writeFile, rename, mkdir, rm } from 'fs/promises'

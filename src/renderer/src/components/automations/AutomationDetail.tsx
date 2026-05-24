@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationDetail owns the run header,
- * trigger badge, lineage links, run history rows, step-state rendering and
- * chain breakdown. Splitting now would scatter the row-shape logic; revisit
- * when the chain rendering grows past another major addition. */
 import React from 'react'
 import { Pencil, Pause, Play, RotateCcw, Square, Trash2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'

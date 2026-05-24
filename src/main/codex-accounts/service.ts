@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this service intentionally keeps Codex
-account lifecycle, path safety, login, and identity parsing in one audited
-main-process module so the managed-account boundary stays explicit. */
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'

@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: the grouped composer keeps form layout,
-   validation, and post-create launch wiring in one place so the agent
-   picker, per-repo controls, and group-create transaction can share the
-   same state without splitting into incidentally-coupled fragments. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { LoaderCircle, RefreshCw, Server } from 'lucide-react'
 import { toast } from 'sonner'

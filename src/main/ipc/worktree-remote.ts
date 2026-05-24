@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 // Why: extracted from worktrees.ts to keep the main IPC module under the
 // max-lines threshold. Worktree creation helpers (local and remote) live
 // here so the IPC dispatch file stays focused on handler wiring. The

@@ -1,5 +1,3 @@
-/* oxlint-disable max-lines -- Why: co-locates forwarded list, detected list, modal form, and
-per-entry actions in one file to keep the data flow straightforward. */
 import React, { useCallback, useMemo, useState } from 'react'
 import { ExternalLink, Copy, Trash2, Plus, Unplug, ChevronRight, Pencil } from 'lucide-react'
 import { useAppStore } from '@/store'

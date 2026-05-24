@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 // End-to-end behavior of the track() wrapper against a mock PostHog. These
 // tests pin the ordering contracts:
 //

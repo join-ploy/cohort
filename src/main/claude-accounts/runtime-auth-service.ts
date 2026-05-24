@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: Claude account switching has one safety
-boundary: runtime auth materialization. Keeping file, Keychain, snapshot, and
-env-patch semantics together prevents PTY launch and quota fetch paths drifting. */
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'

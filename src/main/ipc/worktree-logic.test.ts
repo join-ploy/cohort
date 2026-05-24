@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this suite covers every helper exported
-from worktree-logic so a single regression is caught without splitting tests
-across files for unrelated functions. */
 import { join, resolve } from 'path'
 import { describe, expect, it } from 'vitest'
 import {

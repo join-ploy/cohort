@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the split-group workspace model intentionally keeps
-   group-scoped activation, close, split, and tab-order rules together so the extracted
-   controller cannot drift from the TabGroupPanel surface it coordinates. */
 import { useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'

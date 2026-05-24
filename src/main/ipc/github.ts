@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: all GitHub IPC handlers stay co-located so
-the repo-path validation, preference-threading, and stats wiring patterns are
-reviewable as one surface. Splitting by feature area would risk drifting
-validation/gate conventions across handler files. */
 import { ipcMain, webContents } from 'electron'
 import { resolve } from 'path'
 import type { Repo, GitHubIssueUpdate } from '../../shared/types'

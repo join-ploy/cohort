@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- test suite covers config sync, login seeding, and fallback scenarios */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

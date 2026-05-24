@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: slug-addressed mutations + work-item
-details share the validate/runRest/runGraphql plumbing with the read path.
-Keeping them together preserves a single review surface for the write side. */
 import {
   acquire,
   release,

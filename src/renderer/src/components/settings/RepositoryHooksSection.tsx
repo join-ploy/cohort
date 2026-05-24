@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the YAML status card, issue-command editor, policy grid, and legacy-hook section form one cohesive settings surface; splitting them across files would scatter tightly coupled state and prop drilling. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { OrcaHooks, Repo, SetupRunPolicy } from '../../../../shared/types'
 import { AlertTriangle } from 'lucide-react'

@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: RunPanel + group view tests share builders
-   and mocks; keeping them in one file avoids duplicating the renderToStaticMarkup
-   harness + the makeRunMember/IDLE_RUN_STATE fixtures across files. */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ScriptState } from '@/store/slices/scripts'
@@ -260,6 +257,7 @@ function makeRunMember(overrides: {
   runScript?: string | undefined
   status?: ScriptState['status']
   ptyId?: string | null
+  exitCode?: number | null
 }): RunGroupMember {
   return {
     worktreeId: overrides.worktreeId,
@@ -269,7 +267,7 @@ function makeRunMember(overrides: {
     runState: {
       ptyId: overrides.ptyId ?? null,
       status: overrides.status ?? 'idle',
-      exitCode: null,
+      exitCode: overrides.exitCode ?? null,
       startedAt: null
     }
   }

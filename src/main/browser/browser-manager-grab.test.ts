@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: grab operation tests cover authorization,
-lifecycle (arm/await/cancel/teardown), navigation/destruction auto-cancel, and
-main-side payload validation. Splitting across files would scatter the shared
-mock setup and make it harder to verify the grab contract holistically. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GRAB_BUDGET } from '../../shared/browser-grab-types'
 

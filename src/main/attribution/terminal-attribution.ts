@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this module owns the generated git/gh wrapper
-scripts for both POSIX shells and Windows shells. Keeping the scripts adjacent
-to the env injection code makes the attribution behavior auditable as one unit
-instead of scattering generated shell fragments across files. */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 

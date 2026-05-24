@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationService aggregates multiple
-   responsibilities (scheduler, dispatchAutoRun, restartRun, engine wiring),
-   and its tests live in one file to share the `createStore` + repo-seed
-   helpers; splitting them tracks the upstream service split, not this work. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'

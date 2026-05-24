@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: the GitHub slice co-locates all cache + fetch logic for
-PR, issue, checks, and comments data so the dedup and invalidation patterns stay consistent. */
 import type { StateCreator } from 'zustand'
 import { toast } from 'sonner'
 import type { AppState } from '../types'

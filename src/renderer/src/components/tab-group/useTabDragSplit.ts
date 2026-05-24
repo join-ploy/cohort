@@ -1,6 +1,3 @@
-/* oxlint-disable max-lines -- Why: the drag-split hook co-locates drop-zone
- * resolution, same-group reordering, and cross-group handoff so state
- * transitions stay readable in one place. */
 import { useCallback, useState } from 'react'
 import {
   closestCenter,

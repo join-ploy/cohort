@@ -1,5 +1,3 @@
-/* eslint-disable max-lines */
-
 import React, { useEffect, useCallback, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'

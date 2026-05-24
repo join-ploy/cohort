@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: computer CLI coverage shares one mocked runtime setup across command contracts. */
 import path from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

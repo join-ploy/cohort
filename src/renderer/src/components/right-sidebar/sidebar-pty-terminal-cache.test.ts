@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: xterm + pty-dispatcher mocks plus the
-   full attach/detach/dispose/notify lifecycle assertions land just over
-   the default 300-line threshold. Splitting would scatter the shared
-   mock state across files. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AttachOptions } from './sidebar-pty-terminal-cache'
 

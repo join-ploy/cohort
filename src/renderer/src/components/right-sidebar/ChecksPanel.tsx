@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: the checks panel co-locates PR header, checks, comments,
-merge actions, and conflict state in one component to keep the data flow straightforward. */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle, ExternalLink, RefreshCw, Check, X, Pencil } from 'lucide-react'
 import { useAppStore } from '@/store'

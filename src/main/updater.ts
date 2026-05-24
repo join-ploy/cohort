@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import path from 'node:path'
 import { app, BrowserWindow, powerMonitor } from 'electron'
 import { autoUpdater } from 'electron-updater'

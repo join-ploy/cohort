@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this suite covers every runner-script
-helper (setup, run, issue-command) plus the new CONDUCTOR env-var assertions
-in one place so a regression in the shared wrapper is caught against the
-full surface instead of being scattered. */
 import type { Repo } from '../shared/types'
 
 import { describe, expect, it, vi } from 'vitest'

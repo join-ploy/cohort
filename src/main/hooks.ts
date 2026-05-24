@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: hook parsing, layered issue-command resolution, and cross-platform runner setup share one execution surface, so keeping them together avoids subtle drift across create/read/write paths. */
 import { readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { exec, execFile } from 'child_process'

@@ -1,8 +1,3 @@
-/* oxlint-disable max-lines -- Why: rendering the drop-indicator prop on each
- * of three distinct tab components (terminal, browser, editor) adds 3 lines
- * to a file that was already ~398 code lines on main. The per-type render
- * branches share little beyond drag data, so consolidating them would cost
- * more clarity than the ~5 lines of bloat is worth. */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext } from '@dnd-kit/sortable'
 import { FilePlus, Globe, Plus, TerminalSquare } from 'lucide-react'

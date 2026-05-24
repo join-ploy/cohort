@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: this file covers the entire restart flow
-   of daemon-init — construction, the 7-step sequence from
-   docs/daemon-staleness-ux.md §Phase 1, and the concurrency coalescer. A
-   single describe block with shared mocks keeps setup in one place; splitting
-   across files would duplicate the vi.hoisted boundary mocks with no cleaner
-   ownership seam. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION } from './types'
 

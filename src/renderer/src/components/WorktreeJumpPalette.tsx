@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Globe, Layers, Plus, Server, ServerOff } from 'lucide-react'

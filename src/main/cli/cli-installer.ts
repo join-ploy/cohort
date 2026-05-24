@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: this file centralizes cross-platform CLI install state, launcher resolution, and PATH registration so the public shell command stays consistent across packaged and development builds. */
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'

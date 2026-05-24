@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: colocating the PR/issue cache, work-item
-envelope, and IssueSourceIndicator suppression tests in one file keeps the
-GitHub slice's cross-cutting invariants verifiable in one place. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
 import { createGitHubSlice } from './github'

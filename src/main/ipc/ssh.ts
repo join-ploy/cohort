@@ -1,5 +1,3 @@
-/* oxlint-disable max-lines -- Why: co-locates SSH IPC handlers, port-forward
-broadcasting, and session lifecycle in one file to keep the data flow obvious. */
 import { ipcMain, type BrowserWindow } from 'electron'
 import type { Store } from '../persistence'
 import { SshConnectionStore } from '../ssh/ssh-connection-store'

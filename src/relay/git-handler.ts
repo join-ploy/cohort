@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: this relay handler centralizes the git RPC
-protocol surface so local and SSH git behavior stay in one dispatch table. */
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { rm } from 'fs/promises'

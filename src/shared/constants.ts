@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: this file is the single source of truth
-   for default global settings, default repo hook settings, default
-   onboarding state, default UI state, default workspace session, and a
-   handful of related shared constants. Splitting it would only spread the
-   defaults across multiple files without a meaningful boundary. */
 import type {
   GlobalSettings,
   NotificationSettings,

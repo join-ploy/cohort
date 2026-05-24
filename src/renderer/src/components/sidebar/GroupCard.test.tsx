@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: GroupCard tests live in one file so the
-   store-shape mock + helper builders stay close to the assertions; splitting
-   would duplicate the mock plumbing across files. */
 // @vitest-environment jsdom
 import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

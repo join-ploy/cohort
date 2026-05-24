@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: SSH connection lifecycle, credential retries, reconnect policy, and transport fallback are intentionally co-located so state transitions stay auditable in one file. */
 import * as net from 'net'
 import { Client as SshClient } from 'ssh2'
 import type { ChildProcess } from 'child_process'

@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: ProjectV2 GraphQL has its own normalization
-layer, retry policy (parent-field dance), paste-to-add parser, and discovery
-pagination. Co-locating the read path keeps the retry/classify/normalize
-contract reviewable as one surface. Lower-level plumbing (slug validation,
-error classifier, runGraphql/runRest) lives in ./project-view/internals; the
-slug-addressed write path lives in ./project-view/mutations. */
 import {
   acquire,
   release,

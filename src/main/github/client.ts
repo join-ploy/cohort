@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: co-locating all GitHub client functions keeps the
-concurrency acquire/release pattern and error handling consistent across operations. */
 import type {
   ClassifiedError,
   GitPushTarget,

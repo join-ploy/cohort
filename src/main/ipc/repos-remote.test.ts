@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: this file groups all repos IPC handler
-tests (addRemote, getBaseRefDefault envelope, searchBaseRefs SSH relay) so
-fixture setup and mock plumbing can be shared. Splitting by line count would
-duplicate the hoisted mocks and the `../git/repo` partial-real/partial-stub
-setup. */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type * as RepoModule from '../git/repo'
 

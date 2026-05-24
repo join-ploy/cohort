@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: shell-ready startup command integration adds
-~70 lines of scanner/promise wiring to spawn(). Splitting the method would scatter
-tightly coupled PTY lifecycle logic (scan → ready → write → exit cleanup) across
-files without a cleaner ownership seam. */
 import { basename } from 'path'
 import { win32 as pathWin32 } from 'path'
 import { resolveWindowsShellLaunchArgs } from './windows-shell-args'

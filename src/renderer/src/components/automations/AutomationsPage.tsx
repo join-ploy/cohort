@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this page owns the automations list/detail
- * orchestration alongside the delete-confirmation dialog while the chain
- * editor + detail presentation live in sibling files. */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarClock, Check, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'

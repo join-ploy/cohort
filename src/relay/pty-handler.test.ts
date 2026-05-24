@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 const { mockPtySpawn, mockPtyInstance } = vi.hoisted(() => ({

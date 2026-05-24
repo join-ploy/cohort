@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: project picker handles pinned, recent, browse-all listing, paste-to-add, view selection, and accessibility-related orchestration in one place to keep the entry-point flow coherent. */
 // Why: the picker is the only v1 entry point for switching projects (no
 // header tab strip). Pinned + Recent come from settings; Browse all lazy-loads
 // from `listAccessibleProjects` and is cached for 5 minutes. Paste-to-add

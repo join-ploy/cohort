@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: repo IPC is intentionally centralized so SSH
-routing, clone lifecycle, and store persistence stay behind a single audited
-boundary. Splitting by line count would scatter tightly coupled repo behavior. */
 import type { BrowserWindow } from 'electron'
 import { dialog, ipcMain } from 'electron'
 import { randomUUID } from 'crypto'

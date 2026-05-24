@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the CDP bridge owns debugger lifecycle, ref map management, command serialization, and all browser interaction logic in one module so the browser automation boundary stays coherent. */
 import { webContents } from 'electron'
 import type {
   BrowserCaptureStartResult,

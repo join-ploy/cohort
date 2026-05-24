@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: shared type definitions for all runtime RPC methods live in one file for discoverability and import simplicity. */
 import type { TerminalPaneLayoutNode } from './types'
 import type { BrowserSessionProfile, GitWorktreeInfo, Repo } from './types'
 import type {

@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the chain editor modal co-locates its
-   header, body, footer, add-step picker, run-now confirm modal, and triggers
-   sub-modal so the full editor surface stays in one file as it evolves. */
 import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'

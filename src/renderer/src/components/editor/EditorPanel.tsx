@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: EditorPanel still owns the visible editor
-save/load/render lifecycle for many modes (edit, diff, conflict review), and
-keeping that UI state together is easier to reason about than scattering it
-across multiple components. Autosave now lives in a smaller headless controller
-so hidden editor UI no longer participates in shutdown. */
 import React, { useCallback, useEffect, useRef, useState, Suspense } from 'react'
 import * as monaco from 'monaco-editor'
 import { Columns2, Copy, Eye, ExternalLink, FileText, MoreHorizontal, Rows2 } from 'lucide-react'

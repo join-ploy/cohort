@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: keeps the registry, handleRunStart, and
-handleRunStop suites together so a regression in any one path is caught
-against the full IPC surface instead of being split across files. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {

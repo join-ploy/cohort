@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: transcript discovery, parsing, attribution, and aggregation share one data shape pipeline. Keeping them co-located makes it easier to audit correctness when Claude usage numbers look surprising. */
 import { homedir } from 'os'
 import { join, basename } from 'path'
 import { realpath, readdir, stat } from 'fs/promises'

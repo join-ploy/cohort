@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: explorer drag/drop keeps move, native-file
-drop, auto-expand, and undo/redo coordination in one hook because splitting the
-DnD state machine across files makes those interactions harder to reason about. */
 import type { RefObject } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'

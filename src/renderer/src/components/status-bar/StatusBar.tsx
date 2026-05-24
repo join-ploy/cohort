@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the status bar keeps provider rendering,
-interaction menus, and compact-layout behavior together so the hover/click
-states stay consistent across Claude and Codex. */
 import {
   AlertTriangle,
   Activity,

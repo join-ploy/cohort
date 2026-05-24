@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: keeps the per-worktree pty registry,
-   spawn/exit lifecycle, SSH/local provider routing, app-quit teardown, and
-   the SetupScriptRegistry write-through together in one file so the setup
-   lifecycle is reviewable as a single unit. Splitting would fragment the
-   shared `setupPtyByWorktree` map and the `setupStartLocked` flow. */
-
 // Why: per-worktree single-instance setup-script registry + IPC handlers.
 // Setup is per-worktree (not per-repo, in contrast to run) so two worktrees
 // in the same repo can each have their own live setup PTY without one killing

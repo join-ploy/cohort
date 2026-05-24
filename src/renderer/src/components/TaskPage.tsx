@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: the tasks page keeps the repo selector,
-task source controls, and GitHub task list co-located so the wiring between the
-selected repo, the task filters, and the work-item list stays readable in one
-place while this surface is still evolving. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {

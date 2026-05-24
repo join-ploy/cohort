@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this file contains a multi-line inline
-   JS plugin source emitted into OpenCode's plugins directory as a single
-   file; splitting the plugin source across TS modules would obscure the
-   runtime artifact and scatter tightly coupled string-template logic. */
 import { app } from 'electron'
 import { join } from 'path'
 import {

@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: happy path, rollback, and the six pre-create
-   validation specs share the same hoisted mock harness; splitting them would
-   force duplication of the electron/fs mocks without adding clarity. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { handleMock, removeHandlerMock, mkdirSyncMock, rmSyncMock, runWorktreeRemovalMock } =

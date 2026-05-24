@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the update card owns the full updater lifecycle in one
-   renderer surface. Keeping the state machine and its presentation variants together avoids
-   scattering tightly coupled update behavior across multiple files. */
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { Card } from './ui/card'

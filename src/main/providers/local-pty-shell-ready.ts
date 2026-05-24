@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this module owns both shell wrapper file
-   generation and the matching startup-command readiness scanner; splitting
-   them would make the wrapper/marker contract harder to audit. */
 /**
  * Shell-ready startup command support for local PTYs.
  *

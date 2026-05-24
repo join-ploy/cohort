@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: this file is the umbrella suite for the agent-status slice (freshness, tool/assistant fields, stateStartedAt, retention + prefix sweep). Splitting by sub-area would scatter shared helpers (createTestStore, fake timers); narrower edge-cases live in sibling agent-status-*.test.ts files already. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AGENT_STATUS_STALE_AFTER_MS,

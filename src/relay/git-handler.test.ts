@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this file covers ~14 distinct relay git
-   handlers plus the addWorktree state machine (--no-track + push.autoSetupRemote
-   probe/write across four flow branches). Splitting per-handler would scatter
-   related coverage without a meaningful boundary. */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { GitHandler } from './git-handler'
 import { RelayContext } from './context'

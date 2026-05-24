@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: lifecycle + template + outputTail capture
-   coverage lives here as one suite so test helpers and fixtures (baseStep,
-   baseState, baseCtx, noopSubscribePtyData) stay single-source. Splitting
-   would force fixture duplication and is the same call run-prompt-runner
-   makes for its sibling suite. */
 import { describe, it, expect, vi } from 'vitest'
 import type { RunCommandConfig, Step, StepRunState } from '../../../shared/automations-types'
 import { RunCommandRunner } from './run-command-runner'

@@ -1,10 +1,3 @@
-/* eslint-disable max-lines -- Why: this module is the canonical, transport-
-   agnostic agent-hook listener. The HTTP request parser, payload normalizer,
-   per-CLI extractors, and on-disk endpoint-file writer all share invariants
-   (size caps, warn-once Sets, shell-safe value rules) that must not drift
-   between Orca's main process and the relay. Splitting by line count would
-   force the same invariants to be re-derived in two places. */
-
 // Why: extracted from `src/main/agent-hooks/server.ts` so the relay can host
 // the same listener pipeline on the remote without dragging Electron in. The
 // module uses only Node builtins (http/fs/crypto/net/path/url/os) — none of

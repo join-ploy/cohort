@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this service centralizes polling, stale-data
-handling, account-switch fetch semantics, and renderer push coordination so the
-fetch ordering rules stay in one place. */
 import type { BrowserWindow } from 'electron'
 import type {
   RateLimitState,

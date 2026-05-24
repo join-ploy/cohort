@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the preload bridge is the audited contract between
-renderer and Electron. Keeping the IPC surface co-located in one file makes security
-review and type drift checks easier than scattering these bindings across modules. */
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'

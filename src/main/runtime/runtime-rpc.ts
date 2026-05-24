@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: this file is the single security boundary for the bundled CLI — transport setup, auth-token enforcement, admission control, keepalive framing, and orphan-socket sweeping all co-locate deliberately so a reviewer can audit the boundary in one sitting. Splitting this across files would scatter the invariants without reducing complexity. */
 // Why: this is the single security boundary for the bundled CLI. It owns
 // auth-token enforcement, bootstrap-metadata publication, and transport
 // orchestration so a running runtime is always discoverable via exactly

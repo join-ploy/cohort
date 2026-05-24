@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: Claude managed accounts need one audited owner
-for login, credential capture, Keychain storage, selection, and rate-limit refresh. */
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import {

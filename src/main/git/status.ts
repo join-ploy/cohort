@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { existsSync } from 'fs'
 import { readFile, rm } from 'fs/promises'
 import * as path from 'path'

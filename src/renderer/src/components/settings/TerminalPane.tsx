@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: TerminalPane is the single owner of all terminal settings UI;
-   splitting individual settings into separate files would scatter related controls without a
-   meaningful abstraction boundary. Mirrors the same decision made for GeneralPane.tsx. */
 import { useState } from 'react'
 import type {
   FloatingTerminalTriggerLocation,

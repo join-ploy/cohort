@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this component intentionally keeps the full
-composer card markup together so the inline and modal variants share one UI
-surface without splitting the controlled form into hard-to-follow fragments. */
 import React from 'react'
 import {
   Check,

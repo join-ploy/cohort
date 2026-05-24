@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: lifecycle + paneRef branch coverage lives
-   here as one suite so test helpers and fixtures (baseStep, baseState) stay
-   single-source. Splitting would force fixture duplication. */
 import { describe, it, expect, vi } from 'vitest'
 import type { Step, StepRunState } from '../../../shared/automations-types'
 import { RunPromptRunner } from './run-prompt-runner'

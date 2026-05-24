@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: the guest overlay runtime is a single
-self-contained JS string template that must be injected atomically into the
-guest page. Splitting it across modules would require a string concatenation
-build step that adds complexity without improving auditability. */
 // ---------------------------------------------------------------------------
 // Browser Context Grab — guest overlay runtime builder
 //

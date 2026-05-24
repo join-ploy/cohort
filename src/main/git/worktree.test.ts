@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: addWorktree has multiple code paths (no refresh,
-   reset --hard vs update-ref, dirty worktree, diverged branch, custom remote) that each
-   need dedicated test coverage. Splitting into separate files would scatter related tests
-   without a meaningful boundary. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { gitExecFileAsyncMock, gitExecFileSyncMock, translateWslOutputPathsMock } = vi.hoisted(

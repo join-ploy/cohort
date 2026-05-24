@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: keeping both Codex RPC and PTY fallback
-paths together in one file makes it easier to audit the protocol/parsing
-differences and ensure account-scoped env handling stays identical. */
 import type { ProviderRateLimits, RateLimitWindow } from '../../shared/rate-limit-types'
 import { spawn } from 'node:child_process'
 import { resolveCodexCommand } from '../codex-cli/command'

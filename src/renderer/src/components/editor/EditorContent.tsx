@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: EditorContent is the dispatch surface for
-every editor mode (edit, diff, conflict, markdown-preview, combined-diff, and
-now Changes view mode). Keeping the mode-selection branches colocated is easier
-to reason about than scattering the switch across per-mode wrappers. Individual
-renderers (MonacoEditor, DiffViewer, ChangesModeView, MarkdownPreview, etc.)
-already live in their own modules. */
 import React, { lazy } from 'react'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { detectLanguage } from '@/lib/language-detect'

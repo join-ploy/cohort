@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: GeneralPane is the single owner of all general settings UI;
-   splitting individual settings into separate files would scatter related controls without a
-   meaningful abstraction boundary. */
 import { useEffect, useState } from 'react'
 import type { GlobalSettings } from '../../../../shared/types'
 import { Button } from '../ui/button'

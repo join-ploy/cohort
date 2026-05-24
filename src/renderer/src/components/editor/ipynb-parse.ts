@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: keeping notebook parse and mutation helpers
-in one module makes nbformat preservation easier to audit while the notebook
-editor model is still small. */
 export type IpynbCellKind = 'code' | 'markdown' | 'raw'
 
 export type IpynbOutput =

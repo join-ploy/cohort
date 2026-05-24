@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the PR/Issue details service groups the
-   body/comments/files/checks fetch paths alongside the file-contents resolver
-   so the drawer's rate-limit and caching strategy lives in one place. */
 import type {
   GitHubAssignableUser,
   GitHubPRFile,

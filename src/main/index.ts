@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this is Orca's main-process entry point;
-   it owns app lifecycle, service wiring, window creation, and hook/daemon
-   startup. Splitting by line count would fragment tightly coupled startup
-   logic across files without a cleaner ownership seam. */
 import { grantDirAcl } from './win32-utils'
 import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'

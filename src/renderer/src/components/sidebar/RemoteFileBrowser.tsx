@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the remote file browser centralizes filter state, path-mode preview state, cache, debounce, request gen, and click/keyboard handling in one component so picker navigation stays coherent. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Folder, File, ArrowUp, LoaderCircle, Home, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'

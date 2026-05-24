@@ -1,11 +1,3 @@
-/* eslint-disable max-lines -- Why: this module owns the complete daemon
-lifecycle for the Electron main process — init, out-of-process launch,
-current+legacy adapter wiring, restart orchestration (the 7-step sequence
-from docs/daemon-staleness-ux.md §Phase 1), and teardown on app quit. Splitting
-it would scatter the "swap the running provider atomically" invariant across
-files with no cleaner ownership seam: restart, replaceDaemonProvider, and the
-module-level spawner/adapter singletons must stay co-located so a future
-change cannot leave them drifting out of sync. */
 import { join } from 'path'
 import { app } from 'electron'
 import { mkdirSync, existsSync, unlinkSync, writeFileSync } from 'fs'

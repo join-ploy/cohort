@@ -1,8 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationService aggregates runner
-   wiring, the rrule scheduler tick, run-now bookkeeping, and (now) the
-   auto-trigger engine controller. Splitting these concerns is a separate
-   refactor; this file was already over budget before the auto-triggers
-   work. */
 import { randomUUID } from 'crypto'
 import type { IpcMain, WebContents } from 'electron'
 import type { Store } from '../persistence'

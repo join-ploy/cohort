@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
 import type { AutoDedupEntry, Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './telemetry-events'

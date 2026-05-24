@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
