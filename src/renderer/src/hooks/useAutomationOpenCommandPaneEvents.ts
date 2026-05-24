@@ -106,6 +106,19 @@ export function useAutomationOpenCommandPaneEvents(): void {
             ORCA_TAB_ID: tab.id,
             ORCA_WORKTREE_ID: worktreeId
           }
+          // Why (debug-group-runcmd): capture the freshly-created tab state
+          // BEFORE pty.spawn so we can tell whether something (e.g. a parallel
+          // mount path) bound a PTY to the tab while our IPC was in flight.
+          // tab.ptyId here SHOULD be null — initialPtyId isn't passed.
+          const preSpawnPtyIds = useAppStore.getState().ptyIdsByTabId[tab.id]?.slice() ?? []
+          console.log('[debug-group-runcmd] pre-spawn', {
+            tabId: tab.id,
+            worktreeId,
+            cwdSentToMain: worktree.path,
+            tabPtyId: tab.ptyId,
+            ptyIdsByTabIdLen: preSpawnPtyIds.length,
+            ptyIdsByTabId: preSpawnPtyIds
+          })
           let result
           try {
             result = await window.api.pty.spawn({
@@ -123,7 +136,36 @@ export function useAutomationOpenCommandPaneEvents(): void {
             store.closeTab(tab.id)
             throw err
           }
+          // Why (debug-group-runcmd): is the freshly-spawned PTY id different
+          // from anything already bound? If so, the tab is racing two PTYs.
+          const beforeBindState = useAppStore.getState()
+          const beforeBindTab = beforeBindState.tabsByWorktree[worktreeId]?.find(
+            (t) => t.id === tab.id
+          )
+          console.log('[debug-group-runcmd] post-spawn pre-bind', {
+            tabId: tab.id,
+            spawnedPtyId: result.id,
+            tabPtyId: beforeBindTab?.ptyId ?? null,
+            ptyIdsByTabIdLen: (beforeBindState.ptyIdsByTabId[tab.id] ?? []).length,
+            ptyIdsByTabId: beforeBindState.ptyIdsByTabId[tab.id]?.slice() ?? []
+          })
           store.updateTabPtyId(tab.id, result.id)
+          // Why (debug-group-runcmd): after the binding call, did tab.ptyId
+          // actually pick up our explicit spawn id? If a phantom PTY was first,
+          // tab.ptyId will NOT equal result.id (terminals.ts:919 preserves the
+          // existing tab.ptyId).
+          const afterBindState = useAppStore.getState()
+          const afterBindTab = afterBindState.tabsByWorktree[worktreeId]?.find(
+            (t) => t.id === tab.id
+          )
+          console.log('[debug-group-runcmd] post-bind', {
+            tabId: tab.id,
+            spawnedPtyId: result.id,
+            tabPtyId: afterBindTab?.ptyId ?? null,
+            tabPtyIdMatchesSpawn: afterBindTab?.ptyId === result.id,
+            ptyIdsByTabIdLen: (afterBindState.ptyIdsByTabId[tab.id] ?? []).length,
+            ptyIdsByTabId: afterBindState.ptyIdsByTabId[tab.id]?.slice() ?? []
+          })
 
           window.api.automations.replyOpenCommandPane(requestId, {
             ok: true,

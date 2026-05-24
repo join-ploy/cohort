@@ -884,6 +884,30 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   updateTabPtyId: (tabId, ptyId) => {
     let worktreeId: string | null = null
     let wasActivationSpawn = false
+    // Why (debug-group-runcmd): capture inputs + prior binding state for
+    // every updateTabPtyId call. If tab.ptyId is non-null on entry, the new
+    // ptyId will be DISCARDED for tab.ptyId (terminals.ts:919 keeps the
+    // existing binding) — meaning the legacy attach path will still surface
+    // the phantom PTY instead of our explicit run-command spawn.
+    {
+      const snap = get()
+      let existingTabPtyId: string | null = null
+      for (const wId of Object.keys(snap.tabsByWorktree)) {
+        const t = snap.tabsByWorktree[wId]?.find((entry) => entry.id === tabId)
+        if (t) {
+          existingTabPtyId = t.ptyId
+          break
+        }
+      }
+      const existingPtyIdsLen = (snap.ptyIdsByTabId[tabId] ?? []).length
+      console.log('[debug-group-runcmd] updateTabPtyId', {
+        tabId,
+        incomingPtyId: ptyId,
+        existingTabPtyId,
+        willKeepExistingTabPtyId: existingTabPtyId !== null && existingTabPtyId !== ptyId,
+        existingPtyIdsLen
+      })
+    }
     set((s) => {
       const next = { ...s.tabsByWorktree }
       for (const wId of Object.keys(next)) {

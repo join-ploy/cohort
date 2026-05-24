@@ -1234,6 +1234,22 @@ export function registerPtyHandlers(
           if (repos.length > 0) {
             groupEnvPatch = { CONDUCTOR_WORKSPACE_REPOS: repos.join(',') }
           }
+          // Why (debug-group-runcmd): we need to know whether Phase J1 fired
+          // for this spawn, what cwd it picked, and whether args.command is
+          // present. Together with the renderer-side logs this lets us
+          // distinguish "command never reaches main" from "command reaches
+          // main but never writes to the shell".
+          console.log('[debug-group-runcmd] phase-j1', {
+            worktreeId: args.worktreeId,
+            tabId: args.tabId,
+            originalCwd: args.cwd,
+            effectiveCwd,
+            cwdOverridden: effectiveCwd !== args.cwd,
+            keepCwd: args.keepCwd ?? false,
+            hasGroupEnvPatch: groupEnvPatch !== undefined,
+            hasCommand: args.command !== undefined,
+            commandLen: args.command?.length ?? 0
+          })
         }
       }
       const envWithGroup = groupEnvPatch ? { ...env, ...groupEnvPatch } : env

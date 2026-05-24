@@ -414,6 +414,41 @@ export class LocalPtyProvider implements IPtyProvider {
     ptyDisposables.set(id, disposables)
 
     if (args.command) {
+      // Why (debug-group-runcmd): trace the startup-command lifecycle so we
+      // can tell whether the launchCommand was actually written into the
+      // shell — and if not, whether shell-ready never resolved, the timeout
+      // fired with no marker, or the shell exited first.
+      console.log('[debug-group-runcmd] startup-cmd-scheduled', {
+        id,
+        worktreeId: args.worktreeId,
+        cwd: effectiveCwd,
+        supportsReadyMarker: shellReadyLaunch?.supportsReadyMarker ?? false,
+        commandLen: args.command.length
+      })
+      const scheduledAt = Date.now()
+      shellReadyPromise
+        .then(() => {
+          console.log('[debug-group-runcmd] shell-ready-resolved', {
+            id,
+            worktreeId: args.worktreeId,
+            elapsedMs: Date.now() - scheduledAt
+          })
+        })
+        .catch(() => {})
+      const origWrite = proc.write.bind(proc)
+      let didLogWrite = false
+      ;(proc as unknown as { write: (data: string) => void }).write = (data: string) => {
+        if (!didLogWrite && args.command && data.includes(args.command.slice(0, 20))) {
+          didLogWrite = true
+          console.log('[debug-group-runcmd] startup-cmd-written', {
+            id,
+            worktreeId: args.worktreeId,
+            elapsedMs: Date.now() - scheduledAt,
+            bytes: data.length
+          })
+        }
+        origWrite(data)
+      }
       writeStartupCommandWhenShellReady(shellReadyPromise, proc, args.command, (cleanup) => {
         startupCommandCleanup = cleanup
       })
