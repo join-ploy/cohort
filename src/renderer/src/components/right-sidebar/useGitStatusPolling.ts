@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import {
   getOrderedGroupMemberIdsForWorktree,
@@ -8,6 +7,7 @@ import {
   useRepoById,
   useRepoMap
 } from '@/store/selectors'
+import type { AppState } from '@/store'
 import type { GitConflictOperation, GitStatusResult } from '../../../../shared/types'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import { getConnectionId } from '@/lib/connection-context'
@@ -20,6 +20,13 @@ const POLL_INTERVAL_MS = 3000
 // warmed by visiting the sibling member directly, which felt unreactive
 // in long-lived groups.
 const GROUP_SIBLING_POLL_INTERVAL_MS = 3000
+
+// Why: stable empty references so the no-active-worktree and no-siblings
+// paths return the SAME object every call. useShallow / useMemo can then
+// fast-path identity-equal, instead of allocating a fresh `[]` per render
+// and tripping useSyncExternalStore's "snapshot changed" check.
+const EMPTY_MEMBER_IDS: readonly string[] = []
+const EMPTY_SIBLING_TARGETS: readonly { id: string; path: string }[] = []
 
 export function useGitStatusPolling(): void {
   const activeWorktree = useActiveWorktree()
@@ -117,36 +124,51 @@ export function useGitStatusPolling(): void {
     }
   }, [fetchStatus])
 
-  // Why: build the active worktree's sibling-group member list once per
-  // render. Using getOrderedGroupMemberIdsForWorktree keeps semantics aligned
-  // with the aggregated tab strip (live + non-archived in declared order).
-  const groupSiblingTargets = useAppStore(
-    useShallow((state) => {
-      if (!activeWorktreeId) {
-        return [] as { id: string; path: string }[]
+  // Why: subscribe to the raw slices that getOrderedGroupMemberIdsForWorktree
+  // depends on (workspaceGroups + worktreesByRepo) rather than wrapping the
+  // selector in `useShallow`. Earlier attempts threaded the full derivation
+  // through useShallow and allocated fresh `{id, path}` objects inside the
+  // selector each call — the shallow equality check tripped on those fresh
+  // object identities every store write, useSyncExternalStore concluded the
+  // snapshot kept changing, and React's max-update-depth guard fired with
+  // the misleading "setRef → Array.map → setRef" Radix-Slot stack trace.
+  // Subscribing to slice references directly keeps the inputs stable until
+  // those slices actually mutate; the derivation lives in `useMemo` below
+  // where freshly-allocated arrays are the expected output.
+  const workspaceGroups = useAppStore((s) => s.workspaceGroups)
+  const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
+
+  const siblingMemberIds = useMemo(() => {
+    if (!activeWorktreeId) {
+      return EMPTY_MEMBER_IDS
+    }
+    return getOrderedGroupMemberIdsForWorktree(
+      { workspaceGroups, worktreesByRepo } as Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+      activeWorktreeId
+    )
+  }, [activeWorktreeId, workspaceGroups, worktreesByRepo])
+
+  const groupSiblingTargets = useMemo(() => {
+    if (!activeWorktreeId || siblingMemberIds.length === 0) {
+      return EMPTY_SIBLING_TARGETS
+    }
+    const out: { id: string; path: string }[] = []
+    for (const id of siblingMemberIds) {
+      if (id === activeWorktreeId) {
+        continue
       }
-      const orderedIds = getOrderedGroupMemberIdsForWorktree(state, activeWorktreeId)
-      if (orderedIds.length === 0) {
-        return [] as { id: string; path: string }[]
+      const worktree = allWorktrees.find((entry) => entry.id === id)
+      if (!worktree) {
+        continue
       }
-      const out: { id: string; path: string }[] = []
-      for (const id of orderedIds) {
-        if (id === activeWorktreeId) {
-          continue
-        }
-        const worktree = allWorktrees.find((entry) => entry.id === id)
-        if (!worktree) {
-          continue
-        }
-        const repo = repoMap.get(worktree.repoId)
-        if (repo && !isGitRepoKind(repo)) {
-          continue
-        }
-        out.push({ id: worktree.id, path: worktree.path })
+      const repo = repoMap.get(worktree.repoId)
+      if (repo && !isGitRepoKind(repo)) {
+        continue
       }
-      return out
-    })
-  )
+      out.push({ id: worktree.id, path: worktree.path })
+    }
+    return out.length === 0 ? EMPTY_SIBLING_TARGETS : out
+  }, [activeWorktreeId, siblingMemberIds, allWorktrees, repoMap])
 
   const fetchSiblingStatus = useCallback(async () => {
     if (groupSiblingTargets.length === 0) {
