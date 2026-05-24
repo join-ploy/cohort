@@ -10,7 +10,7 @@ import {
   PanelRight
 } from 'lucide-react'
 import { useAppStore } from '../store'
-import { useRepoById, useWorktreeById } from '../store/selectors'
+import { getGroupByWorktreeId, useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
 import {
   DropdownMenu,
@@ -42,6 +42,13 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const setPathOpenerChoice = useAppStore((s) => s.setPathOpenerChoice)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
+  // Why: when the active worktree is a group member, the breadcrumb should
+  // read as "<group> > <repo>" — the group is the workspace identity, the
+  // repo is the inset position within it. Falls back to the standard
+  // "<repo> > <worktree>" shape for ungrouped worktrees.
+  const group = useAppStore((s) =>
+    activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
+  )
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
   const workspaceName = worktree?.workspaceName ?? ''
@@ -168,15 +175,16 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         }
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
-          <span className="shrink-0 truncate text-sm font-medium text-muted-foreground">
-            {repo?.displayName ?? 'Workspace'}
+          {/* Why: breadcrumb uses text-xs (12px) so it sits visually below the
+              tab strip's labels — it's identity metadata, not a primary action.
+              For grouped members, render "<group> > <repo>"; otherwise the
+              standard "<repo> > <worktree>" shape. */}
+          <span className="shrink-0 truncate text-xs font-medium text-muted-foreground">
+            {group ? group.displayName : (repo?.displayName ?? 'Workspace')}
           </span>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-          {/* Why: the worktree name is purely informational here in v1 — the
-              right-click context menu (and the ellipsis button below) already
-              expose rename + the rest of the worktree actions. */}
-          <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
-            {worktree.displayName}
+          <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+            {group ? (repo?.displayName ?? worktree.displayName) : worktree.displayName}
           </span>
           <button
             type="button"
