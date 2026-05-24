@@ -69,4 +69,45 @@ describe('buildPaths', () => {
     const paths = buildPaths(schema)
     expect(paths.filter((p) => p.namespace === 'trigger')).toEqual([])
   })
+
+  it('walks the optional group namespace recursively', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: {},
+      steps: {},
+      group: {
+        id: 'string',
+        parentPath: 'string',
+        members: {
+          orca: {
+            worktreeId: 'string',
+            scoped: 'string'
+          }
+        }
+      }
+    }
+    const paths = buildPaths(schema)
+    const dotted = paths.map((p) => p.path).sort()
+    expect(dotted).toEqual(
+      [
+        'group.id',
+        'group.parentPath',
+        'group.members.orca.worktreeId',
+        'group.members.orca.scoped'
+      ].sort()
+    )
+    for (const entry of paths) {
+      expect(entry.namespace).toBe('group')
+    }
+  })
+
+  it('omits the group namespace when absent', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: {},
+      steps: {}
+    }
+    const paths = buildPaths(schema)
+    expect(paths.filter((p) => p.namespace === 'group')).toEqual([])
+  })
 })

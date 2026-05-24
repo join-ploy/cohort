@@ -10,6 +10,7 @@ import type {
   TriggerConfig,
   WaitForSetupConfig
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
 import {
   type ChainDraft,
   detectFutureReferences,
@@ -92,28 +93,97 @@ export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
  * Builds the AvailableVariables snapshot for the step at `stepIndex`. Only
  * steps strictly before `stepIndex` are visible — a step cannot reference
  * itself or any later step.
+ *
+ * Why `repos`: a `create-workspace-group` step in scope publishes the
+ * `group.members.<repoFolderName>.*` namespace at runtime, keyed by the
+ * basename of each member repo's path. We thread the store's repos through
+ * so the discoverable schema lists real folder names (not just placeholders).
+ * Defaulted to `[]` so call sites that don't yet plumb repos still typecheck
+ * and fall back to a member-less namespace.
  */
 export function getAvailableVariablesAtStep(
   draft: ChainDraft,
-  stepIndex: number
+  stepIndex: number,
+  repos: Repo[] = []
 ): AvailableVariables {
   const steps: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  let groupSchema: NestedSchema | undefined = undefined
   for (let i = 0; i < stepIndex && i < draft.steps.length; i++) {
     const s = draft.steps[i]
     steps[s.id] = getOutputSchemaForKind(s.kind)
+    // Why: any earlier create-workspace-group step injects the top-level
+    // `group.*` namespace. If multiple exist (rare), the latest wins —
+    // mirrors runtime, where each step's contextPatch overwrites `group`.
+    if (s.kind === 'create-workspace-group') {
+      groupSchema = buildGroupSchema(s.config as CreateWorkspaceGroupConfig, repos)
+    }
   }
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
     trigger: buildTriggerSchema(draft.trigger),
-    steps
+    steps,
+    group: groupSchema
   }
 }
 
-export function computeAllErrors(draft: ChainDraft): ChainEditorError[] {
+// Per-member leaf shape, mirroring buildGroupTemplateContext in
+// src/main/workspace-group-runtime.ts. The runner emits strings for all four.
+const GROUP_MEMBER_SHAPE: NestedSchema = {
+  worktreeId: 'string',
+  path: 'string',
+  repoId: 'string',
+  scoped: 'string'
+}
+
+/**
+ * Build the discoverable schema for `group.*` from a draft
+ * `create-workspace-group` step. Members are keyed by `<repoFolderName>` —
+ * derived from each repo's on-disk basename (stripping the `.git` suffix bare
+ * repos carry) so the editor's schema matches the runtime keying in
+ * `buildGroupTemplateContext`.
+ *
+ * Members whose repoId doesn't resolve in the supplied repos list are skipped
+ * — better to under-list than to mislead with a stale name. When the step
+ * has no resolvable members yet (empty config OR repos haven't loaded), the
+ * namespace still exists with the top-level keys plus an empty `members`
+ * record so authors at least see that `group.id` / `group.parentPath` are
+ * available.
+ */
+function buildGroupSchema(config: CreateWorkspaceGroupConfig, repos: Repo[]): NestedSchema {
+  const members: NestedSchema = {}
+  const reposById = new Map(repos.map((r) => [r.id, r]))
+  for (const member of config.members) {
+    const repo = reposById.get(member.repoId)
+    if (!repo) {
+      continue
+    }
+    const folder = repoFolderName(repo.path)
+    if (!folder) {
+      continue
+    }
+    members[folder] = GROUP_MEMBER_SHAPE
+  }
+  return {
+    id: 'string',
+    parentPath: 'string',
+    members
+  }
+}
+
+// Why: matches `repoFolderName` in src/main/ipc/workspace-groups.ts — the
+// dispatcher's runtime keying derives from the same basename-minus-`.git`
+// rule, so the editor's schema must too.
+function repoFolderName(repoPath: string): string {
+  const slashIdx = Math.max(repoPath.lastIndexOf('/'), repoPath.lastIndexOf('\\'))
+  const base = slashIdx >= 0 ? repoPath.slice(slashIdx + 1) : repoPath
+  return base.replace(/\.git$/, '')
+}
+
+export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEditorError[] {
   const all: ChainEditorError[] = []
   for (let i = 0; i < draft.steps.length; i++) {
     const step = draft.steps[i]
-    const available = getAvailableVariablesAtStep(draft, i)
+    const available = getAvailableVariablesAtStep(draft, i, repos)
     walkStepConfigStrings(step.config, step.kind, (field, value) => {
       const errs = dryRunTemplate(value, available)
       for (const err of errs) {

@@ -94,7 +94,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   )
 
   const errors = React.useMemo<ChainEditorError[]>(() => {
-    const base = computeAllErrors(draft)
+    const base = computeAllErrors(draft, props.repos)
     // Why: project is required to dispatch — surface the missing selection as
     // a top-level error so Save is disabled until the user picks a project.
     // When the trigger picks a project at Run Now time, the upfront projectId
@@ -233,8 +233,8 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   }, [draft, errors.length, dirty, saving, props])
 
   const availableAtEnd = React.useMemo(
-    () => getAvailableVariablesAtStep(draft, draft.steps.length),
-    [draft]
+    () => getAvailableVariablesAtStep(draft, draft.steps.length, props.repos),
+    [draft, props.repos]
   )
 
   const canSave = errors.length === 0 && dirty && !saving
@@ -314,7 +314,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
               key={`${step.id}:${index}`}
               step={step}
               index={index}
-              available={getAvailableVariablesAtStep(draft, index)}
+              available={getAvailableVariablesAtStep(draft, index, props.repos)}
               repos={props.repos}
               reviewCommands={props.reviewCommands}
               createPrCommands={props.createPrCommands}

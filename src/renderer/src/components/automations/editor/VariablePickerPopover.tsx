@@ -73,6 +73,7 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
 
   const automation = paths.filter((p) => p.namespace === 'automation')
   const trigger = paths.filter((p) => p.namespace === 'trigger')
+  const group = paths.filter((p) => p.namespace === 'group')
   const steps = paths.filter((p) => p.namespace === 'steps')
 
   return (
@@ -83,6 +84,7 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
     >
       {renderSection('Automation', automation, paths, highlightedIdx, onSelect, onClose, false)}
       {renderSection('Trigger', trigger, paths, highlightedIdx, onSelect, onClose, false)}
+      {renderSection('Group', group, paths, highlightedIdx, onSelect, onClose, false)}
       {renderSection('Steps', steps, paths, highlightedIdx, onSelect, onClose, true)}
     </div>
   )

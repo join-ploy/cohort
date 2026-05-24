@@ -10,6 +10,12 @@ export type AvailableVariables = {
   // recursive shape; step outputs stay flat.
   trigger: NestedSchema
   steps: Record<string, OutputSchema>
+  // Why: the dispatcher publishes a top-level `group.*` shape after a
+  // `create-workspace-group` step succeeds (see
+  // src/main/workspace-group-runtime.ts → buildGroupTemplateContext). When
+  // omitted, any `{{group.*}}` reference is invalid in scope. The shape nests
+  // per-member, so we reuse NestedSchema rather than the flat OutputSchema.
+  group?: NestedSchema
 }
 
 export type TemplateErrorCode = 'unknown-path' | 'unknown-step' | 'empty-token'
@@ -70,6 +76,19 @@ function validatePath(path: string, available: AvailableVariables): TemplateErro
       return { path, code: 'unknown-step', message: `Step '${stepId}' is not in scope.` }
     }
     return walkLeaf(parts.slice(2), stepSchema, path)
+  }
+  if (head === 'group') {
+    // Why: with no earlier `create-workspace-group` step in scope, the
+    // dispatcher never publishes the namespace — treat the whole path as
+    // unknown so authors see the same error shape as any other off-scope ref.
+    if (available.group === undefined) {
+      return {
+        path,
+        code: 'unknown-path',
+        message: `${path} is not in scope (no create-workspace-group step earlier).`
+      }
+    }
+    return walkNested(parts.slice(1), available.group, path)
   }
   return {
     path,
