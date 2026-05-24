@@ -249,7 +249,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalLigatures: 'auto',
     terminalCursorStyle: 'bar',
     terminalCursorBlink: true,
-    terminalThemeDark: 'Ghostty Default Style Dark',
+    terminalThemeDark: 'Melty',
     terminalDividerColorDark: '#3f3f46',
     terminalUseSeparateLightTheme: false,
     terminalThemeLight: 'Builtin Tango Light',
