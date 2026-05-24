@@ -252,6 +252,17 @@ export class AutomationService {
       // would never resolve the step. Reuse the same agent-status registry
       // run-prompt polls.
       getAgentStatus: this.getAgentStatus,
+      // Why: same group-ref resolution run-prompt-runner uses (parity fix).
+      // Without this, a `group:<uuid>` worktreeRef hits openCommandPane with
+      // an id no worktree carries → "Worktree is no longer available". Phase
+      // J1's pty:spawn override then lifts the CWD to the group parent for us.
+      getGroupSummary: (groupId) => {
+        const group = this.store.getWorkspaceGroups().find((g) => g.id === groupId)
+        if (!group || group.memberWorktreeIds.length === 0) {
+          return undefined
+        }
+        return { firstMemberWorktreeId: group.memberWorktreeIds[0] }
+      },
       now: () => Date.now()
     })
 

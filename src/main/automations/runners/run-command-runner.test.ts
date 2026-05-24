@@ -421,4 +421,91 @@ describe('RunCommandRunner', () => {
     await runner.tick(ctx)
     expect(unsubscribe).not.toHaveBeenCalled()
   })
+
+  // Why: regression — a `group:<uuid>` worktreeRef must be unwrapped to a real
+  // member worktreeId before openCommandPane sees it; otherwise the renderer
+  // returns "Worktree is no longer available" because no worktree carries the
+  // group id. Mirrors the same resolution run-prompt-runner already does.
+  it("resolves a group: worktreeRef to the group's first member worktreeId", async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-g', paneKey: 'tab-g:1' })
+    const getGroupSummary = vi
+      .fn()
+      .mockReturnValue({ firstMemberWorktreeId: 'repo-a::/workspaces/g/repo-a' })
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
+      getGroupSummary,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        worktreeRef: 'group:abc-1234',
+        source: 'review',
+        commandId: 'cmd-review-1',
+        captureStdout: false
+      }
+    }
+    await runner.tick(baseCtx({ step }))
+    expect(getGroupSummary).toHaveBeenCalledWith('group:abc-1234')
+    expect(openCommandPane).toHaveBeenCalledWith({
+      worktreeId: 'repo-a::/workspaces/g/repo-a',
+      source: 'review',
+      commandId: 'cmd-review-1',
+      customCommand: undefined
+    })
+  })
+
+  it('fails when a group: worktreeRef does not resolve to a known group', async () => {
+    const openCommandPane = vi.fn()
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
+      getGroupSummary: () => undefined,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        worktreeRef: 'group:missing',
+        source: 'review',
+        commandId: 'cmd-review-1',
+        captureStdout: false
+      }
+    }
+    const next = await runner.tick(baseCtx({ step }))
+    expect(next.outcome).toBe('failed')
+    expect(openCommandPane).not.toHaveBeenCalled()
+    if (next.outcome === 'failed') {
+      expect(next.error).toMatch(/Group not found/)
+    }
+  })
+
+  it('unwraps a member-scoped ref to the inner worktreeId before opening the pane', async () => {
+    const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-m', paneKey: 'tab-m:1' })
+    const runner = new RunCommandRunner({
+      openCommandPane,
+      getPtyExit: () => undefined,
+      subscribePtyData: noopSubscribePtyData,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        worktreeRef: 'member:group:abc:repo-a::/workspaces/g/repo-a',
+        source: 'review',
+        commandId: 'cmd-review-1',
+        captureStdout: false
+      }
+    }
+    await runner.tick(baseCtx({ step }))
+    expect(openCommandPane).toHaveBeenCalledWith({
+      worktreeId: 'repo-a::/workspaces/g/repo-a',
+      source: 'review',
+      commandId: 'cmd-review-1',
+      customCommand: undefined
+    })
+  })
 })
