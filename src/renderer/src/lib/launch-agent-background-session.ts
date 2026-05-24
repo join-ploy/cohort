@@ -35,6 +35,12 @@ export type LaunchAgentBackgroundSessionArgs = {
     path: string
     connectionId: string | null
   }
+  /** Ask C (grouped-workspaces member-scoped runs): forwards to `pty.spawn`'s
+   *  `keepCwd` so Phase J1's grouped-worktree cwd override doesn't redirect
+   *  the agent's CWD to the group's parentPath. The tab is still bound to
+   *  the supplied `worktreeId` (so the group's card / stop-all keeps owning
+   *  it); only the CWD changes. */
+  keepCwd?: boolean
 }
 
 export type LaunchAgentBackgroundSessionResult = {
@@ -77,8 +83,17 @@ async function resolveWorktreeWithRetry(worktreeId: string): Promise<Worktree | 
 export async function launchAgentBackgroundSession(
   args: LaunchAgentBackgroundSessionArgs
 ): Promise<LaunchAgentBackgroundSessionResult | null> {
-  const { agent, worktreeId, prompt, launchSource, title, onExit, onAgentStatus, worktreeOverride } =
-    args
+  const {
+    agent,
+    worktreeId,
+    prompt,
+    launchSource,
+    title,
+    onExit,
+    onAgentStatus,
+    worktreeOverride,
+    keepCwd
+  } = args
   // Why: when the caller pre-resolved the worktree info, skip the cache
   // lookup entirely. This is the chain-executor path — main already knows
   // the path + connectionId and hands them over so we don't race the
@@ -93,8 +108,7 @@ export async function launchAgentBackgroundSession(
     if (!worktree) {
       throw new Error('The target workspace is no longer available.')
     }
-    const repo =
-      useAppStore.getState().repos.find((entry) => entry.id === worktree.repoId) ?? null
+    const repo = useAppStore.getState().repos.find((entry) => entry.id === worktree.repoId) ?? null
     worktreePath = worktree.path
     connectionId = repo?.connectionId ?? null
   }
@@ -159,7 +173,11 @@ export async function launchAgentBackgroundSession(
         agent_kind: tuiAgentToAgentKind(agent),
         launch_source: launchSource ?? 'unknown',
         request_kind: 'new'
-      }
+      },
+      // Why (Ask C): when a chain runner flags this launch as member-scoped,
+      // suppress Phase J1's grouped-worktree cwd override so the agent stays
+      // rooted at the member worktree's path.
+      ...(keepCwd ? { keepCwd: true } : {})
     })
   } catch (error) {
     store.closeTab(tab.id)

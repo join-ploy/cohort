@@ -537,6 +537,13 @@ export type PreloadApi = {
       // so the renderer threads the launch metadata through this field and
       // the IPC handler fires the event from the spawn-success branch.
       telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+      // Why (Ask C, grouped-workspaces member-scoped runs): when true, skip
+      // the Phase J1 grouped-worktree cwd override that normally redirects a
+      // member-worktree terminal's CWD up to the group's parentPath. The
+      // caller (the run-prompt chain runner) wants the agent rooted at the
+      // member's path while the tab remains bound to the member worktreeId
+      // (so the group's card still owns it).
+      keepCwd?: boolean
     }) => Promise<{
       id: string
       snapshot?: string
@@ -1364,6 +1371,11 @@ export type PreloadApi = {
         prompt: string
         worktreePath?: string
         connectionId?: string | null
+        // Why (Ask C): when true, the renderer must thread keepCwd=true into
+        // pty.spawn so Phase J1's grouped-worktree cwd override doesn't
+        // bounce the agent's CWD up to the group's parentPath. See
+        // src/main/automations/open-prompt-pane.ts for the contract.
+        memberScoped?: boolean
       }) => void
     ) => () => void
     replyOpenPromptPane: (

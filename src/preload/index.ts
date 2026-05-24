@@ -530,6 +530,10 @@ const api = {
       // truth for whether the launch happened. Loose typing here on
       // purpose: validation lives at the main-side schema validator.
       telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+      // Why (Ask C): caller opts out of Phase J1's grouped-worktree cwd
+      // override for member-scoped automation runs. See
+      // src/preload/api-types.ts for the contract.
+      keepCwd?: boolean
     }): Promise<{
       id: string
       snapshot?: string
@@ -2524,6 +2528,7 @@ const api = {
         prompt: string
         worktreePath?: string
         connectionId?: string | null
+        memberScoped?: boolean
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2535,6 +2540,7 @@ const api = {
           prompt: string
           worktreePath?: string
           connectionId?: string | null
+          memberScoped?: boolean
         }
       ) => callback(request)
       ipcRenderer.on('automations:openPromptPane', listener)

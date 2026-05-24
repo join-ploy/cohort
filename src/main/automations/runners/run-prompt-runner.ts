@@ -1,5 +1,6 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { RunPromptConfig } from '../../../shared/automations-types'
+import { parseMemberScopedRef } from '../../../shared/automation-member-scoped-ref'
 import type { AgentStatusEntry } from '../../agent-status/registry'
 import { OpenPromptPaneError } from '../open-prompt-pane'
 import { SendPromptToPaneError } from '../send-prompt-to-pane'
@@ -18,6 +19,13 @@ export type RunPromptDeps = {
     prompt: string
     worktreePath?: string
     connectionId?: string | null
+    /** Member-scoped marker (Ask C). When true, the renderer threads
+     *  `keepCwd: true` through to `pty.spawn` so the Phase J1 grouped-
+     *  worktree cwd override doesn't redirect the agent's CWD to the
+     *  group's parentPath. The tab itself is still bound to the member
+     *  worktreeId (so the group's card/stop-all/tab strip still own it).
+     *  Optional so non-grouped chains stay unaffected. */
+    memberScoped?: boolean
   }) => Promise<{ paneKey: string }>
   /** Reuses an existing pane by paneKey instead of opening a new one. Optional
    *  so legacy `paneRef`-less chains keep working without wiring the IPC; the
@@ -181,9 +189,34 @@ export class RunPromptRunner implements StepRunner {
         // worktreeId, it already redirects the CWD to parentPath if the
         // worktree has groupId set — so we don't need a second branch for
         // member-targeted runs.
+        //
+        // Ask C (member-scoped): a `member:<groupId>:<worktreeId>` ref means
+        // "run at the member worktree's path, but keep the terminal bound to
+        // the group". We bind the tab to the member worktreeId (the group's
+        // card already owns any tab whose worktreeId is a member), then pass
+        // `memberScoped: true` so the renderer threads `keepCwd: true` and
+        // Phase J1 doesn't bounce the CWD back up to parentPath.
         let effectiveWorktreeId = worktreeId
         let effectiveSummary: { path: string; connectionId: string | null } | null = null
-        if (worktreeId.startsWith('group:')) {
+        let memberScoped = false
+        const parsedMemberScoped = parseMemberScopedRef(worktreeId)
+        if (parsedMemberScoped) {
+          // Why: ignore the renderer's possibly-stale cache here too — we
+          // need the member's path to plant the agent there even if the
+          // member was minted milliseconds earlier in the same chain.
+          const memberSummary =
+            this.deps.getWorktreeSummary?.(parsedMemberScoped.worktreeId) ?? null
+          if (!memberSummary) {
+            return {
+              outcome: 'failed',
+              status: 'failed',
+              error: `Member worktree not found for worktreeRef "${worktreeId}".`
+            }
+          }
+          effectiveWorktreeId = parsedMemberScoped.worktreeId
+          effectiveSummary = memberSummary
+          memberScoped = true
+        } else if (worktreeId.startsWith('group:')) {
           const groupSummary = this.deps.getGroupSummary?.(worktreeId) ?? null
           if (!groupSummary) {
             return {
@@ -210,7 +243,8 @@ export class RunPromptRunner implements StepRunner {
           prompt,
           ...(effectiveSummary
             ? { worktreePath: effectiveSummary.path, connectionId: effectiveSummary.connectionId }
-            : {})
+            : {}),
+          ...(memberScoped ? { memberScoped: true } : {})
         })
         paneKey = result.paneKey
       } catch (e) {

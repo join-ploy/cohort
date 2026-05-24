@@ -77,6 +77,29 @@ describe('CreateWorkspaceGroupRunner', () => {
           memberWorktreeIds: ['repo-a::/p/a', 'repo-b::/p/b'],
           parentPath: '/p/workspaces/feature-group-x'
         }
+      },
+      // Why: top-level `group.*` shape is published alongside `steps.<id>` so
+      // downstream steps can template `{{group.members.<repoFolderName>.*}}`
+      // without knowing which step created the group. Each member entry
+      // exposes a pre-built `scoped` ref the run-prompt runner recognizes for
+      // member-scoped runs (Ask C).
+      group: {
+        id: 'group:gid-1',
+        parentPath: '/p/workspaces/feature-group-x',
+        members: {
+          a: {
+            worktreeId: 'repo-a::/p/a',
+            path: '/p/a',
+            repoId: 'repo-a',
+            scoped: 'member:group:gid-1:repo-a::/p/a'
+          },
+          b: {
+            worktreeId: 'repo-b::/p/b',
+            path: '/p/b',
+            repoId: 'repo-b',
+            scoped: 'member:group:gid-1:repo-b::/p/b'
+          }
+        }
       }
     })
   })

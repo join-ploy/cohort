@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorkspaceGroup } from '../shared/types'
 import {
+  buildGroupTemplateContext,
   findGroupForWorktree,
   resolveGroupRepoNames,
   resolveTerminalCwd
@@ -127,5 +128,37 @@ describe('resolveTerminalCwd', () => {
         suppliedCwd: siblingCwd
       })
     ).toBe(siblingCwd)
+  })
+})
+
+describe('buildGroupTemplateContext', () => {
+  it('builds a primitive-leaf members map keyed by repo folder name', () => {
+    const ctx = buildGroupTemplateContext(makeGroup())
+    expect(ctx.id).toBe('group:abc')
+    expect(ctx.parentPath).toBe('/u/m/workspaces/daring_tiger')
+    expect(Object.keys(ctx.members).sort()).toEqual(['orca', 'ploy-client'])
+    expect(ctx.members.orca).toEqual({
+      worktreeId: 'repo-orca::/u/m/workspaces/daring_tiger/orca',
+      path: '/u/m/workspaces/daring_tiger/orca',
+      repoId: 'repo-orca',
+      // Why: the `scoped` field is a pre-built member-scoped wire ref so
+      // chain authors can paste `{{group.members.orca.scoped}}` straight into
+      // a worktreeRef slot — the runner recognizes the `member:` prefix.
+      scoped: 'member:group:abc:repo-orca::/u/m/workspaces/daring_tiger/orca'
+    })
+  })
+
+  it('drops members whose worktreeIds are malformed', () => {
+    const ctx = buildGroupTemplateContext(
+      makeGroup({
+        memberWorktreeIds: ['repo-orca::/x/orca', 'bare-id-no-separator']
+      })
+    )
+    expect(Object.keys(ctx.members)).toEqual(['orca'])
+  })
+
+  it('returns an empty members map when the group has no members', () => {
+    const ctx = buildGroupTemplateContext(makeGroup({ memberWorktreeIds: [] }))
+    expect(ctx.members).toEqual({})
   })
 })

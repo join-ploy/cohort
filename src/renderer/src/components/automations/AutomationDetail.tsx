@@ -28,6 +28,11 @@ import type {
 import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
 import {
+  isMemberScopedRef,
+  parseMemberScopedRef
+} from '../../../../shared/automation-member-scoped-ref'
+import { splitWorktreeId } from '../../../../shared/worktree-id'
+import {
   formatAutomationDateTime,
   formatAutomationDateTimeWithRelative,
   getAutomationRunStatusLabel,
@@ -468,7 +473,41 @@ function describeStepConfig(step: Step): string {
   }
 }
 
+/** Pull a short repo-folder label out of a step's `worktreeRef` when it
+ *  resolves to a member-scoped sentinel — used to render the "scoped to <repo>"
+ *  badge on chain step rows (Ask C, UI marker). Returns null for any other
+ *  shape, including templated values that don't statically contain the
+ *  sentinel (e.g. `{{group.members.<x>.scoped}}` — without runtime context
+ *  we can't tell which repo it'll resolve to). */
+function getMemberScopedRepoLabel(step: Step): string | null {
+  // Only run-prompt steps carry the worktreeRef the runner inspects for the
+  // member-scoped branch today; keeping the check tight avoids false
+  // positives on other step kinds whose `worktreeRef` slot may grow later.
+  if (step.kind !== 'run-prompt' && step.kind !== 'run-command' && step.kind !== 'wait-for-setup') {
+    return null
+  }
+  const config = step.config as { worktreeRef?: string }
+  const raw = config.worktreeRef?.trim() ?? ''
+  if (!isMemberScopedRef(raw)) {
+    return null
+  }
+  const parsed = parseMemberScopedRef(raw)
+  if (!parsed) {
+    return null
+  }
+  const split = splitWorktreeId(parsed.worktreeId)
+  if (!split) {
+    return null
+  }
+  // Repo folder name == basename of the member's worktree path. Avoid pulling
+  // in Node's `path` module by slicing on the last `/` or `\`.
+  const path = split.worktreePath
+  const lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return lastSep === -1 ? path : path.slice(lastSep + 1)
+}
+
 function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX.Element {
+  const memberScopedRepo = getMemberScopedRepoLabel(step)
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
       <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
@@ -478,6 +517,26 @@ function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX
         <div className="flex flex-wrap items-baseline gap-2">
           <span className="font-medium text-foreground">{STEP_KIND_LABELS[step.kind]}</span>
           <span className="truncate font-mono text-xs text-muted-foreground">{step.id}</span>
+          {memberScopedRepo ? (
+            // Why (Ask C UI marker): make member-scoped runs visually
+            // distinct from group-scoped ones so the operator can tell at a
+            // glance the agent will land at the member's CWD rather than the
+            // group parent. Minimal chip — full detail lives in the picker.
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="px-1.5 py-0 text-[10px] uppercase tracking-wide"
+                >
+                  scoped to {memberScopedRepo}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                Agent runs at this member&apos;s working directory; the terminal tab still belongs
+                to the group.
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
         <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
           {describeStepConfig(step)}

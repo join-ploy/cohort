@@ -1,6 +1,7 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { CreateWorkspaceGroupConfig } from '../../../shared/automations-types'
-import type { SetupDecision } from '../../../shared/types'
+import type { SetupDecision, WorkspaceGroup } from '../../../shared/types'
+import { buildGroupTemplateContext, type GroupTemplateContext } from '../../workspace-group-runtime'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 export type CreateWorkspaceGroupDeps = {
@@ -31,6 +32,12 @@ type Tracker = {
   groupId: string
   memberWorktreeIds: string[]
   parentPath: string
+  /** Cached templating-shape view of the new group, dumped at the top level
+   *  of context as `group.*` so downstream steps can reference
+   *  `{{group.members.<repoFolderName>.worktreeId}}` /
+   *  `{{group.members.<repoFolderName>.scoped}}` etc. without having to
+   *  reach through `steps.<this-step-id>`. */
+  groupContext: GroupTemplateContext
 }
 
 export class CreateWorkspaceGroupRunner implements StepRunner {
@@ -50,11 +57,22 @@ export class CreateWorkspaceGroupRunner implements StepRunner {
       // Why: defensive no-op on re-tick after success — the chain executor
       // shouldn't drive a succeeded step, but if it does, return the same
       // output rather than double-create the group.
+      const stepOutput = {
+        groupId: existing.groupId,
+        memberWorktreeIds: existing.memberWorktreeIds,
+        parentPath: existing.parentPath
+      }
       return {
         outcome: 'done',
         status: 'succeeded',
-        output: existing,
-        contextPatch: { steps: { [ctx.step.id]: existing } }
+        output: stepOutput,
+        contextPatch: {
+          steps: { [ctx.step.id]: stepOutput },
+          // Why: re-publish the top-level `group.*` shape so downstream
+          // template-only refs keep resolving on the no-op retick (same as
+          // the first-pass success branch below).
+          group: existing.groupContext
+        }
       }
     }
 
@@ -104,21 +122,45 @@ export class CreateWorkspaceGroupRunner implements StepRunner {
         linkedIssue,
         createdByAutomationRunId: ctx.runId
       })
+      // Why: synthesize the templating-shape view here rather than at every
+      // template-resolve site so the per-member primitives (worktreeId, path,
+      // scoped ref) are computed exactly once per chain run. Builds against a
+      // minimal WorkspaceGroup shape since the IPC dep only hands us back the
+      // three id-ish fields — buildGroupTemplateContext only reads those.
+      const groupShape: Pick<WorkspaceGroup, 'id' | 'parentPath' | 'memberWorktreeIds'> = {
+        id: result.groupId,
+        parentPath: result.parentPath,
+        memberWorktreeIds: result.memberWorktreeIds
+      }
+      const groupContext = buildGroupTemplateContext(groupShape as WorkspaceGroup)
       const tracker: Tracker = {
         groupId: result.groupId,
         memberWorktreeIds: result.memberWorktreeIds,
-        parentPath: result.parentPath
+        parentPath: result.parentPath,
+        groupContext
       }
       if (!runTrackers) {
         runTrackers = new Map()
         this.trackers.set(ctx.runId, runTrackers)
       }
       runTrackers.set(ctx.step.id, tracker)
+      // Why: split the step-output (kept narrow for the step's own consumers
+      // and the run-summary) from the top-level `group` shape (used by any
+      // downstream step's templates). The two namespaces live alongside each
+      // other in context for the rest of the run.
+      const stepOutput = {
+        groupId: tracker.groupId,
+        memberWorktreeIds: tracker.memberWorktreeIds,
+        parentPath: tracker.parentPath
+      }
       return {
         outcome: 'done',
         status: 'succeeded',
-        output: tracker,
-        contextPatch: { steps: { [ctx.step.id]: tracker } }
+        output: stepOutput,
+        contextPatch: {
+          steps: { [ctx.step.id]: stepOutput },
+          group: groupContext
+        }
       }
     } catch (e) {
       // Why: createWorkspaceGroup errors are deterministic (namespace

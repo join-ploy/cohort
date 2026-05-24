@@ -1077,6 +1077,11 @@ export function registerPtyHandlers(
           launch_source?: unknown
           request_kind?: unknown
         }
+        // Why (Ask C, grouped-workspaces member-scoped runs): caller opts
+        // out of Phase J1's grouped-worktree cwd override so the agent
+        // stays rooted at the member worktree's path. See
+        // src/preload/api-types.ts pty.spawn for the contract.
+        keepCwd?: boolean
       }
     ) => {
       const provider = getProvider(args.connectionId)
@@ -1206,17 +1211,25 @@ export function registerPtyHandlers(
       // worktrees are unaffected. We also surface the sibling repo names via
       // CONDUCTOR_WORKSPACE_REPOS so user shell scripts can fan out across the
       // group without having to re-read Orca's state.
+      //
+      // Ask C (member-scoped runs): when the caller passes `keepCwd: true`,
+      // skip the override entirely — the supplied cwd IS the member's path
+      // and the caller wants the agent rooted there while the tab stays
+      // bound to the member worktreeId. CONDUCTOR_WORKSPACE_REPOS is still
+      // surfaced because the run is logically part of the group's session.
       let effectiveCwd = args.cwd
       let groupEnvPatch: Record<string, string> | undefined
       if (store && args.worktreeId !== undefined && !args.connectionId) {
         const group = findGroupForWorktree(args.worktreeId, store.getWorkspaceGroups())
         if (group) {
-          const worktreePath = splitWorktreeId(args.worktreeId)?.worktreePath
-          effectiveCwd = resolveTerminalCwd({
-            worktreePath,
-            group,
-            suppliedCwd: args.cwd
-          })
+          if (!args.keepCwd) {
+            const worktreePath = splitWorktreeId(args.worktreeId)?.worktreePath
+            effectiveCwd = resolveTerminalCwd({
+              worktreePath,
+              group,
+              suppliedCwd: args.cwd
+            })
+          }
           const repos = resolveGroupRepoNames(group)
           if (repos.length > 0) {
             groupEnvPatch = { CONDUCTOR_WORKSPACE_REPOS: repos.join(',') }

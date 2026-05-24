@@ -11,6 +11,13 @@ export type OpenPromptPaneRequest = {
   // the worktreeId.
   worktreePath?: string
   connectionId?: string | null
+  /** Ask C (member-scoped runs): when true, the renderer must thread
+   *  `keepCwd: true` into `pty.spawn` so the Phase J1 grouped-worktree cwd
+   *  override does NOT redirect the agent's CWD to the group's parentPath.
+   *  The terminal tab itself is still bound to the supplied member
+   *  worktreeId, so the group's card/stop-all/tab strip continue to own it.
+   *  Optional for backwards compatibility with non-grouped chains. */
+  memberScoped?: boolean
 }
 
 export type OpenPromptPaneResult = { paneKey: string }

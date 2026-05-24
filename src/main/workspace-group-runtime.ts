@@ -1,5 +1,6 @@
 import { basename } from 'path'
 
+import { buildMemberScopedRef } from '../shared/automation-member-scoped-ref'
 import type { WorkspaceGroup } from '../shared/types'
 import { splitWorktreeId } from '../shared/worktree-id'
 
@@ -28,6 +29,64 @@ export function findGroupForWorktree(
   groups: readonly WorkspaceGroup[]
 ): WorkspaceGroup | undefined {
   return groups.find((g) => g.memberWorktreeIds.includes(worktreeId))
+}
+
+/**
+ * Templating-shape view of a workspace group, suitable to dump into a chain
+ * run's context as `group.*`. Lets steps reference
+ *
+ *     {{group.id}}
+ *     {{group.parentPath}}
+ *     {{group.members.<repoFolderName>.worktreeId}}
+ *     {{group.members.<repoFolderName>.path}}
+ *     {{group.members.<repoFolderName>.scoped}}    // member-scoped wire ref
+ *
+ * Members are keyed by `basename(memberPath)` — the same `<repoFolderName>`
+ * segment users see on disk under `<parentPath>/`. Member entries are
+ * primitive-leaf only (strings) so `resolveTemplate` accepts them; that's why
+ * `repoId` is also a string rather than a richer object.
+ */
+export type GroupTemplateContext = {
+  id: string
+  parentPath: string
+  members: Record<
+    string,
+    {
+      worktreeId: string
+      path: string
+      repoId: string
+      /** Pre-built member-scoped wire ref so authors can paste
+       *  `{{group.members.<repoName>.scoped}}` straight into a `worktreeRef`
+       *  slot instead of hand-assembling the `member:<groupId>:<worktreeId>`
+       *  string. Recognized by the run-prompt runner's member-scoped branch. */
+      scoped: string
+    }
+  >
+}
+
+export function buildGroupTemplateContext(group: WorkspaceGroup): GroupTemplateContext {
+  const members: GroupTemplateContext['members'] = {}
+  for (const id of group.memberWorktreeIds) {
+    const parsed = splitWorktreeId(id)
+    if (!parsed) {
+      continue
+    }
+    const folder = basename(parsed.worktreePath)
+    if (!folder) {
+      continue
+    }
+    members[folder] = {
+      worktreeId: id,
+      path: parsed.worktreePath,
+      repoId: parsed.repoId,
+      scoped: buildMemberScopedRef(group.id, id)
+    }
+  }
+  return {
+    id: group.id,
+    parentPath: group.parentPath,
+    members
+  }
 }
 
 /**
