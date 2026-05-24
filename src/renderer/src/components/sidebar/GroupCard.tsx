@@ -4,12 +4,12 @@ import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { isAutomationRunActive } from '@/store/slices/automation-runs'
 import { isFolderRepo } from '../../../../shared/repo-kind'
-import type { Repo, WorkspaceGroup, Worktree } from '../../../../shared/types'
+import type { LinearIssue, Repo, WorkspaceGroup, Worktree } from '../../../../shared/types'
 import { getMemberWorktreesForGroup, getRepoMapFromState } from '@/store/selectors'
 import { groupIsRunning } from './group-aggregation'
 import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 import { branchDisplayName, checksLabel } from './WorktreeCardHelpers'
-import { PrSection } from './WorktreeCardMeta'
+import { LinearIssueSection, PrSection } from './WorktreeCardMeta'
 import WorktreeCardAgents from './WorktreeCardAgents'
 import {
   DropdownMenu,
@@ -55,6 +55,28 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
   const isArchiving = useAppStore((s) => s.archivingGroupIds.has(group.id))
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
   const showInlineAgents = cardProps.includes('inline-agents')
+
+  // Why: union the group's own linkedLinearIssue with each member's so a
+  // ticket linked at create-time on either surface still surfaces in the
+  // sidebar. Dedup by identifier — same ticket linked from group + member
+  // should render once. Stable order: group's own first, then members in
+  // declared order so the visual layout doesn't reshuffle as new members
+  // get linked over time.
+  const linearIdentifiers = useMemo(() => {
+    const out: string[] = []
+    const seen = new Set<string>()
+    const push = (id: string | null | undefined): void => {
+      if (id && !seen.has(id)) {
+        seen.add(id)
+        out.push(id)
+      }
+    }
+    push(group.linkedLinearIssue)
+    for (const m of members) {
+      push(m.linkedLinearIssue)
+    }
+    return out
+  }, [group.linkedLinearIssue, members])
 
   // Why: runningWorktreeIds is not a first-class store field yet; derive it
   // from scriptsByWorktree on the fly. Mirrors how WorktreeCard reads its own
@@ -205,6 +227,19 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
           {group.displayName}
         </span>
       </div>
+
+      {/* Why: linked Linear tickets render as IssueSection-style rows above
+          the repo list, matching the row layout used elsewhere on workspace
+          cards. Group-level link first, then each member's link in declared
+          order (deduped); placement above the members visually maps "this
+          ticket scopes the work below". */}
+      {linearIdentifiers.length > 0 && (
+        <div className="flex flex-col gap-0.5" data-testid="group-linear-issues">
+          {linearIdentifiers.map((identifier) => (
+            <GroupLinearIssueRow key={identifier} identifier={identifier} />
+          ))}
+        </div>
+      )}
 
       {/* Body: one row per member repo.
           Why: pl-3 + a left border bar communicates "these are members of THIS
@@ -557,6 +592,52 @@ const GroupMemberRow = React.memo(function GroupMemberRow({
         />
       )}
     </div>
+  )
+})
+
+type GroupLinearIssueRowProps = {
+  identifier: string
+}
+
+/**
+ * Per-row Linear ticket renderer. Pulls the cached LinearIssue out of the
+ * store and triggers a fetch on mount so the title backfills automatically.
+ *
+ * Why a dedicated row component: keeps the per-identifier subscription
+ * scoped to one row at a time — adding/removing a single linked ticket
+ * doesn't re-render the rest of the GroupCard.
+ *
+ * Why fetch by identifier (e.g. "ENG-123") rather than UUID: the persisted
+ * `linkedLinearIssue` field stores the human-readable identifier (see
+ * launch-work-item-direct.ts) and the Linear SDK's `client.issue(id)` accepts
+ * both UUIDs and identifiers. Eventually we should normalize cache keys, but
+ * the worst case today is a duplicate cache entry for the same issue.
+ */
+const GroupLinearIssueRow = React.memo(function GroupLinearIssueRow({
+  identifier
+}: GroupLinearIssueRowProps): React.JSX.Element {
+  const fetchLinearIssue = useAppStore((s) => s.fetchLinearIssue)
+  // Why: focused selector — only re-renders this row when its specific cache
+  // entry changes, not on every unrelated linearIssueCache write.
+  const cached = useAppStore((s) => s.linearIssueCache[identifier]?.data)
+
+  useEffect(() => {
+    // Why: best-effort hydrate. The store dedupes inflight requests so
+    // multiple rows for the same identifier (e.g. group + member both linked
+    // to the same ticket — deduped by the parent before reaching here) only
+    // result in one IPC call.
+    void fetchLinearIssue(identifier)
+  }, [fetchLinearIssue, identifier])
+
+  const issue: LinearIssue | null | undefined = cached
+  return (
+    <LinearIssueSection
+      identifier={issue?.identifier ?? identifier}
+      title={issue?.title}
+      url={issue?.url ?? null}
+      stateColor={issue?.state?.color ?? null}
+      stateName={issue?.state?.name ?? null}
+    />
   )
 })
 

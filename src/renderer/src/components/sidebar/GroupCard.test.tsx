@@ -23,6 +23,13 @@ import type { WorktreeScriptsEntry } from '@/store/slices/scripts'
 // the store. Provide a minimal in-memory slice surface so each test seeds the
 // data it needs without booting the real zustand store.
 type AutomationRun = { status: string }
+type LinearIssueShape = {
+  id: string
+  identifier: string
+  title: string
+  url: string
+  state: { name: string; color: string; type: string }
+}
 type StoreState = {
   worktreesByRepo: Record<string, Worktree[]>
   repos: Repo[]
@@ -42,11 +49,16 @@ type StoreState = {
   acknowledgedAgentsByPaneKey: Record<string, never>
   agentStatusEpoch: number
   tabsByWorktree: Record<string, never[]>
+  // Why: GroupCard's linked-Linear row reads from linearIssueCache and calls
+  // fetchLinearIssue on mount. Default to empty/no-op so unrelated tests
+  // don't have to seed Linear state.
+  linearIssueCache: Record<string, { data: LinearIssueShape | null; fetchedAt: number }>
   setActiveWorktree: ReturnType<typeof vi.fn>
   openModal: ReturnType<typeof vi.fn>
   updateWorkspaceGroup: ReturnType<typeof vi.fn>
   updateWorktreeMeta: ReturnType<typeof vi.fn>
   fetchPRForBranch: ReturnType<typeof vi.fn>
+  fetchLinearIssue: ReturnType<typeof vi.fn>
 }
 
 const mocks = vi.hoisted(() => {
@@ -66,11 +78,13 @@ const mocks = vi.hoisted(() => {
       acknowledgedAgentsByPaneKey: {},
       agentStatusEpoch: 0,
       tabsByWorktree: {},
+      linearIssueCache: {},
       setActiveWorktree: vi.fn(),
       openModal: vi.fn(),
       updateWorkspaceGroup: vi.fn().mockResolvedValue(undefined),
       updateWorktreeMeta: vi.fn().mockResolvedValue(undefined),
-      fetchPRForBranch: vi.fn().mockResolvedValue(null)
+      fetchPRForBranch: vi.fn().mockResolvedValue(null),
+      fetchLinearIssue: vi.fn().mockResolvedValue(null)
     } as StoreState,
     shellOpenPath: vi.fn()
   }
@@ -655,6 +669,79 @@ describe('<GroupCard />', () => {
     mocks.state.worktreeCardProperties = ['status', 'pr', 'ci']
     const disabled = render(<GroupCard group={group} />)
     expect(disabled.container.querySelector('[data-testid="group-agents"]')).toBeNull()
+  })
+
+  it('renders linked Linear tickets as rows above the members (group + each member, deduped)', () => {
+    // Why: covers the new contract — group.linkedLinearIssue plus per-member
+    // linkedLinearIssue rendered together, with stable order (group first,
+    // then declared member order) and dedup when the same identifier is
+    // linked on multiple surfaces.
+    const wtA = makeWorktree({
+      id: 'wt-a',
+      repoId: 'repo-a',
+      linkedLinearIssue: 'ENG-200'
+    })
+    const wtB = makeWorktree({
+      id: 'wt-b',
+      repoId: 'repo-b',
+      linkedLinearIssue: 'ENG-100' // duplicates the group-level link — must dedupe
+    })
+    const repos = [
+      makeRepo({ id: 'repo-a', displayName: 'a' }),
+      makeRepo({ id: 'repo-b', displayName: 'b' })
+    ]
+    const group = makeGroup({
+      id: 'group:1',
+      memberWorktreeIds: [wtA.id, wtB.id],
+      linkedLinearIssue: 'ENG-100'
+    })
+    // Title for one of them is cached — verifies the title backfills, while
+    // the other identifier still renders without a title attached.
+    mocks.state.linearIssueCache = {
+      'ENG-100': {
+        data: {
+          id: 'uuid-100',
+          identifier: 'ENG-100',
+          title: 'Add grouped workspaces',
+          url: 'https://linear.app/x/ENG-100',
+          state: { name: 'In Progress', color: '#5e6ad2', type: 'started' }
+        },
+        fetchedAt: 0
+      }
+    }
+    seed({ worktrees: [wtA, wtB], repos, groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    const container = screen.getByTestId('group-linear-issues')
+    expect(container.textContent).toContain('ENG-100')
+    expect(container.textContent).toContain('Add grouped workspaces')
+    expect(container.textContent).toContain('ENG-200')
+
+    // Order: ENG-100 (group-level + dedupe absorbs wtB's copy) before ENG-200 (wtA).
+    const firstIdx = container.textContent!.indexOf('ENG-100')
+    const secondIdx = container.textContent!.indexOf('ENG-200')
+    expect(firstIdx).toBeLessThan(secondIdx)
+
+    // Dedup: ENG-100 appears in the rendered text exactly once — the group's
+    // own link and wtB's identical link must not double-render.
+    const occurrences = (container.textContent!.match(/ENG-100/g) ?? []).length
+    expect(occurrences).toBe(1)
+
+    // Every linked identifier triggers a fetchLinearIssue on mount.
+    expect(mocks.state.fetchLinearIssue).toHaveBeenCalledWith('ENG-100')
+    expect(mocks.state.fetchLinearIssue).toHaveBeenCalledWith('ENG-200')
+  })
+
+  it('omits the Linear-issues row container when neither the group nor any member is linked', () => {
+    const wt = makeWorktree({ id: 'wt-orca', repoId: 'repo-orca' })
+    const repo = makeRepo({ id: 'repo-orca', displayName: 'orca' })
+    const group = makeGroup({ id: 'group:1', memberWorktreeIds: [wt.id] })
+    seed({ worktrees: [wt], repos: [repo], groups: [group] })
+
+    render(<GroupCard group={group} />)
+
+    expect(screen.queryByTestId('group-linear-issues')).toBeNull()
   })
 
   it('mounting a GroupMemberRow triggers fetchPRForBranch for that branch', () => {
