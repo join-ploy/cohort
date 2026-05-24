@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { CalendarClock, Check, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  CalendarClock,
+  Check,
+  Copy,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -47,6 +57,7 @@ export default function AutomationsPage(): React.JSX.Element {
   const createPrCommands = settings?.createPrCommands ?? []
   const selectedId = useAppStore((s) => s.selectedAutomationId)
   const setSelectedId = useAppStore((s) => s.setSelectedAutomationId)
+  const duplicateAutomation = useAppStore((s) => s.duplicateAutomation)
   const repoMap = useRepoMap()
   const worktreeMap = useWorktreeMap()
 
@@ -227,6 +238,17 @@ export default function AutomationsPage(): React.JSX.Element {
       updates: { enabled: !automation.enabled }
     })
     await refresh()
+  }
+
+  const handleDuplicateAutomation = async (automation: Automation): Promise<void> => {
+    try {
+      const clone = await duplicateAutomation(automation.id)
+      await refresh()
+      setSelectedId(clone.id)
+      toast.success('Automation duplicated. The copy is paused — enable it to run.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to duplicate automation.')
+    }
   }
 
   const deleteAutomation = async (automation: Automation): Promise<void> => {
@@ -579,6 +601,10 @@ export default function AutomationsPage(): React.JSX.Element {
                         <Play className="size-3.5" />
                       )}
                       {automation.enabled ? 'Pause' : 'Resume'}
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => void handleDuplicateAutomation(automation)}>
+                      <Copy className="size-3.5" />
+                      Duplicate
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem

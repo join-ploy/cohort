@@ -95,6 +95,7 @@ import { createDetectedAgentsSlice } from './detected-agents'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
 import { createScriptsSlice } from './scripts'
 import { createAutomationRunsSlice } from './automation-runs'
+import { createAutomationsSlice } from './automations'
 import { createWorkspaceGroupsSlice } from './workspace-groups'
 
 function createTestStore() {
@@ -122,6 +123,7 @@ function createTestStore() {
     ...createWorktreeNavHistorySlice(...a),
     ...createScriptsSlice(...a),
     ...createAutomationRunsSlice(...a),
+    ...createAutomationsSlice(...a),
     ...createWorkspaceGroupsSlice(...a)
   }))
 }
