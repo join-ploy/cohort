@@ -22,7 +22,7 @@ import { createLocalWorktree, createRemoteWorktree } from './worktree-remote'
 // Why: repo folders are derived from the on-disk basename (stripped of the
 // `.git` suffix bare repos carry) so member layouts match the convention
 // `computeWorktreePath` already uses for nested workspaces.
-function repoFolderName(repo: Repo): string {
+export function repoFolderName(repo: Repo): string {
   return basename(repo.path).replace(/\.git$/, '')
 }
 

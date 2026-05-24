@@ -72,7 +72,10 @@ import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
 import { createCleanupService, type CleanupService } from './archive/cleanup-service'
 import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
-import { createWorkspaceGroup as createWorkspaceGroupFlow } from './ipc/workspace-groups'
+import {
+  createWorkspaceGroup as createWorkspaceGroupFlow,
+  repoFolderName
+} from './ipc/workspace-groups'
 import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 
@@ -731,11 +734,27 @@ app.whenReady().then(async () => {
       if (!mainWindow) {
         throw new Error('createWorkspaceGroup: no mainWindow available.')
       }
+      // Why: chain-shape automations may leave branchName empty when the user
+      // wants the group name auto-generated (just like the manual composer
+      // and the create-worktree wiring above). Generate an adjective_noun
+      // slug against the same taken-names set the manual composer + IPC
+      // validator use (repo folder basenames + existing group workspaceNames)
+      // so the new slug can never collide with a sibling. The slug doubles
+      // as the workspaceName AND the per-member branch — matches the runner
+      // contract where branchName plays a triple role today.
+      const resolvedBranchName =
+        input.branchName.trim() ||
+        generateUniqueWorkspaceName(
+          new Set([
+            ...storeRef.getRepos().map(repoFolderName),
+            ...storeRef.getWorkspaceGroups().map((g) => g.workspaceName)
+          ])
+        )
       const result = await createWorkspaceGroupFlow(
         {
-          workspaceName: input.branchName,
+          workspaceName: resolvedBranchName,
           displayName: input.displayName,
-          branchName: input.branchName,
+          branchName: resolvedBranchName,
           members: input.members.map((m) => ({
             repoId: m.repoId,
             baseRef: m.baseBranch ? m.baseBranch : null,

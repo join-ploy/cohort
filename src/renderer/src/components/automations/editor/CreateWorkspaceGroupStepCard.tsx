@@ -126,10 +126,14 @@ export function CreateWorkspaceGroupStepCard(
         </div>
       ) : null}
 
+      {/* Why: blank branchName at run time → main auto-generates an
+          adjective_noun slug against the live taken-names set (same generator
+          the manual composer uses). Authors who want a deterministic /
+          templated name still get full control. */}
       <TemplateInput
         value={config.branchName}
         onChange={(v) => update({ branchName: v })}
-        placeholder="Branch / group name (templates allowed)"
+        placeholder="Branch / group slug (auto-generated when blank)"
         available={props.available}
         ariaLabel="Branch name"
       />
