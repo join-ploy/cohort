@@ -1,5 +1,18 @@
 import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
@@ -25,7 +38,8 @@ import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
   type ChainDraft,
   generateDefaultStepId,
-  renameStepWithRewrites
+  renameStepWithRewrites,
+  reorderSteps
 } from '../../../lib/chain-editor-state'
 import {
   chainHasStep,
@@ -151,6 +165,30 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     setDirty(true)
   }, [])
 
+  const moveStep = React.useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) {
+      return
+    }
+    setDraft((current) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= current.steps.length ||
+        toIndex < 0 ||
+        toIndex >= current.steps.length
+      ) {
+        return current
+      }
+      return { ...current, steps: reorderSteps(current.steps, fromIndex, toIndex) }
+    })
+    // Why: dirty stays unconditional so any reorder enables the save button —
+    // even a same-shape move that the executor would treat as a no-op should
+    // require an explicit save so the persisted order matches what the user
+    // sees. Future-reference validation re-runs via computeAllErrors's useMemo
+    // and will surface any newly-invalid {{steps.x}} reference produced by the
+    // reorder, instead of silently accepting an unrunnable chain.
+    setDirty(true)
+  }, [])
+
   const addStep = React.useCallback((kind: StepKind) => {
     setDraft((current) => {
       const config = defaultConfigForKind(kind)
@@ -229,6 +267,35 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     [draft, props.repos]
   )
 
+  // Why: 5px activation distance matches TabBar's PointerSensor so a click on
+  // the grip without movement still falls through to focus/native behaviour.
+  // KeyboardSensor is added here (TabBar omits it) because automation editing
+  // is keyboard-heavy — arrow keys on a focused grip reorder a step. Both
+  // sensors are passed even when the chain has zero steps so the hook order
+  // remains stable across renders.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const stepIds = React.useMemo(() => draft.steps.map((s) => s.id), [draft.steps])
+
+  const handleDragEnd = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) {
+        return
+      }
+      const fromIndex = draft.steps.findIndex((s) => s.id === active.id)
+      const toIndex = draft.steps.findIndex((s) => s.id === over.id)
+      if (fromIndex === -1 || toIndex === -1) {
+        return
+      }
+      moveStep(fromIndex, toIndex)
+    },
+    [draft.steps, moveStep]
+  )
+
   const canSave = errors.length === 0 && dirty && !saving
   const canRunNow = props.automation !== null && !dirty
   const issueCount = errors.length
@@ -303,22 +370,31 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
               No steps yet. Click &ldquo;Add step&rdquo; to start your chain.
             </div>
           ) : null}
-          {draft.steps.map((step, index) => (
-            <ChainEditorStepCardRouter
-              key={`${step.id}:${index}`}
-              step={step}
-              index={index}
-              available={getAvailableVariablesAtStep(draft, index, props.repos)}
-              repos={props.repos}
-              reviewCommands={props.reviewCommands}
-              createPrCommands={props.createPrCommands}
-              onIdChange={(newId) => renameStep(index, newId)}
-              onConfigChange={(config) => updateStepConfig(index, config)}
-              onOnFailureChange={(val) => updateStep(index, { onFailure: val })}
-              onTimeoutChange={(val) => updateStep(index, { timeoutSeconds: val })}
-              onDelete={() => deleteStep(index)}
-            />
-          ))}
+          {/* Why: DndContext wraps only the steps list so dnd-kit's pointer
+              listeners don't interfere with the header/footer controls. The
+              outer scroll container is the editor body div above, which
+              DndContext.autoScroll discovers automatically and scrolls while
+              the user drags near its edges. */}
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={stepIds} strategy={verticalListSortingStrategy}>
+              {draft.steps.map((step, index) => (
+                <ChainEditorStepCardRouter
+                  key={step.id}
+                  step={step}
+                  index={index}
+                  available={getAvailableVariablesAtStep(draft, index, props.repos)}
+                  repos={props.repos}
+                  reviewCommands={props.reviewCommands}
+                  createPrCommands={props.createPrCommands}
+                  onIdChange={(newId) => renameStep(index, newId)}
+                  onConfigChange={(config) => updateStepConfig(index, config)}
+                  onOnFailureChange={(val) => updateStep(index, { onFailure: val })}
+                  onTimeoutChange={(val) => updateStep(index, { timeoutSeconds: val })}
+                  onDelete={() => deleteStep(index)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
 
           <AddStepControl
             open={addOpen}
