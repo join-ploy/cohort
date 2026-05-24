@@ -362,7 +362,6 @@ export function RepositoryPane({
             onChange={(e) => setDescriptionDraft(e.target.value)}
             onBlur={commitDescription}
             placeholder="e.g. Web app frontend (React + TS)"
-            maxLength={240}
             rows={3}
             className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />
@@ -371,7 +370,7 @@ export function RepositoryPane({
             <code className="rounded bg-muted px-1 py-0.5">
               {'{{'}group.members.&lt;repo&gt;.description{'}}'}
             </code>
-            . Max 240 characters.
+            . Multi-line allowed.
           </p>
         </SearchableSetting>
 

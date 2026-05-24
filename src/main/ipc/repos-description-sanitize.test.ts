@@ -3,12 +3,12 @@
  * normalizes user-authored Repo.description before it lands in persisted
  * state. The description gets dumped into automation prompts via
  * `group.members.<repo>.description`, so the sanitizer must be paranoid about
- * control chars, bidi-override escapes, and unbounded length the same way
+ * control chars and bidi-override escapes the same way
  * `sanitizeWorktreeDisplayName` is for worktree titles.
  *
- * Why a direct unit test on the helper (not the full IPC handler): the handler
- * already delegates input shape validation to TypeScript via Repo's allow-list;
- * the load-bearing logic is the per-character normalization in this helper.
+ * No length cap: descriptions are local-only and may be paragraphs. Newlines
+ * and tabs survive on purpose so users can structure the prose; only the
+ * other C0/C1 control bytes get neutralized.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -19,12 +19,22 @@ describe('sanitizeRepoDescription', () => {
     expect(sanitizeRepoDescription('   hello   ')).toBe('hello')
   })
 
-  it('collapses internal whitespace runs to a single space', () => {
-    expect(sanitizeRepoDescription('a   b\tc')).toBe('a b c')
+  it('preserves internal whitespace including multiple spaces', () => {
+    // Why: the sanitizer used to collapse `\s+` runs, which destroyed
+    // paragraph structure. We now treat the user-typed prose as-is.
+    expect(sanitizeRepoDescription('a   b c')).toBe('a   b c')
   })
 
-  it('replaces C0 control chars (incl. embedded newlines) with spaces', () => {
-    expect(sanitizeRepoDescription('line one\nline two')).toBe('line one line two')
+  it('preserves newlines so multi-line descriptions survive', () => {
+    expect(sanitizeRepoDescription('line one\nline two')).toBe('line one\nline two')
+    expect(sanitizeRepoDescription('para one\n\npara two')).toBe('para one\n\npara two')
+  })
+
+  it('preserves tabs', () => {
+    expect(sanitizeRepoDescription('col1\tcol2')).toBe('col1\tcol2')
+  })
+
+  it('replaces non-newline non-tab C0 control chars with spaces', () => {
     expect(sanitizeRepoDescription('bell\x07alert')).toBe('bell alert')
   })
 
@@ -39,22 +49,21 @@ describe('sanitizeRepoDescription', () => {
     expect(sanitizeRepoDescription('A⁦B⁩C')).toBe('ABC')
   })
 
-  it('caps the result at 240 chars', () => {
-    const long = 'x'.repeat(500)
+  it('does not cap long input', () => {
+    const long = 'x'.repeat(5000)
     const result = sanitizeRepoDescription(long)
-    expect(result).toBeDefined()
-    expect(result?.length).toBe(240)
+    expect(result).toBe(long)
   })
 
   it('returns undefined when the input is empty', () => {
     expect(sanitizeRepoDescription('')).toBeUndefined()
   })
 
-  it('returns undefined when the input collapses to empty after sanitization', () => {
-    // Bidi overrides + whitespace + control chars only — nothing left after
+  it('returns undefined when the input collapses to whitespace + bidi only', () => {
+    // Bidi overrides + whitespace only — nothing displayable left after
     // stripping. Treating this as "no description" lets the IPC layer drop
     // the key from the patch so persisted state stays clean.
-    expect(sanitizeRepoDescription('   ‮⁦\n\t  ')).toBeUndefined()
+    expect(sanitizeRepoDescription('   ‮⁦  ')).toBeUndefined()
   })
 
   it('preserves Unicode letters (CJK, accented Latin, emoji)', () => {

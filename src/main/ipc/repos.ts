@@ -57,20 +57,25 @@ function emitRepoAdded(method: RepoMethod, alreadyExisted: boolean): void {
  * override controls (mirrors `sanitizeWorktreeDisplayName` — the description
  * gets dumped into automation prompts, so it shouldn't be able to smuggle
  * escapes or visually reorder adjacent UI text), collapses internal
- * whitespace, and caps at 240 chars. Returns undefined when the string
- * collapses to empty so the IPC layer can drop the key from the patch.
+ * whitespace, preserves newlines + tabs (so multi-line paragraph
+ * descriptions survive \u2014 they're dumped into automation prompts and the
+ * user may want structure), and has no length cap. Returns undefined when
+ * the string collapses to empty so the IPC layer can drop the key from the
+ * patch.
  */
 export function sanitizeRepoDescription(input: string): string | undefined {
   const withoutControls = Array.from(input, (char) => {
     const code = char.charCodeAt(0)
+    // Why: keep newline (0x0a) and tab (0x09) so users can structure the
+    // description across lines. Every other low-ASCII control + DEL/C1
+    // range becomes a space (matches sanitizeWorktreeDisplayName's policy
+    // for the characters they DO strip).
+    if (code === 0x0a || code === 0x09) {
+      return char
+    }
     return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? ' ' : char
   }).join('')
-  const sanitized = withoutControls
-    .replace(/[\u202a-\u202e\u2066-\u2069]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 240)
-    .trim()
+  const sanitized = withoutControls.replace(/[\u202a-\u202e\u2066-\u2069]/g, '').trim()
   return sanitized || undefined
 }
 
@@ -501,9 +506,9 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
       // `group.members.<repo>.description`. Strip C0/C1 control chars and
       // bidi-override controls so a pasted blob can't smuggle escape
       // sequences into a terminal or visually reorder adjacent text the
-      // way `sanitizeWorktreeDisplayName` does for titles. Cap at 240
-      // chars; collapse to undefined when empty so the persisted record
-      // drops the key cleanly.
+      // way `sanitizeWorktreeDisplayName` does for titles. No length cap
+      // (descriptions may be paragraphs); collapse to undefined when empty
+      // so the persisted record drops the key cleanly.
       if ('description' in updates) {
         const raw = updates.description
         if (typeof raw !== 'string') {
