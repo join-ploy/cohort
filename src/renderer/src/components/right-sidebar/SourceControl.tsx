@@ -27,8 +27,18 @@ import {
   Search,
   X
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
-import { useActiveWorktree, useRepoById, useWorktreeMap } from '@/store/selectors'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useActiveWorktreeId,
+  useRepoById,
+  useWorktreeById,
+  useWorktreeMap
+} from '@/store/selectors'
+import { SourceControlGroupContainer } from './SourceControlGroupView'
 import { detectLanguage } from '@/lib/language-detect'
 import { basename, dirname, joinPath } from '@/lib/path'
 import { cn } from '@/lib/utils'
@@ -175,15 +185,23 @@ const CONFLICT_KIND_LABELS: Record<GitConflictKind, string> = {
   both_deleted: 'Both deleted'
 }
 
-function SourceControlInner(): React.JSX.Element {
+// Why: when an explicit worktreeId prop is supplied (group-mode segment view),
+// the panel renders THAT member's source-control surface regardless of which
+// worktree is globally active. Mirrors FileExplorerInner so the same prop
+// override pattern works across right-sidebar panels.
+export type SourceControlInnerProps = {
+  worktreeId: string | null
+}
+
+export function SourceControlInner({ worktreeId }: SourceControlInnerProps): React.JSX.Element {
   const sourceControlRef = useRef<HTMLDivElement>(null)
   // Why: React setState is async, so a rapid double-click on the Commit
   // button can both pass the isCommitting state guard before the disabled
   // state re-renders. A ref flipped synchronously at the start of
   // handleCommit gives us a true single-flight lock.
   const commitInFlightRef = useRef<Record<string, boolean>>({})
-  const activeWorktree = useActiveWorktree()
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+  const activeWorktreeId = worktreeId
+  const activeWorktree = useWorktreeById(worktreeId)
   const activeGroupId = useAppStore((s) =>
     activeWorktreeId ? s.activeGroupIdByWorktree[activeWorktreeId] : undefined
   )
@@ -1832,8 +1850,47 @@ function SourceControlInner(): React.JSX.Element {
   )
 }
 
-const SourceControl = React.memo(SourceControlInner)
-export default SourceControl
+// Why: top-level wrapper detects whether the active worktree belongs to a
+// workspace group; if so, render the segmented per-member view. Otherwise
+// fall back to a single panel keyed off the global activeWorktreeId.
+// Mirrors the FileExplorer / SetupPanel / RunPanel group-detection branch.
+function SourceControl(): React.JSX.Element {
+  const activeWorktreeId = useActiveWorktreeId()
+  const group = useAppStore((s) =>
+    activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
+  )
+  // Why: useShallow — getMemberWorktreesForGroup returns a fresh array each
+  // call. Without element-wise comparison, useSyncExternalStore re-enters on
+  // every state mutation and trips React's max-update-depth guard. Same for
+  // memberChangedCounts which maps over groupMembers.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
+  const repoMap = useAppStore((s) => getRepoMapFromState(s))
+  const memberChangedCounts = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => (s.gitStatusByWorktree[wt.id] ?? []).length)
+    })
+  )
+
+  if (group && groupMembers && groupMembers.length > 0) {
+    return (
+      <SourceControlGroupContainer
+        members={groupMembers}
+        memberChangedCounts={memberChangedCounts ?? []}
+        repoMap={repoMap}
+        defaultActiveWorktreeId={activeWorktreeId}
+      />
+    )
+  }
+
+  return <SourceControlInner worktreeId={activeWorktreeId} />
+}
+
+export default React.memo(SourceControl)
 
 type CommitAreaProps = {
   commitMessage: string
