@@ -167,6 +167,38 @@ export function isWorktreeGrouped(
   return state.workspaceGroups.some((g) => g.memberWorktreeIds.includes(worktreeId))
 }
 
+/**
+ * Sibling worktree ids that share a WorkspaceGroup with the given worktree,
+ * in the group's declared member order, excluding the input worktree itself.
+ *
+ * Why: the group-aware tab strip needs to enumerate which OTHER members
+ * contribute tabs to surface, and it must skip members whose worktree is
+ * archived or missing — those members no longer have a renderable surface,
+ * so their tabs would be unreachable from the strip even if listed.
+ */
+export function getSiblingWorktreeIdsForGroupMember(
+  state: Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+  worktreeId: string
+): string[] {
+  const group = getGroupByWorktreeId(state, worktreeId)
+  if (!group) {
+    return []
+  }
+  const worktreeMap = getCachedWorktreeMap(state.worktreesByRepo)
+  const siblings: string[] = []
+  for (const id of group.memberWorktreeIds) {
+    if (id === worktreeId) {
+      continue
+    }
+    const wt = worktreeMap.get(id)
+    if (!wt || wt.isArchived) {
+      continue
+    }
+    siblings.push(id)
+  }
+  return siblings
+}
+
 export const useWorkspaceGroups = () => useAppStore((s) => s.workspaceGroups)
 export const useGroupById = (groupId: string | null) =>
   useAppStore((s) => (groupId ? getGroupById(s, groupId) : null))

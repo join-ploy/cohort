@@ -3,6 +3,7 @@ import {
   getGroupById,
   getGroupByWorktreeId,
   getMemberWorktreesForGroup,
+  getSiblingWorktreeIdsForGroupMember,
   isWorktreeGrouped
 } from './selectors'
 import type { Worktree, WorkspaceGroup } from '../../../shared/types'
@@ -113,6 +114,52 @@ describe('group selectors', () => {
     it('returns an empty array when the group does not exist', () => {
       const state = { workspaceGroups: [], worktreesByRepo: {} }
       expect(getMemberWorktreesForGroup(state, 'group:missing')).toEqual([])
+    })
+  })
+
+  describe('getSiblingWorktreeIdsForGroupMember', () => {
+    it('returns the other members of the active worktree’s group, preserving group order', () => {
+      const wtA = makeWorktree('repoA::/wt1', 'repoA')
+      const wtB = makeWorktree('repoB::/wt2', 'repoB')
+      const wtC = makeWorktree('repoC::/wt3', 'repoC')
+      const group = makeGroup('group:a', [wtA.id, wtB.id, wtC.id])
+      const state = {
+        workspaceGroups: [group],
+        worktreesByRepo: { repoA: [wtA], repoB: [wtB], repoC: [wtC] }
+      }
+      expect(getSiblingWorktreeIdsForGroupMember(state, wtA.id)).toEqual([wtB.id, wtC.id])
+      expect(getSiblingWorktreeIdsForGroupMember(state, wtB.id)).toEqual([wtA.id, wtC.id])
+    })
+
+    it('returns an empty array when the worktree is not in any group', () => {
+      const wtA = makeWorktree('repoA::/wt1', 'repoA')
+      const state = {
+        workspaceGroups: [],
+        worktreesByRepo: { repoA: [wtA] }
+      }
+      expect(getSiblingWorktreeIdsForGroupMember(state, wtA.id)).toEqual([])
+    })
+
+    it('omits archived sibling worktrees — they have no surface to host tabs anymore', () => {
+      const wtA = makeWorktree('repoA::/wt1', 'repoA')
+      const wtB = { ...makeWorktree('repoB::/wt2', 'repoB'), isArchived: true }
+      const wtC = makeWorktree('repoC::/wt3', 'repoC')
+      const group = makeGroup('group:a', [wtA.id, wtB.id, wtC.id])
+      const state = {
+        workspaceGroups: [group],
+        worktreesByRepo: { repoA: [wtA], repoB: [wtB], repoC: [wtC] }
+      }
+      expect(getSiblingWorktreeIdsForGroupMember(state, wtA.id)).toEqual([wtC.id])
+    })
+
+    it('omits sibling members whose worktree record cannot be resolved', () => {
+      const wtA = makeWorktree('repoA::/wt1', 'repoA')
+      const group = makeGroup('group:a', [wtA.id, 'repoX::/ghost'])
+      const state = {
+        workspaceGroups: [group],
+        worktreesByRepo: { repoA: [wtA] }
+      }
+      expect(getSiblingWorktreeIdsForGroupMember(state, wtA.id)).toEqual([])
     })
   })
 

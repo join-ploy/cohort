@@ -36,6 +36,10 @@ type SortableTabProps = {
   onSplitGroup: (direction: 'left' | 'right' | 'up' | 'down', sourceVisibleTabId: string) => void
   dragData: TabDragItemData
   dropIndicator?: DropIndicator
+  /** Repo-color dot rendered before the tab title when this tab belongs to a
+   *  different member of the active workspace group. null/undefined when the
+   *  tab is part of the strip's own worktree. */
+  memberBadge?: { color: string; name: string } | null
 }
 
 export const TAB_COLORS = [
@@ -68,7 +72,8 @@ export default function SortableTab({
   onToggleExpand,
   onSplitGroup,
   dragData,
-  dropIndicator
+  dropIndicator,
+  memberBadge
 }: SortableTabProps): React.JSX.Element {
   const { attributes, listeners, setNodeRef } = useSortable({
     id: tab.id,
@@ -280,6 +285,21 @@ export default function SortableTab({
             >
               <ShellIcon shell={shellForIcon} size={12} />
             </span>
+          )}
+          {memberBadge && !isEditing && (
+            // Why: small repo-color dot prefixed to the title is the same
+            // visual idiom RepoDotLabel uses across the app for "tab/row
+            // belongs to repo X". Tooltip provided via `title` attribute
+            // keeps the strip dependency-light — no Radix Tooltip mount per
+            // tab — which matters because the tab strip can have dozens of
+            // tabs in a grouped workspace.
+            <span
+              aria-label={`Tab from ${memberBadge.name}`}
+              title={`Tab from ${memberBadge.name}`}
+              data-testid="tab-member-badge"
+              className="mr-1 inline-block size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: memberBadge.color }}
+            />
           )}
           {isEditing ? (
             <Input

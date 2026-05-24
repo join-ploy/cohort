@@ -7,6 +7,7 @@ import type {
   WorkspaceVisibleTabType
 } from '../../../../shared/types'
 import { useAppStore } from '../../store'
+import { getRepoMapFromState, getWorktreeMapFromState } from '../../store/selectors'
 import { buildStatusMap } from '../right-sidebar/status-display'
 import type { OpenFile } from '../../store/slices/editor'
 import SortableTab from './SortableTab'
@@ -35,6 +36,13 @@ const isWindows = navigator.userAgent.includes('Windows')
 const NEW_TERMINAL_SHORTCUT = isMac ? '⌘T' : 'Ctrl+T'
 const NEW_BROWSER_SHORTCUT = isMac ? '⌘⇧B' : 'Ctrl+Shift+B'
 const NEW_FILE_SHORTCUT = isMac ? '⌘⇧M' : 'Ctrl+Shift+M'
+
+// Why: stable empty references so the conditional store selectors above
+// don't allocate fresh objects on every render — that would defeat the
+// shallow-equality fast path Zustand v5 uses to skip re-renders.
+const EMPTY_WORKTREE_MAP = new Map<string, never>()
+const EMPTY_REPO_MAP = new Map<string, never>()
+const EMPTY_BADGE_MAP: ReadonlyMap<string, TabMemberBadge> = new Map()
 
 type TabBarProps = {
   tabs: (TerminalTab & { unifiedTabId?: string })[]
@@ -77,7 +85,17 @@ type TabBarProps = {
     sourceVisibleTabId?: string
   ) => void
   hoveredTabInsertion?: HoveredTabInsertion | null
+  /** Maps a visible tab id (entityId for terminals/browsers, unifiedTabId
+   *  for editors) to the worktree that owns the tab when this strip is
+   *  aggregating sibling-member tabs. Undefined when not aggregating. */
+  ownerByVisibleId?: ReadonlyMap<string, string>
 }
+
+/** Per-tab affordance rendered when this tab belongs to a different
+ *  workspace-group member than the strip's anchor worktree. Surfaces the
+ *  owning repo via its badge color + name so the user can tell which member
+ *  a sibling-member tab originates from at a glance. */
+export type TabMemberBadge = { color: string; name: string }
 
 type TabItem =
   | {
@@ -138,9 +156,33 @@ function TabBarInner({
   tabBarOrder,
   onCreateSplitGroup,
   hoveredTabInsertion,
-  wslAvailable
+  wslAvailable,
+  ownerByVisibleId
 }: TabBarProps): React.JSX.Element {
   const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
+  const hasOwnerMap = (ownerByVisibleId?.size ?? 0) > 0
+  // Why: only subscribe to the repo + worktree maps when aggregation is
+  // active. The shallow-equal selectors are cached so re-renders are cheap,
+  // but skipping the subscription entirely for the common no-aggregation
+  // case keeps the legacy code path's render cost identical.
+  const worktreeMap = useAppStore((s) =>
+    hasOwnerMap ? getWorktreeMapFromState(s) : EMPTY_WORKTREE_MAP
+  )
+  const repoMap = useAppStore((s) => (hasOwnerMap ? getRepoMapFromState(s) : EMPTY_REPO_MAP))
+  const memberBadgeByVisibleId = useMemo(() => {
+    if (!hasOwnerMap || !ownerByVisibleId) {
+      return EMPTY_BADGE_MAP
+    }
+    const out = new Map<string, TabMemberBadge>()
+    for (const [visibleId, ownerWorktreeId] of ownerByVisibleId) {
+      const wt = worktreeMap.get(ownerWorktreeId)
+      const repo = wt ? repoMap.get(wt.repoId) : undefined
+      if (repo) {
+        out.set(visibleId, { color: repo.badgeColor, name: repo.displayName })
+      }
+    }
+    return out
+  }, [hasOwnerMap, ownerByVisibleId, repoMap, worktreeMap])
   const defaultWindowsShell = useAppStore(
     (s) => s.settings?.terminalWindowsShell ?? 'powershell.exe'
   )
@@ -378,6 +420,7 @@ function TabBarInner({
               label: getTabDragLabel(item),
               color: item.type === 'terminal' ? (item.data.color ?? null) : null
             }
+            const memberBadge = memberBadgeByVisibleId.get(item.id) ?? null
             if (item.type === 'terminal') {
               return (
                 <SortableTab
@@ -399,6 +442,7 @@ function TabBarInner({
                   }
                   dragData={dragData}
                   dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
+                  memberBadge={memberBadge}
                 />
               )
             }
@@ -418,6 +462,7 @@ function TabBarInner({
                   onDuplicate={() => onDuplicateBrowserTab?.(item.id)}
                   dragData={dragData}
                   dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
+                  memberBadge={memberBadge}
                 />
               )
             }
@@ -438,6 +483,7 @@ function TabBarInner({
                 }
                 dragData={dragData}
                 dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
+                memberBadge={memberBadge}
               />
             )
           })}
