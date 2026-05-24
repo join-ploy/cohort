@@ -512,6 +512,7 @@ export type PreloadApi = {
       groupId: string
       partial: { displayName?: string; comment?: string; isPinned?: boolean }
     }) => Promise<WorkspaceGroup>
+    onChanged: (callback: () => void) => () => void
   }
   pty: {
     spawn: (opts: {

@@ -17,13 +17,30 @@ import { memberWorktreePath, resolveGroupParentPath } from '../../shared/workspa
 import { validateGroupName } from '../../shared/workspace-group-namespace'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { runWorktreeRemoval } from '../worktree-removal/run-worktree-removal'
-import { createLocalWorktree, createRemoteWorktree } from './worktree-remote'
+import {
+  createLocalWorktree,
+  createRemoteWorktree,
+  notifyWorktreesChanged
+} from './worktree-remote'
 
 // Why: repo folders are derived from the on-disk basename (stripped of the
 // `.git` suffix bare repos carry) so member layouts match the convention
 // `computeWorktreePath` already uses for nested workspaces.
 export function repoFolderName(repo: Repo): string {
   return basename(repo.path).replace(/\.git$/, '')
+}
+
+// Why: dedicated broadcast so the renderer can refetch workspaceGroups when
+// the slice mutates from a non-renderer path (automation chain creating a
+// group, archive cascade, update). The piggybacking on `worktrees:changed`
+// wasn't enough: that event already fires per-repo during member creation,
+// but the renderer's handler only refetches that repo's worktrees — not the
+// workspaceGroups slice. Without this signal, an automation-created group
+// stays invisible until the next app restart re-hydrates from disk.
+function notifyWorkspaceGroupsChanged(mainWindow: BrowserWindow): void {
+  if (!mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('workspaceGroups:changed')
+  }
 }
 
 /**
@@ -233,6 +250,14 @@ export async function createWorkspaceGroup(
     store.setWorktreeMeta(worktree.id, { groupId })
   }
 
+  // Why: broadcast AFTER both the group record and the per-member groupId
+  // stamps land so the renderer's followup fetch sees a consistent picture
+  // (group exists, members carry groupId).
+  notifyWorkspaceGroupsChanged(mainWindow)
+  for (const worktree of memberWorktrees) {
+    notifyWorktreesChanged(mainWindow, worktree.repoId)
+  }
+
   return { group, memberWorktrees }
 }
 
@@ -301,6 +326,7 @@ export function registerWorkspaceGroupHandlers(
           archiveCleanupError: errorSummary
         }
         store.setWorkspaceGroup(updated)
+        notifyWorkspaceGroupsChanged(mainWindow)
         throw new Error(
           `Failed to archive workspace group "${existing.displayName}": ` +
             `${failures.length} of ${memberIds.length} member(s) failed — ${errorSummary}`
@@ -327,6 +353,7 @@ export function registerWorkspaceGroupHandlers(
         archiveCleanupError: null
       }
       store.setWorkspaceGroup(archived)
+      notifyWorkspaceGroupsChanged(mainWindow)
       return archived
     }
   )
@@ -368,6 +395,7 @@ export function registerWorkspaceGroupHandlers(
         ...(typeof args.partial.isPinned === 'boolean' ? { isPinned: args.partial.isPinned } : {})
       }
       store.setWorkspaceGroup(next)
+      notifyWorkspaceGroupsChanged(mainWindow)
       return next
     }
   )

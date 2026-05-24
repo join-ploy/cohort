@@ -56,6 +56,18 @@ export function useIpcEvents(): void {
       })
     )
 
+    // Why: main broadcasts this whenever the workspaceGroups slice mutates
+    // (create from automation, archive, update). Without this, an
+    // automation-created group stays invisible in the sidebar until app
+    // restart re-hydrates from disk — the only other refresh path for groups
+    // is the renderer's own optimistic upsert inside the createGroup action,
+    // which doesn't fire when main creates a group through a chain runner.
+    unsubs.push(
+      window.api.workspaceGroups.onChanged(() => {
+        void useAppStore.getState().fetchWorkspaceGroups()
+      })
+    )
+
     unsubs.push(
       window.api.worktrees.onChanged(async (data: { repoId: string }) => {
         // Why: diff before vs. after fetchWorktrees to detect server-side

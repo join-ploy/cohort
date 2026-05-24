@@ -23,7 +23,11 @@ vi.mock('fs', () => ({
 
 vi.mock('./worktree-remote', () => ({
   createLocalWorktree: vi.fn(),
-  createRemoteWorktree: vi.fn()
+  createRemoteWorktree: vi.fn(),
+  // Why: createWorkspaceGroup broadcasts worktrees:changed per member after
+  // successful create so the renderer's onChanged handler refetches each
+  // affected repo's worktrees (and picks up the newly-stamped groupId).
+  notifyWorktreesChanged: vi.fn()
 }))
 
 vi.mock('../worktree-removal/run-worktree-removal', () => ({

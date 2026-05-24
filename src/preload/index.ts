@@ -504,7 +504,13 @@ const api = {
     update: (args: {
       groupId: string
       partial: { displayName?: string; comment?: string; isPinned?: boolean }
-    }): Promise<WorkspaceGroup> => ipcRenderer.invoke('workspace-groups:update', args)
+    }): Promise<WorkspaceGroup> => ipcRenderer.invoke('workspace-groups:update', args),
+
+    onChanged: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('workspaceGroups:changed', listener)
+      return () => ipcRenderer.removeListener('workspaceGroups:changed', listener)
+    }
   },
 
   pty: {
