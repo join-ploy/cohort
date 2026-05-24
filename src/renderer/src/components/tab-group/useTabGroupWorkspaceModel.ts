@@ -170,43 +170,62 @@ export function useTabGroupWorkspaceModel({
     )
   )
 
-  const siblingState = useAppStore(
-    useShallow((state) => {
-      if (siblingWorktreeIds.length === 0) {
-        return EMPTY_SIBLING_STATE
+  // Why: subscribe to each raw slice individually so each one is a stable
+  // reference (Zustand returns the same Record until it actually mutates).
+  // The previous useShallow over a single object that contained freshly-built
+  // inner records always allocated new sub-objects every store write — the
+  // shallow comparison only checks the OUTER keys, sees fresh inner refs, and
+  // flagged every render as a change → useSyncExternalStore re-entered →
+  // React's max-update-depth crashed. Filtering moves out of the selector
+  // into the useMemo below where it's purely derivational.
+  const allUnifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
+  const allGroupsByWorktree = useAppStore((s) => s.groupsByWorktree)
+  const allTabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const allBrowserTabsByWorktree = useAppStore((s) => s.browserTabsByWorktree)
+  const allOpenFiles = useAppStore((s) => s.openFiles)
+
+  const siblingState = useMemo(() => {
+    if (siblingWorktreeIds.length === 0) {
+      return EMPTY_SIBLING_STATE
+    }
+    const unifiedTabsByWorktree: Record<string, Tab[]> = {}
+    const groupsByWorktree: Record<string, TabGroup[]> = {}
+    const tabsByWorktree: Record<string, (typeof allTabsByWorktree)[string]> = {}
+    const browserTabsByWorktree: Record<string, BrowserTabState[]> = {}
+    for (const id of siblingWorktreeIds) {
+      const u = allUnifiedTabsByWorktree[id]
+      if (u) {
+        unifiedTabsByWorktree[id] = u
       }
-      const unifiedTabsByWorktree: Record<string, Tab[]> = {}
-      const groupsByWorktree: Record<string, TabGroup[]> = {}
-      const tabsByWorktree: Record<string, (typeof state.tabsByWorktree)[string]> = {}
-      const browserTabsByWorktree: Record<string, BrowserTabState[]> = {}
-      for (const id of siblingWorktreeIds) {
-        const u = state.unifiedTabsByWorktree[id]
-        if (u) {
-          unifiedTabsByWorktree[id] = u
-        }
-        const g = state.groupsByWorktree[id]
-        if (g) {
-          groupsByWorktree[id] = g
-        }
-        const t = state.tabsByWorktree[id]
-        if (t) {
-          tabsByWorktree[id] = t
-        }
-        const b = state.browserTabsByWorktree[id]
-        if (b) {
-          browserTabsByWorktree[id] = b
-        }
+      const g = allGroupsByWorktree[id]
+      if (g) {
+        groupsByWorktree[id] = g
       }
-      const openFiles = state.openFiles.filter((f) => siblingWorktreeIds.includes(f.worktreeId))
-      return {
-        unifiedTabsByWorktree,
-        groupsByWorktree,
-        tabsByWorktree,
-        browserTabsByWorktree,
-        openFiles
+      const t = allTabsByWorktree[id]
+      if (t) {
+        tabsByWorktree[id] = t
       }
-    })
-  )
+      const b = allBrowserTabsByWorktree[id]
+      if (b) {
+        browserTabsByWorktree[id] = b
+      }
+    }
+    const openFiles = allOpenFiles.filter((f) => siblingWorktreeIds.includes(f.worktreeId))
+    return {
+      unifiedTabsByWorktree,
+      groupsByWorktree,
+      tabsByWorktree,
+      browserTabsByWorktree,
+      openFiles
+    }
+  }, [
+    siblingWorktreeIds,
+    allUnifiedTabsByWorktree,
+    allGroupsByWorktree,
+    allTabsByWorktree,
+    allBrowserTabsByWorktree,
+    allOpenFiles
+  ])
 
   const aggregatedSiblings = useMemo(
     () =>
