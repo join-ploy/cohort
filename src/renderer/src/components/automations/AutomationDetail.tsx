@@ -342,10 +342,16 @@ function formatCondition(c: Condition): React.ReactNode {
 
 function describeRule(rule: Rule, repos: Repo[]): React.ReactNode {
   const repo = repos.find((r) => r.id === rule.projectId)
+  // Why: rule.projectId is intentionally optional when the chain itself
+  // supplies project context (e.g. a create-workspace-group step). Don't
+  // alarm the operator with "project deleted" for a rule they purposely
+  // left blank.
   const projectLabel = repo ? (
     <span className="font-medium text-foreground">{repo.displayName}</span>
-  ) : (
+  ) : rule.projectId ? (
     <span className="text-destructive">project deleted</span>
+  ) : (
+    <span className="text-muted-foreground">inferred from chain</span>
   )
   if (rule.conditions.length === 0) {
     return <>Matches every event → {projectLabel}</>

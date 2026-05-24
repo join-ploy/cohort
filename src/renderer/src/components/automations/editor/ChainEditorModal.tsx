@@ -28,10 +28,12 @@ import {
   renameStepWithRewrites
 } from '../../../lib/chain-editor-state'
 import {
+  chainHasStep,
   computeAllErrors,
   createBlankAutomation,
   defaultConfigForKind,
   getAvailableVariablesAtStep,
+  isProjectRequired,
   LEGACY_AUTOMATION_FIELDS,
   pickDefaultWorktreeRef,
   seedDraft,
@@ -93,23 +95,13 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     [groupedEnabled]
   )
 
-  const errors = React.useMemo<ChainEditorError[]>(() => {
-    const base = computeAllErrors(draft, props.repos)
-    // Why: project is required to dispatch — surface the missing selection as
-    // a top-level error so Save is disabled until the user picks a project.
-    // When the trigger picks a project at Run Now time, the upfront projectId
-    // is intentionally empty, so don't gate Save on it.
-    if (!draft.projectId && !draft.trigger?.acceptsProjectSelection) {
-      base.push({
-        path: 'projectId',
-        code: 'unknown-path',
-        message: 'Project is required',
-        stepId: '',
-        field: 'projectId'
-      })
-    }
-    return base
-  }, [draft])
+  // Why: project-required gating now lives inside computeAllErrors so it can
+  // factor in chain shape (e.g. a create-workspace-group chain genuinely
+  // doesn't need an upfront projectId — see chain-editor-modal-state).
+  const errors = React.useMemo<ChainEditorError[]>(
+    () => computeAllErrors(draft, props.repos),
+    [draft, props.repos]
+  )
 
   const updateDraft = React.useCallback((patch: Partial<ChainDraft>) => {
     setDraft((current) => ({ ...current, ...patch }))
@@ -256,6 +248,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
         canRunNow={canRunNow}
+        projectOptional={!isProjectRequired(draft)}
         onNameChange={(name) => updateDraft({ name })}
         onProjectChange={(projectId) => updateDraft({ projectId })}
         onEnabledChange={(enabled) => updateDraft({ enabled })}
@@ -295,6 +288,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
         availableSources={AVAILABLE_TRIGGER_SOURCES}
+        chainProvidesProject={chainHasStep(draft, 'create-workspace-group')}
         onSave={(next) => {
           updateDraft({ trigger: next.trigger, autoTriggers: next.autoTriggers })
           setTriggersModalOpen(false)
@@ -356,6 +350,10 @@ type ChainEditorHeaderProps = {
   trigger: TriggerConfig
   autoTriggers: AutoTrigger[]
   canRunNow: boolean
+  /** True when the chain doesn't consume `automation.projectId` (e.g. a
+   *  group-target chain with no create-worktree step). Drives the placeholder
+   *  copy so the operator isn't told to pick a project they don't need. */
+  projectOptional: boolean
   onNameChange: (name: string) => void
   onProjectChange: (projectId: string) => void
   onEnabledChange: (enabled: boolean) => void
@@ -387,7 +385,9 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
           onChange={(e) => props.onProjectChange(e.target.value)}
           className="min-w-[10rem] rounded-md border border-input bg-background px-2 py-2 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
         >
-          <option value="">Pick a project…</option>
+          <option value="">
+            {props.projectOptional ? 'No project (group)' : 'Pick a project…'}
+          </option>
           {props.repos.map((r) => (
             <option key={r.id} value={r.id}>
               {r.displayName}

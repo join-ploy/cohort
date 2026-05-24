@@ -202,7 +202,79 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
       field: v.atField
     })
   }
+  // Why: a chain needs an upfront `automation.projectId` only when something
+  // downstream actually consumes it — a create-worktree step, or any template
+  // that references `{{automation.projectId}}`. Chains built around a
+  // create-workspace-group step supply their repo context via the group's
+  // `members[*].repoId` instead, so the upfront project is genuinely moot.
+  if (!draft.projectId && isProjectRequired(draft)) {
+    all.push({
+      path: 'projectId',
+      code: 'unknown-path',
+      message: projectRequirementReason(draft),
+      stepId: '',
+      field: 'projectId'
+    })
+  }
   return all
+}
+
+/**
+ * True when the chain has at least one step of the given kind. Pure helper
+ * so the project-requirement rule can be unit-tested without ChainEditorModal.
+ */
+export function chainHasStep(draft: ChainDraft, kind: StepKind): boolean {
+  return draft.steps.some((s) => s.kind === kind)
+}
+
+/**
+ * True when any step config template references `{{automation.projectId}}`.
+ * Cheap string-scan over the template-string fields surfaced by
+ * walkStepConfigStrings — exact enough for the editor's gate.
+ */
+export function chainReferencesAutomationProjectId(draft: ChainDraft): boolean {
+  const pattern = /\{\{\s*automation\.projectId\s*\}\}/
+  let found = false
+  for (const step of draft.steps) {
+    walkStepConfigStrings(step.config, step.kind, (_field, value) => {
+      if (pattern.test(value)) {
+        found = true
+      }
+    })
+    if (found) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Project is required iff downstream code consumes it: a create-worktree step
+ * (which reads `context.automation.projectId` to pick the repo) OR any
+ * template that explicitly references `{{automation.projectId}}`. When the
+ * trigger picks a project at Run Now time we already skip the check upstream.
+ */
+export function isProjectRequired(draft: ChainDraft): boolean {
+  if (draft.trigger?.acceptsProjectSelection) {
+    return false
+  }
+  return chainHasStep(draft, 'create-worktree') || chainReferencesAutomationProjectId(draft)
+}
+
+/**
+ * Human-readable reason the project is required, so the modal can surface a
+ * specific message rather than a generic "Project is required". Lets the
+ * editor explain *why* the field gates Save in the group-chain case where a
+ * template was responsible.
+ */
+function projectRequirementReason(draft: ChainDraft): string {
+  if (chainReferencesAutomationProjectId(draft)) {
+    return 'Project is required: a step references {{automation.projectId}}.'
+  }
+  if (chainHasStep(draft, 'create-worktree')) {
+    return 'Project is required: the create-worktree step picks the repo from it.'
+  }
+  return 'Project is required'
 }
 
 export function seedDraft(automation: Automation | null): ChainDraft {

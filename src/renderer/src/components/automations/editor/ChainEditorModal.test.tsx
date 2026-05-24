@@ -349,7 +349,27 @@ describe('ChainEditorModal', () => {
     expect(markup).not.toMatch(/aria-label=["']Triggers["']/)
   })
 
-  it('disables save when projectId is empty (new automation)', () => {
+  it('disables save when projectId is empty AND a step needs it (create-worktree)', () => {
+    // Why: project-required is now driven by chain shape — a chain with a
+    // create-worktree step needs the upfront projectId, but a blank chain or
+    // a group-only chain doesn't. Construct a single-step create-worktree
+    // automation with no project to assert the gate.
+    const markup = renderToStaticMarkup(
+      <ChainEditorModal
+        open={true}
+        automation={makeAutomation({ projectId: '' })}
+        repos={[]}
+        reviewCommands={[]}
+        createPrCommands={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    )
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Save\s*<\/button>/)
+    expect(markup).toMatch(/1 issue/i)
+  })
+
+  it('does NOT require a project for a blank chain (no steps)', () => {
     const markup = renderToStaticMarkup(
       <ChainEditorModal
         open={true}
@@ -361,10 +381,7 @@ describe('ChainEditorModal', () => {
         onSave={vi.fn()}
       />
     )
-    // Save button is rendered but disabled because projectId is empty and the
-    // form is also pristine. The footer issue count surfaces the missing
-    // project as one issue.
-    expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Save\s*<\/button>/)
-    expect(markup).toMatch(/1 issue/i)
+    // No steps → no consumer of automation.projectId → no error.
+    expect(markup).toMatch(/0 issues/i)
   })
 })
