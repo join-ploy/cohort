@@ -103,7 +103,15 @@ export function CreateWorkspaceGroupStepCard(
               const baseBranchValue = member?.baseBranch ?? 'main'
               return (
                 <div key={repo.id} className="grid grid-cols-[1fr_2fr] items-center gap-2">
-                  <RepoDotLabel name={repo.displayName} color={repo.badgeColor} />
+                  {/* Why: match the sibling Input's text-xs so the repo name
+                      sits in scale with the rest of the per-repo row. The
+                      default inherited size was visibly larger and dominated
+                      the form. */}
+                  <RepoDotLabel
+                    name={repo.displayName}
+                    color={repo.badgeColor}
+                    className="text-xs"
+                  />
                   <Input
                     value={baseBranchValue}
                     onChange={(e) => handleBaseBranchChange(repo.id, e.target.value)}
