@@ -324,7 +324,11 @@ describe('<GroupCard />', () => {
     expect(screen.getByTestId('group-member-run-eq')).toBeTruthy()
   })
 
-  it('clicking a member row activates THAT member, not the first group member', () => {
+  it('clicking a member row bubbles to the group root and activates the first member', () => {
+    // Why: member rows are intentionally not independently clickable — they
+    // are visual content inside the GroupCard. A click anywhere on the card
+    // (including a member row) is a group activation, which v1 implements
+    // by activating the first member.
     const wtA = makeWorktree({ id: 'wt-a', repoId: 'repo-a' })
     const wtB = makeWorktree({ id: 'wt-b', repoId: 'repo-b' })
     const repos = [
@@ -339,7 +343,7 @@ describe('<GroupCard />', () => {
     const rows = screen.getAllByTestId('group-member-row')
     fireEvent.click(rows[1])
 
-    expect(mocks.state.setActiveWorktree).toHaveBeenLastCalledWith('wt-b')
+    expect(mocks.state.setActiveWorktree).toHaveBeenLastCalledWith('wt-a')
   })
 
   it('right-click → Archive Group fires runGroupArchive with the group id', () => {

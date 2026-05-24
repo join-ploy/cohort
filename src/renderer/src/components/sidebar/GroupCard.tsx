@@ -288,7 +288,6 @@ const GroupMemberRow = React.memo(function GroupMemberRow({
   member,
   repo
 }: GroupMemberRowProps): React.JSX.Element {
-  const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
   const openModal = useAppStore((s) => s.openModal)
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
 
@@ -314,17 +313,6 @@ const GroupMemberRow = React.memo(function GroupMemberRow({
 
   const repoName = repo?.displayName ?? member.repoId
 
-  const handleRowClick = useCallback(
-    (e: React.MouseEvent) => {
-      // Why: stop the click from bubbling to the GroupCard root, which would
-      // re-activate the first member (likely a different worktree). The user
-      // clicked THIS row — honor that intent.
-      e.stopPropagation()
-      setActiveWorktree(member.id)
-    },
-    [member.id, setActiveWorktree]
-  )
-
   const handleEditPr = useCallback(() => {
     openModal('edit-meta', {
       worktreeId: member.id,
@@ -340,33 +328,27 @@ const GroupMemberRow = React.memo(function GroupMemberRow({
     void updateWorktreeMeta(member.id, { linkedPR: null })
   }, [member.id, updateWorktreeMeta])
 
-  // PrSection requires an onClick. We don't want to navigate away on PR-text
-  // clicks (the row already activates the member); swallow and let the row
-  // click take precedence by bubbling up to handleRowClick.
+  // PrSection requires an onClick. Member rows are not independently
+  // interactive — clicks bubble to the GroupCard root which treats them
+  // as a group activation, so this is intentionally empty.
   const noopPrSectionClick = useCallback((_e: React.MouseEvent) => {
-    // intentionally empty: clicking the PR row should activate the member,
-    // which happens via bubbling to the row's onClick.
+    // intentionally empty: see comment above.
   }, [])
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={handleRowClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          handleRowClick(e as unknown as React.MouseEvent)
-        }
-      }}
-      className="flex flex-col gap-0.5 rounded -mx-1 px-1 py-0.5 cursor-pointer outline-none transition-colors hover:bg-sidebar-accent/40 focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex flex-col gap-0.5 -mx-1 px-1 py-0.5"
       data-testid="group-member-row"
       data-member-id={member.id}
     >
-      {/* Header line: repo name + change count + CI icon + run indicator */}
+      {/* Header line: repo name + [branch] + change count + CI icon + run indicator */}
       <div className="flex items-center justify-between min-w-0 gap-2">
-        <span className="text-[12px] leading-tight text-muted-foreground truncate min-w-0 flex-1">
+        {/* Why: repo name and bracketed branch share the left flex slot so
+            they truncate as one unit when space runs short, preserving the
+            right-side change-count / CI / run indicators. */}
+        <span className="text-[12px] leading-tight truncate min-w-0 flex-1 text-foreground">
           {repoName}
+          {branch && <span className="text-foreground/80"> [{branch}]</span>}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
           {changedFileCount > 0 && (
