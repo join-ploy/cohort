@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { WorkspaceGroup } from '../shared/types'
 import {
   buildGroupTemplateContext,
+  findGroupById,
   findGroupForWorktree,
   resolveGroupRepoNames,
   resolveTerminalCwd
@@ -62,6 +63,22 @@ describe('findGroupForWorktree', () => {
 
   it('returns undefined when there are no groups', () => {
     expect(findGroupForWorktree('any-id', [])).toBeUndefined()
+  })
+})
+
+describe('findGroupById', () => {
+  it('finds the group whose id matches', () => {
+    const a = makeGroup({ id: 'group:aaa' })
+    const b = makeGroup({ id: 'group:bbb' })
+    expect(findGroupById('group:bbb', [a, b])).toBe(b)
+  })
+
+  it('returns undefined when no group has that id', () => {
+    expect(findGroupById('group:missing', [makeGroup({ id: 'group:aaa' })])).toBeUndefined()
+  })
+
+  it('returns undefined when the group list is empty', () => {
+    expect(findGroupById('group:anything', [])).toBeUndefined()
   })
 })
 

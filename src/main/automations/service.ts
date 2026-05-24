@@ -227,6 +227,12 @@ export class AutomationService {
 
     this.waitForSetupRunner = new WaitForSetupRunner({
       getSetupScript: this.getSetupScript,
+      // Why (grouped-workspaces): hand the runner a fresh snapshot per tick so
+      // it can fan out a `group:<uuid>` worktreeRef into the group's member
+      // worktreeIds. Without this, a group-id ref hit the registry empty-handed
+      // and the runner silently resolved as success without ever waiting for
+      // member setup scripts.
+      getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
       now: () => Date.now()
     })
 

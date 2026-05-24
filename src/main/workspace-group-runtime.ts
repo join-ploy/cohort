@@ -32,6 +32,18 @@ export function findGroupForWorktree(
 }
 
 /**
+ * Find a group by its `group:<uuid>` id. Returns undefined when nothing
+ * matches — callers decide whether to fail-fast or silently fall through.
+ * Linear scan: same N + frequency reasoning as findGroupForWorktree.
+ */
+export function findGroupById(
+  groupId: string,
+  groups: readonly WorkspaceGroup[]
+): WorkspaceGroup | undefined {
+  return groups.find((g) => g.id === groupId)
+}
+
+/**
  * Templating-shape view of a workspace group, suitable to dump into a chain
  * run's context as `group.*`. Lets steps reference
  *
