@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { ipcMain, shell } from 'electron'
 import { readdir, readFile, writeFile, stat, lstat, open } from 'fs/promises'
 import { extname, join } from 'path'

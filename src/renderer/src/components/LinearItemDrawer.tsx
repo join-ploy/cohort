@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the Linear drawer co-locates read-only preview, edit controls, and comment input so the full issue surface stays in one file. */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRight, ExternalLink, LoaderCircle, Send, X } from 'lucide-react'
 import { toast } from 'sonner'

@@ -4,7 +4,7 @@ import type { GlobalSettings } from '../../../shared/types'
 
 export const BUILTIN_TERMINAL_THEME_NAMES = getThemeNames()
 
-export const DEFAULT_TERMINAL_THEME_DARK = 'Ghostty Default Style Dark'
+export const DEFAULT_TERMINAL_THEME_DARK = 'Melty'
 export const DEFAULT_TERMINAL_THEME_LIGHT = 'Builtin Tango Light'
 export const DEFAULT_TERMINAL_DIVIDER_DARK = '#3f3f46'
 export const DEFAULT_TERMINAL_DIVIDER_LIGHT = '#d4d4d8'

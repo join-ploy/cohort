@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: cookie import is a single pipeline (detect → decrypt → stage → swap)
-   that must stay together so the encryption, schema, and staging steps remain in sync. */
 import { app, type BrowserWindow, dialog, session } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { createDecipheriv, pbkdf2Sync } from 'node:crypto'

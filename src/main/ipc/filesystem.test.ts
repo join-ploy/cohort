@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: filesystem authorization and git/file IPC invariants are exercised end-to-end here, so the scenarios stay together to keep the security boundary readable. */
 import path from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

@@ -30,6 +30,10 @@ export type AutoTriggerCardProps = {
   /** Closure bound to this trigger's source by the parent so ConditionRow can
    *  fetch option lists without knowing about source ids. */
   loadOptions: LoadOptionsFn
+  /** Forwarded to each rule row so the per-rule project select can hint that
+   *  it's optional when the chain itself supplies project context (group
+   *  target). */
+  chainProvidesProject?: boolean
 }
 
 // Why: per-source human label + icon. Long form (vs. TriggerPill's chip) since
@@ -143,7 +147,16 @@ export function updateCondition(
 }
 
 export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element {
-  const { trigger, onChange, onRemove, automationId, projects, fieldCatalog, loadOptions } = props
+  const {
+    trigger,
+    onChange,
+    onRemove,
+    automationId,
+    projects,
+    fieldCatalog,
+    loadOptions,
+    chainProvidesProject = false
+  } = props
 
   const onToggle = (): void => {
     onChange(toggleEnabled(trigger))
@@ -233,6 +246,7 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
                 projects={projects}
                 fieldCatalog={fieldCatalog}
                 loadOptions={loadOptions}
+                chainProvidesProject={chainProvidesProject}
                 onProjectChange={(projectId) =>
                   onChange(updateRule(trigger, rule.id, { projectId }))
                 }

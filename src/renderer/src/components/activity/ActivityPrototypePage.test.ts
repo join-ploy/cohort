@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Activity feed builders share realistic fixture
-coverage in one file so status grouping stays tied to the event/thread adapter. */
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_STATUS_STALE_AFTER_MS,

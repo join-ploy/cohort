@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: lifecycle + paneRef branch coverage lives
-   here as one suite so test helpers and fixtures (baseStep, baseState) stay
-   single-source. Splitting would force fixture duplication. */
 import { describe, it, expect, vi } from 'vitest'
 import type { Step, StepRunState } from '../../../shared/automations-types'
 import { RunPromptRunner } from './run-prompt-runner'
@@ -414,5 +411,135 @@ describe('RunPromptRunner', () => {
     }
     await runner.tick(ctx)
     expect(sendPromptToPane).toHaveBeenCalledWith({ paneKey: 'tab-9:1', prompt: 'Hello' })
+  })
+
+  // ─── group: branch (grouped-workspaces L3) ───────────────────────────────
+
+  it('opens the pane at the group parentPath when worktreeRef resolves to a group:<id>', async () => {
+    const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-grp:pane-1' })
+    const getGroupSummary = vi.fn().mockReturnValue({
+      parentPath: '/orca/workspaces/feat-x',
+      firstMemberWorktreeId: 'repo-a::/orca/workspaces/feat-x/repo-a',
+      connectionId: null
+    })
+    const getWorktreeSummary = vi.fn() // must NOT be called for group: ids
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      getAgentStatus: vi.fn().mockReturnValue(undefined),
+      getGroupSummary,
+      getWorktreeSummary,
+      now: () => 0
+    })
+    // Why: simulate the output shape CreateWorkspaceGroupRunner stamps into
+    // context.steps — `groupId` is a `group:<uuid>` string.
+    const step: Step = {
+      ...baseStep,
+      config: { ...baseStep.config, worktreeRef: '{{steps.cwg1.groupId}}' }
+    }
+    const ctx: StepRunnerCtx = {
+      runId: 'r-group',
+      step,
+      state: baseState,
+      context: { steps: { cwg1: { groupId: 'group:abc-123' } } }
+    }
+    const result = await runner.tick(ctx)
+    expect(getGroupSummary).toHaveBeenCalledWith('group:abc-123')
+    expect(getWorktreeSummary).not.toHaveBeenCalled()
+    // The agent is bound to the first member's worktreeId (UI binding) and
+    // its CWD points at the group's parentPath (where `pwd` lands).
+    expect(openPromptPane).toHaveBeenCalledWith({
+      worktreeId: 'repo-a::/orca/workspaces/feat-x/repo-a',
+      agentId: 'claude',
+      prompt: 'Hello',
+      worktreePath: '/orca/workspaces/feat-x',
+      connectionId: null
+    })
+    expect(result.outcome).toBe('needs-more-time')
+  })
+
+  it('fails fast when worktreeRef resolves to a group:<id> the store cannot find', async () => {
+    const openPromptPane = vi.fn()
+    const getGroupSummary = vi.fn().mockReturnValue(null)
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      getAgentStatus: vi.fn().mockReturnValue(undefined),
+      getGroupSummary,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: { ...baseStep.config, worktreeRef: 'group:missing' }
+    }
+    const ctx: StepRunnerCtx = { runId: 'r', step, state: baseState, context: {} }
+    const result = await runner.tick(ctx)
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toMatch(/Group not found.*group:missing/)
+    expect(openPromptPane).not.toHaveBeenCalled()
+  })
+
+  // ─── member-scoped branch (Ask C) ─────────────────────────────────────
+
+  it('routes a member-scoped ref to the member worktreeId + flags memberScoped', async () => {
+    const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-ms:pane-1' })
+    const getWorktreeSummary = vi.fn().mockReturnValue({
+      path: '/orca/workspaces/feat-x/repo-a',
+      connectionId: null
+    })
+    const getGroupSummary = vi.fn() // must NOT be called for member-scoped refs
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      getAgentStatus: vi.fn().mockReturnValue(undefined),
+      getWorktreeSummary,
+      getGroupSummary,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      // Why: simulate `{{group.members.repo-a.scoped}}` resolving to the
+      // wire-format sentinel produced by buildGroupTemplateContext.
+      config: {
+        ...baseStep.config,
+        worktreeRef: 'member:group:abc:repo-a::/orca/workspaces/feat-x/repo-a'
+      }
+    }
+    const ctx: StepRunnerCtx = { runId: 'r-ms', step, state: baseState, context: {} }
+    const result = await runner.tick(ctx)
+    // Agent CWD goes to the member path (NOT the group's parentPath), and
+    // the tab is bound to the member worktreeId so the group still owns it.
+    expect(getWorktreeSummary).toHaveBeenCalledWith('repo-a::/orca/workspaces/feat-x/repo-a')
+    expect(getGroupSummary).not.toHaveBeenCalled()
+    expect(openPromptPane).toHaveBeenCalledWith({
+      worktreeId: 'repo-a::/orca/workspaces/feat-x/repo-a',
+      agentId: 'claude',
+      prompt: 'Hello',
+      worktreePath: '/orca/workspaces/feat-x/repo-a',
+      connectionId: null,
+      // Why: tells the renderer to thread `keepCwd: true` into pty.spawn so
+      // Phase J1's grouped cwd override doesn't bounce CWD up to parentPath.
+      memberScoped: true
+    })
+    expect(result.outcome).toBe('needs-more-time')
+  })
+
+  it('fails fast when a member-scoped ref points at a missing member worktree', async () => {
+    const openPromptPane = vi.fn()
+    const getWorktreeSummary = vi.fn().mockReturnValue(null)
+    const runner = new RunPromptRunner({
+      openPromptPane,
+      getAgentStatus: vi.fn().mockReturnValue(undefined),
+      getWorktreeSummary,
+      now: () => 0
+    })
+    const step: Step = {
+      ...baseStep,
+      config: { ...baseStep.config, worktreeRef: 'member:group:abc:repo-z::/gone' }
+    }
+    const ctx: StepRunnerCtx = { runId: 'r-ms-miss', step, state: baseState, context: {} }
+    const result = await runner.tick(ctx)
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toMatch(/Member worktree not found.*member:group:abc:repo-z/)
+    expect(openPromptPane).not.toHaveBeenCalled()
   })
 })

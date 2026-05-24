@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: desktop provider contract coverage shares one mocked bridge harness. */
 import { execFile } from 'child_process'
 import { readFileSync } from 'fs'
 import { describe, expect, it, vi } from 'vitest'

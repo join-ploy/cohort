@@ -1,5 +1,6 @@
 import type {
   Automation,
+  CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   RunCommandConfig,
   RunPromptConfig,
@@ -7,8 +8,10 @@ import type {
   StepConfig,
   StepKind,
   TriggerConfig,
+  UpdateLinearIssueConfig,
   WaitForSetupConfig
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
 import {
   type ChainDraft,
   detectFutureReferences,
@@ -33,16 +36,25 @@ export type ChainEditorError = TemplateError & {
 
 export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'create-worktree': 'Create worktree',
+  'create-workspace-group': 'Create workspace group',
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
-  'run-command': 'Run command'
+  'run-command': 'Run command',
+  'update-linear-issue': 'Update Linear issue'
 }
 
+// Why: `create-workspace-group` slots in next to `create-worktree` so the picker
+// groups "creation" kinds together visually. `update-linear-issue` slots next
+// to `run-prompt` / `run-command` — it's an effect step, not a creation step.
+// ChainEditorModal filters this list down by removing `create-workspace-group`
+// when settings.experimentalGroupedWorkspaces is false.
 export const STEP_KIND_ORDER: StepKind[] = [
   'create-worktree',
+  'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
-  'run-command'
+  'run-command',
+  'update-linear-issue'
 ]
 
 // Why: legacy schedule/dispatch fields are dormant in v2 (manual trigger only)
@@ -85,28 +97,101 @@ export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
  * Builds the AvailableVariables snapshot for the step at `stepIndex`. Only
  * steps strictly before `stepIndex` are visible — a step cannot reference
  * itself or any later step.
+ *
+ * Why `repos`: a `create-workspace-group` step in scope publishes the
+ * `group.members.<repoFolderName>.*` namespace at runtime, keyed by the
+ * basename of each member repo's path. We thread the store's repos through
+ * so the discoverable schema lists real folder names (not just placeholders).
+ * Defaulted to `[]` so call sites that don't yet plumb repos still typecheck
+ * and fall back to a member-less namespace.
  */
 export function getAvailableVariablesAtStep(
   draft: ChainDraft,
-  stepIndex: number
+  stepIndex: number,
+  repos: Repo[] = []
 ): AvailableVariables {
   const steps: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  let groupSchema: NestedSchema | undefined = undefined
   for (let i = 0; i < stepIndex && i < draft.steps.length; i++) {
     const s = draft.steps[i]
     steps[s.id] = getOutputSchemaForKind(s.kind)
+    // Why: any earlier create-workspace-group step injects the top-level
+    // `group.*` namespace. If multiple exist (rare), the latest wins —
+    // mirrors runtime, where each step's contextPatch overwrites `group`.
+    if (s.kind === 'create-workspace-group') {
+      groupSchema = buildGroupSchema(s.config as CreateWorkspaceGroupConfig, repos)
+    }
   }
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
     trigger: buildTriggerSchema(draft.trigger),
-    steps
+    steps,
+    group: groupSchema
   }
 }
 
-export function computeAllErrors(draft: ChainDraft): ChainEditorError[] {
+// Per-member leaf shape, mirroring buildGroupTemplateContext in
+// src/main/workspace-group-runtime.ts. The runner emits strings for all keys
+// — `description` is always present (empty string when the repo has no
+// user-authored description) so a template referencing it never resolves
+// against `undefined`.
+const GROUP_MEMBER_SHAPE: NestedSchema = {
+  worktreeId: 'string',
+  path: 'string',
+  repoId: 'string',
+  scoped: 'string',
+  description: 'string'
+}
+
+/**
+ * Build the discoverable schema for `group.*` from a draft
+ * `create-workspace-group` step. Members are keyed by `<repoFolderName>` —
+ * derived from each repo's on-disk basename (stripping the `.git` suffix bare
+ * repos carry) so the editor's schema matches the runtime keying in
+ * `buildGroupTemplateContext`.
+ *
+ * Members whose repoId doesn't resolve in the supplied repos list are skipped
+ * — better to under-list than to mislead with a stale name. When the step
+ * has no resolvable members yet (empty config OR repos haven't loaded), the
+ * namespace still exists with the top-level keys plus an empty `members`
+ * record so authors at least see that `group.id` / `group.parentPath` are
+ * available.
+ */
+function buildGroupSchema(config: CreateWorkspaceGroupConfig, repos: Repo[]): NestedSchema {
+  const members: NestedSchema = {}
+  const reposById = new Map(repos.map((r) => [r.id, r]))
+  for (const member of config.members) {
+    const repo = reposById.get(member.repoId)
+    if (!repo) {
+      continue
+    }
+    const folder = repoFolderName(repo.path)
+    if (!folder) {
+      continue
+    }
+    members[folder] = GROUP_MEMBER_SHAPE
+  }
+  return {
+    id: 'string',
+    parentPath: 'string',
+    members
+  }
+}
+
+// Why: matches `repoFolderName` in src/main/ipc/workspace-groups.ts — the
+// dispatcher's runtime keying derives from the same basename-minus-`.git`
+// rule, so the editor's schema must too.
+function repoFolderName(repoPath: string): string {
+  const slashIdx = Math.max(repoPath.lastIndexOf('/'), repoPath.lastIndexOf('\\'))
+  const base = slashIdx >= 0 ? repoPath.slice(slashIdx + 1) : repoPath
+  return base.replace(/\.git$/, '')
+}
+
+export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEditorError[] {
   const all: ChainEditorError[] = []
   for (let i = 0; i < draft.steps.length; i++) {
     const step = draft.steps[i]
-    const available = getAvailableVariablesAtStep(draft, i)
+    const available = getAvailableVariablesAtStep(draft, i, repos)
     walkStepConfigStrings(step.config, step.kind, (field, value) => {
       const errs = dryRunTemplate(value, available)
       for (const err of errs) {
@@ -125,7 +210,79 @@ export function computeAllErrors(draft: ChainDraft): ChainEditorError[] {
       field: v.atField
     })
   }
+  // Why: a chain needs an upfront `automation.projectId` only when something
+  // downstream actually consumes it — a create-worktree step, or any template
+  // that references `{{automation.projectId}}`. Chains built around a
+  // create-workspace-group step supply their repo context via the group's
+  // `members[*].repoId` instead, so the upfront project is genuinely moot.
+  if (!draft.projectId && isProjectRequired(draft)) {
+    all.push({
+      path: 'projectId',
+      code: 'unknown-path',
+      message: projectRequirementReason(draft),
+      stepId: '',
+      field: 'projectId'
+    })
+  }
   return all
+}
+
+/**
+ * True when the chain has at least one step of the given kind. Pure helper
+ * so the project-requirement rule can be unit-tested without ChainEditorModal.
+ */
+export function chainHasStep(draft: ChainDraft, kind: StepKind): boolean {
+  return draft.steps.some((s) => s.kind === kind)
+}
+
+/**
+ * True when any step config template references `{{automation.projectId}}`.
+ * Cheap string-scan over the template-string fields surfaced by
+ * walkStepConfigStrings — exact enough for the editor's gate.
+ */
+export function chainReferencesAutomationProjectId(draft: ChainDraft): boolean {
+  const pattern = /\{\{\s*automation\.projectId\s*\}\}/
+  let found = false
+  for (const step of draft.steps) {
+    walkStepConfigStrings(step.config, step.kind, (_field, value) => {
+      if (pattern.test(value)) {
+        found = true
+      }
+    })
+    if (found) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Project is required iff downstream code consumes it: a create-worktree step
+ * (which reads `context.automation.projectId` to pick the repo) OR any
+ * template that explicitly references `{{automation.projectId}}`. When the
+ * trigger picks a project at Run Now time we already skip the check upstream.
+ */
+export function isProjectRequired(draft: ChainDraft): boolean {
+  if (draft.trigger?.acceptsProjectSelection) {
+    return false
+  }
+  return chainHasStep(draft, 'create-worktree') || chainReferencesAutomationProjectId(draft)
+}
+
+/**
+ * Human-readable reason the project is required, so the modal can surface a
+ * specific message rather than a generic "Project is required". Lets the
+ * editor explain *why* the field gates Save in the group-chain case where a
+ * template was responsible.
+ */
+function projectRequirementReason(draft: ChainDraft): string {
+  if (chainReferencesAutomationProjectId(draft)) {
+    return 'Project is required: a step references {{automation.projectId}}.'
+  }
+  if (chainHasStep(draft, 'create-worktree')) {
+    return 'Project is required: the create-worktree step picks the repo from it.'
+  }
+  return 'Project is required'
 }
 
 export function seedDraft(automation: Automation | null): ChainDraft {
@@ -151,11 +308,51 @@ export function seedDraft(automation: Automation | null): ChainDraft {
   }
 }
 
+/**
+ * When the user adds a new step that has a `worktreeRef` slot, pick a sensible
+ * default by walking the chain in reverse and referencing the most recent
+ * step whose output exposes a worktree-equivalent value:
+ *
+ * - `create-worktree` exports `worktreeId`
+ * - `create-workspace-group` exports `groupId` (the runner accepts either)
+ *
+ * Returns null when no such prior step exists — the consumer leaves the field
+ * blank in that case so the user knows to fill it in (referencing an existing
+ * workspace, a member-scoped group child, etc.).
+ *
+ * Why: the most common chain shape is "create something → run prompt against
+ * it"; making the user retype the same `{{steps.<id>.<output>}}` template on
+ * every new run-prompt is friction with zero upside.
+ */
+export function pickDefaultWorktreeRef(steps: Step[]): string | null {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i]
+    if (s.kind === 'create-worktree') {
+      return `{{steps.${s.id}.worktreeId}}`
+    }
+    if (s.kind === 'create-workspace-group') {
+      return `{{steps.${s.id}.groupId}}`
+    }
+  }
+  return null
+}
+
 export function defaultConfigForKind(kind: StepKind): StepConfig {
   switch (kind) {
     case 'create-worktree': {
       const cfg: CreateWorktreeConfig = {
         baseBranch: 'main',
+        branchName: '',
+        displayName: '',
+        linkLinearIssue: false
+      }
+      return cfg
+    }
+    case 'create-workspace-group': {
+      // Why: members start empty — the editor surfaces the multi-select so the
+      // user picks ≥2 repos; the IPC handler validates that minimum at run time.
+      const cfg: CreateWorkspaceGroupConfig = {
+        members: [],
         branchName: '',
         displayName: '',
         linkLinearIssue: false
@@ -183,6 +380,14 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         worktreeRef: '',
         source: 'review',
         captureStdout: false
+      }
+      return cfg
+    }
+    case 'update-linear-issue': {
+      const cfg: UpdateLinearIssueConfig = {
+        issueRef: '',
+        assigneeRef: '',
+        stateRef: ''
       }
       return cfg
     }

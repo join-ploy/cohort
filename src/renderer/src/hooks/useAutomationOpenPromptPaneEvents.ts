@@ -15,7 +15,15 @@ import type { TuiAgent } from '../../../shared/types'
 export function useAutomationOpenPromptPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onOpenPromptPane(
-      async ({ requestId, worktreeId, agentId, prompt, worktreePath, connectionId }) => {
+      async ({
+        requestId,
+        worktreeId,
+        agentId,
+        prompt,
+        worktreePath,
+        connectionId,
+        memberScoped
+      }) => {
         try {
           const result = await launchAgentBackgroundSession({
             agent: agentId as TuiAgent,
@@ -24,7 +32,11 @@ export function useAutomationOpenPromptPaneEvents(): void {
             launchSource: 'unknown',
             ...(typeof worktreePath === 'string'
               ? { worktreeOverride: { path: worktreePath, connectionId: connectionId ?? null } }
-              : {})
+              : {}),
+            // Why (Ask C): when the main-side runner flags this as a member-
+            // scoped run, suppress Phase J1's CWD override so the agent stays
+            // rooted at the member worktree (not the group's parentPath).
+            ...(memberScoped ? { keepCwd: true } : {})
           })
           if (!result) {
             // Why: launchAgentBackgroundSession returns null when no startup

@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, Copy, File } from 'lucide-react'
 import { useAppStore } from '@/store'

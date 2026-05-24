@@ -1,5 +1,5 @@
 import React from 'react'
-import { Bell, CalendarClock, Github, List, Search } from 'lucide-react'
+import { CalendarClock, Github, List, Search } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
@@ -12,7 +12,6 @@ const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('
 const SidebarNav = React.memo(function SidebarNav() {
   const openTaskPage = useAppStore((s) => s.openTaskPage)
   const openAutomationsPage = useAppStore((s) => s.openAutomationsPage)
-  const openActivityPage = useAppStore((s) => s.openActivityPage)
   const openModal = useAppStore((s) => s.openModal)
   const activeView = useAppStore((s) => s.activeView)
   const repos = useAppStore((s) => s.repos)
@@ -51,39 +50,6 @@ const SidebarNav = React.memo(function SidebarNav() {
 
   const tasksActive = activeView === 'tasks'
   const automationsActive = activeView === 'automations'
-  const activityActive = activeView === 'activity'
-  const activityUnreadCount = useAppStore((s) => {
-    let count = 0
-    // Why: archived worktrees are hidden from every selectable surface, so
-    // their unread state must not contribute to the Activity badge.
-    for (const worktrees of Object.values(s.worktreesByRepo)) {
-      for (const worktree of worktrees) {
-        if (worktree.isArchived) {
-          continue
-        }
-        if (worktree.createdAt && worktree.isUnread) {
-          count += 1
-        }
-      }
-    }
-    for (const [paneKey, entry] of Object.entries(s.agentStatusByPaneKey)) {
-      if (entry.state !== 'done' && entry.state !== 'blocked' && entry.state !== 'waiting') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    for (const [paneKey, retained] of Object.entries(s.retainedAgentsByPaneKey)) {
-      if (retained.entry.state !== 'done') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < retained.entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    return count
-  })
 
   return (
     <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
@@ -161,28 +127,6 @@ const SidebarNav = React.memo(function SidebarNav() {
           strokeWidth={automationsActive ? 2.25 : 1.75}
         />
         <span className="flex-1">Automations</span>
-      </button>
-      <button
-        type="button"
-        onClick={openActivityPage}
-        aria-current={activityActive ? 'page' : undefined}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
-          activityActive
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground/60 hover:bg-sidebar-foreground/8'
-        )}
-      >
-        <Bell
-          className={cn('size-4 shrink-0', !activityActive && 'text-sidebar-foreground/30')}
-          strokeWidth={activityActive ? 2.25 : 1.75}
-        />
-        <span className="flex-1">Agents</span>
-        {activityUnreadCount > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold text-primary-foreground">
-            {activityUnreadCount}
-          </span>
-        ) : null}
       </button>
       <button
         type="button"

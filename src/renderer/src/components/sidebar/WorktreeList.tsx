@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import React, { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown, CircleX, Plus } from 'lucide-react'
@@ -108,6 +107,23 @@ type VirtualizedWorktreeViewportProps = {
   // a worktree is deleted. The parent persists the last observed scrollTop
   // in a ref and seeds the new virtualizer via initialOffset.
   scrollOffsetRef: React.MutableRefObject<number>
+  // Why: shared scroll container that wraps GroupsSection + WorktreeList +
+  // ArchivedSection. The virtualizer measures and scrolls this element
+  // instead of its own internal container so all three sections scroll
+  // together as one continuous list.
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>
+  // Why: pixel offset of the virtualized region inside scrollContainerRef.
+  // The virtualizer needs this so it positions translated rows correctly
+  // when non-virtualized content (e.g. GroupsSection) is rendered above it.
+  scrollMargin: number
+  // Why: the keyboard navigation handler used to live on the WorktreeList
+  // scroll container. With the scroll container hoisted, the handler ships
+  // to the shared parent which exposes it through this prop.
+  registerNavigateWorktree: (handler: (direction: 'up' | 'down') => void) => void
+  // Why: aria-activedescendant lives on the shared scroll container now,
+  // since that's the element that owns the listbox role. Surface the active
+  // option id through a callback so the parent can apply it.
+  setActiveDescendantId: (id: string | undefined) => void
 }
 
 const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
@@ -130,17 +146,19 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   allRepoIds,
   reorderRepos,
   prCache,
-  scrollOffsetRef
+  scrollOffsetRef,
+  scrollContainerRef,
+  scrollMargin,
+  registerNavigateWorktree,
+  setActiveDescendantId
 }: VirtualizedWorktreeViewportProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-
   // Drag is only meaningful when the user is grouping by repo. When inert
   // (groupBy !== 'repo'), the controller is still constructed for hook order
   // stability but the handle is never rendered.
   const repoDrag = useRepoHeaderDrag({
     orderedRepoIds: allRepoIds,
     onCommit: reorderRepos,
-    getScrollContainer: () => scrollRef.current
+    getScrollContainer: () => scrollContainerRef.current
   })
   const activeWorktreeRowIndex = useMemo(
     () => rows.findIndex((row) => row.type === 'item' && row.worktree.id === activeWorktreeId),
@@ -149,7 +167,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
 
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => 120,
     overscan: 10,
     // Why: widened the inter-row gap (was 6) so cards feel breathable without
@@ -161,6 +179,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     // mirrors this onto the actual scrollElement.scrollTop so the DOM and
     // virtualizer stay aligned across remounts.
     initialOffset: () => scrollOffsetRef.current,
+    // Why: GroupsSection (and anything else non-virtualized above the
+    // virtualized region) lives inside the same scroll container. scrollMargin
+    // tells the virtualizer to offset its translated rows by that height so
+    // the first row lands directly below the static content.
+    scrollMargin,
     getItemKey: (index) => {
       const row = rows[index]
       if (!row) {
@@ -182,7 +205,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   // the virtualizer has not yet measured every row) doesn't overwrite the
   // user's intended offset with a clamped value.
   useLayoutEffect(() => {
-    const el = scrollRef.current
+    const el = scrollContainerRef.current
     if (!el) {
       return
     }
@@ -213,7 +236,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [scrollOffsetRef])
+  }, [scrollOffsetRef, scrollContainerRef])
 
   React.useEffect(() => {
     if (!pendingRevealWorktreeId) {
@@ -346,7 +369,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         ? e.metaKey && !e.ctrlKey
         : e.ctrlKey && !e.metaKey
       if (mod && !e.shiftKey && e.key === '0') {
-        scrollRef.current?.focus()
+        scrollContainerRef.current?.focus()
         e.preventDefault()
         return
       }
@@ -359,28 +382,15 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
 
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [activeModal, navigateWorktree])
+  }, [activeModal, navigateWorktree, scrollContainerRef])
 
-  const handleContainerKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (e.target !== e.currentTarget) {
-          return
-        }
-        navigateWorktree(e.key === 'ArrowUp' ? 'up' : 'down')
-        e.preventDefault()
-      } else if (e.key === 'Enter') {
-        const helper = document.querySelector(
-          '.xterm-helper-textarea'
-        ) as HTMLTextAreaElement | null
-        if (helper) {
-          helper.focus()
-        }
-        e.preventDefault()
-      }
-    },
-    [navigateWorktree]
-  )
+  // Why: the shared scroll container (in components/sidebar/index.tsx) hosts
+  // the listbox role and its own ArrowUp/Down handler. Hand it our navigator
+  // so keyboard cycling stays wired up after the scroll container moved out
+  // of this component.
+  useEffect(() => {
+    registerNavigateWorktree(navigateWorktree)
+  }, [navigateWorktree, registerNavigateWorktree])
 
   const firstHeaderIndex = useMemo(() => rows.findIndex((r) => r.type === 'header'), [rows])
 
@@ -392,171 +402,197 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       ? getWorktreeOptionId(activeWorktreeId)
       : undefined
 
+  // Why: aria-activedescendant lives on the shared scroll container (which
+  // owns the listbox role). Mirror our computed id up through the callback
+  // and reset on unmount so the parent doesn't keep pointing at a stale row.
+  useEffect(() => {
+    setActiveDescendantId(activeDescendantId)
+    return () => setActiveDescendantId(undefined)
+  }, [activeDescendantId, setActiveDescendantId])
+
   return (
     <div
-      ref={scrollRef}
-      data-worktree-sidebar
-      tabIndex={0}
-      role="listbox"
-      aria-label="Worktrees"
-      aria-orientation="vertical"
-      aria-multiselectable="true"
-      aria-activedescendant={activeDescendantId}
-      onKeyDown={handleContainerKeyDown}
-      className="worktree-sidebar-scrollbar flex-1 overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset pt-px"
+      role="presentation"
+      className="relative w-full"
+      // Why: virtualizer.getTotalSize() is the height of the virtualized
+      // region only. Translated rows use coordinates relative to the start
+      // of this wrapper, so it must stay sized to exactly the rows' total —
+      // scrollMargin handles the offset within the shared scroll container.
+      style={{ height: `${virtualizer.getTotalSize()}px` }}
     >
-      <div
-        role="presentation"
-        className="relative w-full"
-        style={{ height: `${virtualizer.getTotalSize()}px` }}
-      >
-        {repoDrag.state.draggingRepoId !== null && repoDrag.state.dropIndicatorY !== null ? (
-          <div
-            role="presentation"
-            className="pointer-events-none absolute left-2 right-2 z-10 border-t border-dashed border-muted-foreground/70"
-            style={{ top: `${repoDrag.state.dropIndicatorY}px` }}
-          />
-        ) : null}
-        {virtualItems.map((vItem) => {
-          const row = rows[vItem.index]
+      {repoDrag.state.draggingRepoId !== null && repoDrag.state.dropIndicatorY !== null ? (
+        <div
+          role="presentation"
+          className="pointer-events-none absolute left-2 right-2 z-10 border-t border-dashed border-muted-foreground/70"
+          // Why: drop indicator coordinates come from getScrollContainer().scrollTop,
+          // which is now the shared container. Subtract scrollMargin so the
+          // indicator lines up with the virtualized region's local origin.
+          style={{ top: `${repoDrag.state.dropIndicatorY - scrollMargin}px` }}
+        />
+      ) : null}
+      {virtualItems.map((vItem) => {
+        const row = rows[vItem.index]
 
-          if (row.type === 'header') {
-            const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
-            const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
-            const isDraggingThis =
-              repoDrag.state.draggingRepoId !== null &&
-              repoDrag.state.draggingRepoId === repoIdForHeader
-            return (
-              <div
-                key={vItem.key}
-                role="presentation"
-                data-index={vItem.index}
-                ref={virtualizer.measureElement}
-                className="absolute left-0 right-0"
-                style={{ transform: `translateY(${vItem.start}px)` }}
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  data-repo-header-id={repoIdForHeader}
-                  className={cn(
-                    'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all',
-                    'cursor-pointer',
-                    isDraggingThis &&
-                      'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
-                    // First header sits directly under SidebarHeader, which already
-                    // supplies its own spacing — only offset secondary group headers.
-                    vItem.index !== firstHeaderIndex && 'mt-2',
-                    row.repo ? 'overflow-hidden' : row.tone
-                  )}
-                  onClick={() => toggleGroup(row.key)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      toggleGroup(row.key)
-                    }
-                  }}
-                >
-                  {row.icon ? (
-                    <div
-                      onPointerDown={
-                        isRepoHeader && repoIdForHeader
-                          ? (e) => repoDrag.onHandlePointerDown(e, repoIdForHeader)
-                          : undefined
-                      }
-                      className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
-                        row.repo && 'text-muted-foreground'
-                      )}
-                    >
-                      <row.icon className="size-3.5" />
-                    </div>
-                  ) : null}
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <div className="truncate text-[13px] font-semibold leading-none">
-                        {row.label}
-                      </div>
-                      <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
-                        {row.count}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <ChevronDown
-                      className={cn(
-                        'size-3.5 transition-transform',
-                        collapsedGroups.has(row.key) && '-rotate-90'
-                      )}
-                    />
-                  </div>
-
-                  {row.repo ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="size-5 shrink-0 rounded-md text-muted-foreground hover:bg-accent/70 hover:text-foreground transition-opacity"
-                          aria-label={`Create worktree for ${row.label}`}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            if (row.repo && isGitRepoKind(row.repo)) {
-                              handleCreateForRepo(row.repo.id)
-                            }
-                          }}
-                          disabled={row.repo ? !isGitRepoKind(row.repo) : false}
-                        >
-                          <Plus className="size-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={6}>
-                        {row.repo && !isGitRepoKind(row.repo)
-                          ? `${row.label} is opened as a folder`
-                          : `Create worktree for ${row.label}`}
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                </div>
-              </div>
-            )
-          }
-
+        if (row.type === 'header') {
+          const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
+          const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
+          const isDraggingThis =
+            repoDrag.state.draggingRepoId !== null &&
+            repoDrag.state.draggingRepoId === repoIdForHeader
           return (
             <div
               key={vItem.key}
-              id={getWorktreeOptionId(row.worktree.id)}
-              role="option"
-              aria-selected={selectedWorktreeIds.has(row.worktree.id)}
-              aria-current={activeWorktreeId === row.worktree.id ? 'page' : undefined}
+              role="presentation"
               data-index={vItem.index}
               ref={virtualizer.measureElement}
               className="absolute left-0 right-0"
-              style={{ transform: `translateY(${vItem.start}px)` }}
+              style={{ transform: `translateY(${vItem.start - scrollMargin}px)` }}
             >
-              <WorktreeCard
-                worktree={row.worktree}
-                repo={row.repo}
-                isActive={activeWorktreeId === row.worktree.id}
-                isMultiSelected={selectedWorktreeIds.has(row.worktree.id)}
-                selectedWorktrees={selectedWorktrees}
-                onSelectionGesture={onSelectionGesture}
-                onContextMenuSelect={(event) => onContextMenuSelect(event, row.worktree)}
-                hideRepoBadge={groupBy === 'repo'}
-              />
+              <div
+                role="button"
+                tabIndex={0}
+                data-repo-header-id={repoIdForHeader}
+                className={cn(
+                  'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all',
+                  'cursor-pointer',
+                  isDraggingThis &&
+                    'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
+                  // First header sits directly under SidebarHeader, which already
+                  // supplies its own spacing — only offset secondary group headers.
+                  vItem.index !== firstHeaderIndex && 'mt-2',
+                  row.repo ? 'overflow-hidden' : row.tone
+                )}
+                onClick={() => toggleGroup(row.key)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    toggleGroup(row.key)
+                  }
+                }}
+              >
+                {row.icon ? (
+                  <div
+                    onPointerDown={
+                      isRepoHeader && repoIdForHeader
+                        ? (e) => repoDrag.onHandlePointerDown(e, repoIdForHeader)
+                        : undefined
+                    }
+                    className={cn(
+                      'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
+                      row.repo && 'text-muted-foreground'
+                    )}
+                  >
+                    <row.icon className="size-3.5" />
+                  </div>
+                ) : null}
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <div className="truncate text-[13px] font-semibold leading-none">
+                      {row.label}
+                    </div>
+                    <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
+                      {row.count}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ChevronDown
+                    className={cn(
+                      'size-3.5 transition-transform',
+                      collapsedGroups.has(row.key) && '-rotate-90'
+                    )}
+                  />
+                </div>
+
+                {row.repo ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="size-5 shrink-0 rounded-md text-muted-foreground hover:bg-accent/70 hover:text-foreground transition-opacity"
+                        aria-label={`Create worktree for ${row.label}`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (row.repo && isGitRepoKind(row.repo)) {
+                            handleCreateForRepo(row.repo.id)
+                          }
+                        }}
+                        disabled={row.repo ? !isGitRepoKind(row.repo) : false}
+                      >
+                        <Plus className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      {row.repo && !isGitRepoKind(row.repo)
+                        ? `${row.label} is opened as a folder`
+                        : `Create worktree for ${row.label}`}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
             </div>
           )
-        })}
-      </div>
+        }
+
+        return (
+          <div
+            key={vItem.key}
+            id={getWorktreeOptionId(row.worktree.id)}
+            role="option"
+            aria-selected={selectedWorktreeIds.has(row.worktree.id)}
+            aria-current={activeWorktreeId === row.worktree.id ? 'page' : undefined}
+            data-index={vItem.index}
+            ref={virtualizer.measureElement}
+            className="absolute left-0 right-0"
+            style={{ transform: `translateY(${vItem.start - scrollMargin}px)` }}
+          >
+            <WorktreeCard
+              worktree={row.worktree}
+              repo={row.repo}
+              isActive={activeWorktreeId === row.worktree.id}
+              isMultiSelected={selectedWorktreeIds.has(row.worktree.id)}
+              selectedWorktrees={selectedWorktrees}
+              onSelectionGesture={onSelectionGesture}
+              onContextMenuSelect={(event) => onContextMenuSelect(event, row.worktree)}
+              hideRepoBadge={groupBy === 'repo'}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 })
 
-const WorktreeList = React.memo(function WorktreeList() {
+type WorktreeListProps = {
+  // Why: the shared scroll container is owned by components/sidebar/index.tsx
+  // so GroupsSection + WorktreeList + ArchivedSection scroll together. This
+  // ref is what the virtualizer measures, scrolls, and listens to.
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>
+  // Why: pixel height of any non-virtualized content rendered above
+  // WorktreeList inside the shared container (currently GroupsSection). The
+  // virtualizer needs this so translated rows land below the static content.
+  scrollMargin: number
+  // Why: the shared scroll container owns the listbox role and its own
+  // keydown handler; this callback lets WorktreeList hand it our cycling
+  // navigator so Cmd/Ctrl+Shift+Arrow and container Arrow keys still work.
+  registerNavigateWorktree: (handler: (direction: 'up' | 'down') => void) => void
+  // Why: aria-activedescendant must live on the same element as the listbox
+  // role (the shared scroll container). This callback surfaces the active
+  // worktree option id so the parent can apply it.
+  setActiveDescendantId: (id: string | undefined) => void
+}
+
+const WorktreeList = React.memo(function WorktreeList({
+  scrollContainerRef,
+  scrollMargin,
+  registerNavigateWorktree,
+  setActiveDescendantId
+}: WorktreeListProps) {
   // Why: persists the sidebar scroll offset across the VirtualizedWorktreeViewport
   // remount that row-structure changes trigger. See viewportResetKey.
   const sidebarScrollOffsetRef = useRef(0)
@@ -952,7 +988,10 @@ const WorktreeList = React.memo(function WorktreeList() {
 
   if (worktrees.length === 0) {
     return (
-      <div className="worktree-sidebar-scrollbar flex flex-1 flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
+      // Why: the shared scroll container owns scroll/overflow. This block
+      // just stacks an empty message inside it, taking the remaining height
+      // so the toolbar below stays pinned.
+      <div className="flex flex-1 flex-col pl-1 pt-px">
         <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
           <span>No worktrees found</span>
           {hasFilters && (
@@ -994,6 +1033,10 @@ const WorktreeList = React.memo(function WorktreeList() {
       }}
       prCache={prCache}
       scrollOffsetRef={sidebarScrollOffsetRef}
+      scrollContainerRef={scrollContainerRef}
+      scrollMargin={scrollMargin}
+      registerNavigateWorktree={registerNavigateWorktree}
+      setActiveDescendantId={setActiveDescendantId}
     />
   )
 })

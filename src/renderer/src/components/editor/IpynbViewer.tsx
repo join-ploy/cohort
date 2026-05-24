@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: notebook editing, output rendering, and cell
-controls share one parsed document/update path for this first notebook editor
-slice; splitting before the model stabilizes would make save/run mutations
-harder to audit. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import DOMPurify from 'dompurify'

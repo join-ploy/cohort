@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationService aggregates multiple
-   responsibilities (scheduler, dispatchAutoRun, restartRun, engine wiring),
-   and its tests live in one file to share the `createStore` + repo-seed
-   helpers; splitting them tracks the upstream service split, not this work. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
@@ -168,6 +164,48 @@ describe('AutomationService', () => {
     expect(after?.stepStates?.[0].status).toBe('failed')
     expect(after?.stepStates?.[0].finishedAt).toBeTypeOf('number')
     expect(after?.stepStates?.[0].error).toMatch(/no runner registered/i)
+  })
+
+  it('runNow accepts an automation with empty projectId (group-target chain)', async () => {
+    // Why: chains that respond by creating a workspace group derive their
+    // repo context from the group's members, not the upfront automation
+    // projectId. The dispatcher must not refuse to run them.
+    vi.setSystemTime(new Date('2026-05-13T09:00:00'))
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'r1' }))
+    store.addRepo(makeRepo({ id: 'r2', path: '/repo2' }))
+    const automation = store.createAutomation({
+      name: 'Group chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: '',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [
+        // Use a fake-kind step so the chain dispatch path itself executes
+        // and we can assert the run was created with the correct context;
+        // the trailing failure (no runner) is incidental to what we're
+        // verifying.
+        {
+          id: 's1',
+          kind: 'definitely-not-a-real-kind' as unknown as Step['kind'],
+          config: {} as never,
+          onFailure: 'halt',
+          timeoutSeconds: null
+        }
+      ]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    expect(stored.projectId).toBe('')
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    // dispatchRun must not throw on empty projectId at the boundary.
+    const run = await service.runNow(automation.id)
+    expect(run).toBeDefined()
+    const ctx = run.context as { automation?: { projectId?: string } } | undefined
+    expect(ctx?.automation?.projectId).toBe('')
   })
 })
 

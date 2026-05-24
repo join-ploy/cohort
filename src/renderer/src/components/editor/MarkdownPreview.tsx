@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: MarkdownPreview owns rendering, link interception,
-search, and viewport state for the preview surface in one place so markdown
-behavior stays coherent across split panes and preview tabs. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'

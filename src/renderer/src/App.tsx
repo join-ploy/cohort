@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import {
   lazy,
   Suspense,
@@ -179,6 +178,7 @@ function App(): React.JSX.Element {
       toggleSidebar: s.toggleSidebar,
       fetchRepos: s.fetchRepos,
       fetchAllWorktrees: s.fetchAllWorktrees,
+      fetchWorkspaceGroups: s.fetchWorkspaceGroups,
       fetchSettings: s.fetchSettings,
       initGitHubCache: s.initGitHubCache,
       refreshAllGitHub: s.refreshAllGitHub,
@@ -351,6 +351,10 @@ function App(): React.JSX.Element {
       try {
         await actions.fetchRepos()
         await actions.fetchAllWorktrees()
+        // Why: workspace groups are persisted in main but the renderer slice
+        // initializes to []. Without this hydration, groups vanish from the
+        // sidebar on every reload (HMR or restart) until the next createGroup.
+        await actions.fetchWorkspaceGroups()
         const persistedUI = await window.api.ui.get()
         const session = await window.api.session.get()
         // Why: settings must be loaded before hydrateWorkspaceSession so that

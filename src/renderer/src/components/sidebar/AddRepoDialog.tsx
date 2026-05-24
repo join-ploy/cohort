@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the add-project dialog centralizes step routing, clone/remote/create state, and reset semantics across five steps so the modal flow stays in one place. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FolderOpen, ArrowLeft, Globe, Monitor } from 'lucide-react'

@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: the collector's platform-specific
-   enumeration paths (`ps` on Unix, `wmic` on Windows) plus the history
-   ring buffer plus the Electron bucketing live together to keep one
-   snapshot's worth of code in one place. Splitting them produces extra
-   modules whose only consumer is this file. */
 /**
  * Memory dashboard collector.
  *

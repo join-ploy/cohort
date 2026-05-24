@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { execFile, type ChildProcess } from 'child_process'
 import { existsSync, accessSync, chmodSync, readFileSync, constants } from 'fs'
 import { join } from 'path'

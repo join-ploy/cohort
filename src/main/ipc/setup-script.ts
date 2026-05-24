@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: keeps the per-worktree pty registry,
-   spawn/exit lifecycle, SSH/local provider routing, app-quit teardown, and
-   the SetupScriptRegistry write-through together in one file so the setup
-   lifecycle is reviewable as a single unit. Splitting would fragment the
-   shared `setupPtyByWorktree` map and the `setupStartLocked` flow. */
-
 // Why: per-worktree single-instance setup-script registry + IPC handlers.
 // Setup is per-worktree (not per-repo, in contrast to run) so two worktrees
 // in the same repo can each have their own live setup PTY without one killing
@@ -15,6 +9,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 
 import { createSetupRunnerScript, getEffectiveHooks } from '../hooks'
+import { findGroupForWorktree, resolveGroupRepoNames } from '../workspace-group-runtime'
 import type { IPtyProvider } from '../providers/types'
 import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { Store } from '../persistence'
@@ -209,7 +204,18 @@ async function setupStartLocked(
   // the run-script path uses for createRunRunnerScript. workspaceName becomes
   // $CONDUCTOR_WORKSPACE_NAME inside the wrapper.
   const workspaceName = deps.store.getWorktreeMeta(args.worktreeId)?.workspaceName
-  const wrapped = createSetupRunnerScript(repo, worktreePath, script, workspaceName)
+  // Why: grouped workspaces also publish their sibling repos as
+  // $CONDUCTOR_WORKSPACE_REPOS so setup scripts can prepare each sibling
+  // (e.g. create per-repo Postgres DBs in one pass).
+  const setupGroup = findGroupForWorktree(args.worktreeId, deps.store.getWorkspaceGroups())
+  const setupGroupRepos = setupGroup ? resolveGroupRepoNames(setupGroup) : undefined
+  const wrapped = createSetupRunnerScript(
+    repo,
+    worktreePath,
+    script,
+    workspaceName,
+    setupGroupRepos
+  )
   const generation = nextGen()
   // Why: self-terminating wrapper exits the parent shell when the runner exits,
   // so node-pty's onExit fires and setup:exited is broadcast. Without this the

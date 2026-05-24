@@ -89,3 +89,46 @@ export function areWorktreeSelectionsEqual(
   }
   return true
 }
+
+// Why (M2): selection ids are opaque strings inside the multi-selection model.
+// WorkspaceGroup ids are already namespaced with a `group:<uuid>` prefix
+// (see WorkspaceGroup.id in shared/types.ts), so we reuse that token directly
+// here — selection-id == group-id. A separate prefix would mean two parallel
+// id schemes and double the parsing in consumers.
+const GROUP_SELECTION_PREFIX = 'group:'
+
+export function groupSelectionId(groupId: string): string {
+  return groupId
+}
+
+export function isGroupSelectionId(id: string): boolean {
+  return id.startsWith(GROUP_SELECTION_PREFIX)
+}
+
+export function parseGroupSelectionId(id: string): string | null {
+  return isGroupSelectionId(id) ? id : null
+}
+
+export type SelectionPartition = {
+  groupIds: Set<string>
+  worktreeIds: Set<string>
+}
+
+/**
+ * Partition a mixed-id selection into group ids (`group:<uuid>`) and
+ * worktree ids (everything else). Batch-action callers (archive, etc.) use
+ * this to dispatch the right action per partition without having to inspect
+ * each id at the call site.
+ */
+export function partitionSelectionIds(ids: ReadonlySet<string>): SelectionPartition {
+  const groupIds = new Set<string>()
+  const worktreeIds = new Set<string>()
+  for (const id of ids) {
+    if (isGroupSelectionId(id)) {
+      groupIds.add(id)
+    } else {
+      worktreeIds.add(id)
+    }
+  }
+  return { groupIds, worktreeIds }
+}

@@ -74,7 +74,11 @@ export function makeRepo(overrides: Partial<Repo> = {}): Repo {
 export function makeSingleRepoStore(repo: Repo | null) {
   return {
     getRepo: vi.fn(() => repo ?? undefined),
-    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' }))
+    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' })),
+    // Why: setup/run handlers look up the enclosing group to emit
+    // CONDUCTOR_WORKSPACE_REPOS. Default to no groups so single-repo
+    // tests stay focused on the non-grouped behavior.
+    getWorkspaceGroups: vi.fn(() => [])
   }
 }
 
@@ -86,7 +90,11 @@ export function makeMultiRepoStore(repos: Repo[]) {
     // forward CONDUCTOR_WORKSPACE_NAME into the wrapper. Provide a stable
     // value across all worktrees so existing tests don't have to seed
     // per-worktree meta.
-    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' }))
+    getWorktreeMeta: vi.fn(() => ({ workspaceName: 'wise_panther' })),
+    // Why: same default as makeSingleRepoStore — handlers call
+    // getWorkspaceGroups() to derive CONDUCTOR_WORKSPACE_REPOS. Empty list
+    // keeps every existing assertion shape unchanged.
+    getWorkspaceGroups: vi.fn(() => [])
   }
 }
 

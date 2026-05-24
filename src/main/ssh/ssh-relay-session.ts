@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 // Why: consolidates all relay lifecycle state (multiplexer, providers, abort
 // controller, initialization flag) into a single class per SSH target.
 // Previously this state was scattered across 5 module-level Maps/Sets in

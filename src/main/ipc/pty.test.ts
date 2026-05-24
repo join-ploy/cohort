@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: PTY spawn env behavior is easiest to verify in
-one focused file because the registration helper is stateful and each spawn-path
-assertion reuses the same mocked IPC and node-pty harness. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {

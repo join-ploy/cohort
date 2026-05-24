@@ -14,6 +14,17 @@ export const CREATE_WORKTREE_OUTPUT_SCHEMA: OutputSchema = {
   branch: 'string'
 }
 
+// Why: groupId is the `group:<uuid>` handle a downstream run-prompt step
+// references to address the WorkspaceGroup; parentPath is the shared folder
+// at which agents launched against the group land. memberWorktreeIds is the
+// ordered string list, exposed as `string` since OutputSchema's leaf types
+// are scalar (template authors typically index by `.0`/`.1` via the engine).
+export const CREATE_WORKSPACE_GROUP_OUTPUT_SCHEMA: OutputSchema = {
+  groupId: 'string',
+  parentPath: 'string',
+  memberWorktreeIds: 'string'
+}
+
 export const WAIT_FOR_SETUP_OUTPUT_SCHEMA: OutputSchema = {
   exitCode: 'number',
   durationMs: 'number'
@@ -32,6 +43,11 @@ export const RUN_COMMAND_OUTPUT_SCHEMA: OutputSchema = {
   // last ~32 KB of that combined output so templates can pattern-match on it.
   outputTail: 'string'
 }
+
+// Why: the step's value is the side-effect on Linear (assignee/state change),
+// not template-consumable output. The empty schema keeps SCHEMA_BY_KIND
+// exhaustive so a new StepKind without a matching schema is a compile error.
+export const UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA: OutputSchema = {}
 
 export const MANUAL_TRIGGER_SCHEMA: OutputSchema = {
   firedAt: 'number',
@@ -60,9 +76,11 @@ export const LINEAR_TICKET_TRIGGER_OVERLAY = {
 // without extending the map is a compile error.
 const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
   'create-worktree': CREATE_WORKTREE_OUTPUT_SCHEMA,
+  'create-workspace-group': CREATE_WORKSPACE_GROUP_OUTPUT_SCHEMA,
   'wait-for-setup': WAIT_FOR_SETUP_OUTPUT_SCHEMA,
   'run-prompt': RUN_PROMPT_OUTPUT_SCHEMA,
-  'run-command': RUN_COMMAND_OUTPUT_SCHEMA
+  'run-command': RUN_COMMAND_OUTPUT_SCHEMA,
+  'update-linear-issue': UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA
 }
 
 export function getOutputSchemaForKind(kind: StepKind): OutputSchema {

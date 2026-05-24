@@ -1,7 +1,3 @@
-/* eslint-disable max-lines --
- * Why: this slice test keeps the worktree store scenarios in one file so the
- * shared mock store setup stays consistent across closely related behaviors.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
 import type { AppState } from '../types'
@@ -697,6 +693,117 @@ describe('worktree unread (show-until-interact)', () => {
 
     expect(store.getState().worktreesByRepo).toBe(initial)
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+  })
+})
+
+// Why (M1): the renderer's in-memory workspaceGroups must mirror the
+// main-process group activity rollup so the Groups sidebar section and any
+// future Cmd+J group entry reorder immediately on activity bumps, without
+// waiting for the next workspaceGroups:list refresh.
+describe('worktree activity rollup to owning group', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function makeGroup(overrides: {
+    id: string
+    memberWorktreeIds: string[]
+    lastActivityAt: number
+  }) {
+    return {
+      id: overrides.id,
+      workspaceName: 'wise_panther',
+      displayName: 'wise_panther',
+      parentPath: '/tmp/wise_panther',
+      memberWorktreeIds: overrides.memberWorktreeIds,
+      branchName: 'wise_panther',
+      isArchived: false,
+      archivedAt: null,
+      isPinned: false,
+      sortOrder: 0,
+      lastActivityAt: overrides.lastActivityAt,
+      isUnread: false,
+      comment: '',
+      createdAt: 0,
+      linkedIssue: null,
+      linkedLinearIssue: null
+    }
+  }
+
+  it('bumpWorktreeActivity bumps the owning group lastActivityAt', () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    const group = makeGroup({
+      id: 'group:a',
+      memberWorktreeIds: [wt.id],
+      lastActivityAt: 1000
+    })
+    store.setState({
+      worktreesByRepo: { repo1: [wt] },
+      workspaceGroups: [group]
+    } as Partial<AppState>)
+
+    store.getState().bumpWorktreeActivity(wt.id)
+
+    const updatedGroup = store.getState().workspaceGroups.find((g) => g.id === 'group:a')
+    expect(updatedGroup?.lastActivityAt).toBeGreaterThan(1000)
+  })
+
+  it('bumpWorktreeActivity does not regress group lastActivityAt when an older bump arrives', () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    // Group already at a future timestamp — Date.now() must not regress it.
+    const group = makeGroup({
+      id: 'group:a',
+      memberWorktreeIds: [wt.id],
+      lastActivityAt: Date.now() + 60_000
+    })
+    store.setState({
+      worktreesByRepo: { repo1: [wt] },
+      workspaceGroups: [group]
+    } as Partial<AppState>)
+    const beforeTs = store.getState().workspaceGroups[0].lastActivityAt
+
+    store.getState().bumpWorktreeActivity(wt.id)
+
+    expect(store.getState().workspaceGroups[0].lastActivityAt).toBe(beforeTs)
+  })
+
+  it('bumpWorktreeActivity is a no-op for groups when the worktree has no owning group', () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    const group = makeGroup({
+      id: 'group:a',
+      memberWorktreeIds: ['repo2::/other/wt'],
+      lastActivityAt: 1000
+    })
+    store.setState({
+      worktreesByRepo: { repo1: [wt] },
+      workspaceGroups: [group]
+    } as Partial<AppState>)
+
+    store.getState().bumpWorktreeActivity(wt.id)
+
+    expect(store.getState().workspaceGroups[0].lastActivityAt).toBe(1000)
+  })
+
+  it('markWorktreeUnread bumps the owning group lastActivityAt', () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    const group = makeGroup({
+      id: 'group:a',
+      memberWorktreeIds: [wt.id],
+      lastActivityAt: 1000
+    })
+    store.setState({
+      worktreesByRepo: { repo1: [wt] },
+      workspaceGroups: [group]
+    } as Partial<AppState>)
+
+    store.getState().markWorktreeUnread(wt.id)
+
+    const updatedGroup = store.getState().workspaceGroups.find((g) => g.id === 'group:a')
+    expect(updatedGroup?.lastActivityAt).toBeGreaterThan(1000)
   })
 })
 

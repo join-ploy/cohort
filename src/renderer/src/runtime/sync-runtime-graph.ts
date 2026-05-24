@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: runtime graph sync and mobile session-tab publication share the same injected renderer state and terminal registry. Keeping them together prevents a second store/registry reader from drifting. */
 import {
   collectLeafIdsInOrder,
   paneLeafId,

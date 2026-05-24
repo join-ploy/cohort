@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: the registry is the single source of truth for
-   browser session profiles, partition allowlisting, cookie import staging, and
-   per-partition permission/download policies. Splitting further would scatter the
-   security boundary across modules. */
 import { app, session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import {

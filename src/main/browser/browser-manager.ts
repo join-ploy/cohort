@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: BrowserManager intentionally remains the
-single privileged facade for guest registration, authorization, and lifecycle
-cleanup even after extracting the grab/session helpers. Keeping that ownership
-in one file avoids scattering the browser security boundary across modules. */
 import { randomUUID } from 'node:crypto'
 
 import { shell, webContents } from 'electron'

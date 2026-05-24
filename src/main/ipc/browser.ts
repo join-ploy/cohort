@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: browser IPC handlers must be registered together so the
-   trust boundary (isTrustedBrowserRenderer) and handler teardown stay consistent. */
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { browserManager } from '../browser/browser-manager'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'

@@ -55,8 +55,23 @@ export default function TabGroupPanel({
     void window.api.wsl.isAvailable().then(setWslAvailable)
   }, [])
 
-  const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
-  const { activeTab, browserItems, commands, editorItems, tabBarOrder, terminalTabs } = model
+  // Why: only the focused pane aggregates sibling-member tabs into its strip.
+  // Splits within the same worktree each render their own TabBar; surfacing
+  // sibling tabs in every strip would duplicate them and confuse close/drag.
+  const model = useTabGroupWorkspaceModel({
+    groupId,
+    worktreeId,
+    aggregateGroupMemberTabs: isFocused
+  })
+  const {
+    activeTab,
+    browserItems,
+    commands,
+    editorItems,
+    ownerByVisibleId,
+    tabBarOrder,
+    terminalTabs
+  } = model
   const { setNodeRef: setBodyDropRef } = useDroppable({
     id: getTabPaneBodyDroppableId(groupId),
     data: {
@@ -97,7 +112,12 @@ export default function TabGroupPanel({
         )
         if (item) {
           commands.closeItem(item.id)
+          return
         }
+        // Why: when the strip aggregates sibling-member tabs, the close X on a
+        // sibling tab carries that sibling's entityId, not a local unifiedTabId.
+        // Route via the cross-worktree close path so the foreign tab actually goes away.
+        commands.closeAggregatedSiblingTab(terminalId)
       }}
       onCloseOthers={(visibleId) => {
         // Why: TabBar emits this with the entityId for terminals/browsers and
@@ -146,7 +166,9 @@ export default function TabGroupPanel({
         )
         if (item) {
           commands.closeItem(item.id)
+          return
         }
+        commands.closeAggregatedSiblingTab(browserTabId)
       }}
       onDuplicateBrowserTab={commands.duplicateBrowserTab}
       onCloseAllFiles={commands.closeAllEditorTabsInGroup}
@@ -163,6 +185,7 @@ export default function TabGroupPanel({
       tabBarOrder={tabBarOrder}
       onCreateSplitGroup={commands.createSplitGroup}
       hoveredTabInsertion={hoveredTabInsertion}
+      ownerByVisibleId={ownerByVisibleId}
     />
   )
 

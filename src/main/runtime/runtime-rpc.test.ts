@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: this integration-style RPC test keeps the request/response contract together so regressions in the external CLI surface are easier to spot. */
 import { existsSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'

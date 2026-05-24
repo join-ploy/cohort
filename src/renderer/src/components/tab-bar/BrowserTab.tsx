@@ -58,7 +58,8 @@ export default function BrowserTab({
   onSplitGroup,
   onDuplicate,
   dragData,
-  dropIndicator
+  dropIndicator,
+  memberBadge
 }: {
   tab: BrowserTabState
   isActive: boolean
@@ -70,6 +71,8 @@ export default function BrowserTab({
   onDuplicate: () => void
   dragData: TabDragItemData
   dropIndicator?: DropIndicator
+  /** See TabBar's `memberBadge` prop. */
+  memberBadge?: { color: string; name: string } | null
 }): React.JSX.Element {
   // Why: no transform/transition/isDragging styling — the drag design is
   // that tabs stay visually anchored; only the blue insertion bar moves.
@@ -158,6 +161,15 @@ export default function BrowserTab({
               keep full color on both active and inactive tabs — dimming to
               muted-foreground made the icon read as "disabled" in practice. */}
           <Globe className="w-3 h-3 mr-1 shrink-0 text-blue-500" />
+          {memberBadge && (
+            <span
+              aria-label={`Tab from ${memberBadge.name}`}
+              title={`Tab from ${memberBadge.name}`}
+              data-testid="tab-member-badge"
+              className="mr-1 inline-block size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: memberBadge.color }}
+            />
+          )}
           <span className="truncate max-w-[100px] mr-1">{getBrowserTabLabel(tab)}</span>
           {tab.loading && !tab.loadError && !isBlankBrowserTab(tab) && (
             <span className="mr-1 size-1.5 rounded-full bg-sky-500/80 shrink-0" />

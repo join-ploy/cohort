@@ -23,6 +23,11 @@ export type AutoTriggerRuleRowProps = {
   onAddCondition: () => void
   onRemoveCondition: (index: number) => void
   onUpdateCondition: (index: number, next: Condition) => void
+  /** When true, the chain supplies its own project context (via a
+   *  create-workspace-group step), so the per-rule project select becomes
+   *  optional and the empty placeholder reads "Inferred from group" instead
+   *  of "Select project". */
+  chainProvidesProject?: boolean
 }
 
 // Why: a single rule inside an AutoTriggerCard. Extracted into its own file
@@ -41,10 +46,15 @@ export function AutoTriggerRuleRow(props: AutoTriggerRuleRowProps): React.JSX.El
     onDelete,
     onAddCondition,
     onRemoveCondition,
-    onUpdateCondition
+    onUpdateCondition,
+    chainProvidesProject = false
   } = props
   const isFirst = index === 0
   const isLast = index === total - 1
+  // Why: when the chain supplies its own project (group target), the per-rule
+  // project select is optional — surface that with the placeholder text so
+  // operators don't think they're being silently required to pick one.
+  const placeholderLabel = chainProvidesProject ? '— Inferred from group —' : '— Select project —'
 
   return (
     <li aria-label={`rule ${rule.id}`} className="rounded-md border border-border bg-background">
@@ -64,7 +74,7 @@ export function AutoTriggerRuleRow(props: AutoTriggerRuleRowProps): React.JSX.El
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
               )}
             >
-              <option value="">— Select project —</option>
+              <option value="">{placeholderLabel}</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.displayName}

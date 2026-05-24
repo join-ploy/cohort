@@ -10,6 +10,12 @@ export type OpenCommandPaneRequest = {
   /** Raw shell command line. Required when source is 'custom'; ignored
    *  otherwise. */
   customCommand?: string
+  /** When set, the runner unwrapped a `member:<groupId>:<worktreeId>` ref
+   *  and wants the command to run at the member worktree's path — NOT the
+   *  group's parent (Phase J1's default override). Renderer hook forwards
+   *  this to pty.spawn as `keepCwd: true`. Parity with the run-prompt
+   *  path's `memberScoped` flag. */
+  memberScoped?: boolean
 }
 
 export type OpenCommandPaneResult = { ptyId: string; paneKey: string }

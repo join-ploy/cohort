@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: PTY IPC is intentionally centralized in one
-main-process module so spawn-time environment scoping, lifecycle cleanup,
-foreground-process inspection, and renderer IPC stay behind a single audited
-boundary. Splitting it by line count would scatter tightly coupled terminal
-process behavior across files without a cleaner ownership seam. */
 import { join, delimiter } from 'path'
 import { randomUUID } from 'crypto'
 import { type BrowserWindow, ipcMain, app } from 'electron'
@@ -39,6 +34,12 @@ import {
 import { isRemoteAgentHooksEnabled } from '../../shared/agent-hook-relay'
 import { readShellStartupEnvVar } from '../pty/shell-startup-env'
 import type { PtyExitRegistry } from '../pty/exit-registry'
+import { splitWorktreeId } from '../../shared/worktree-id'
+import {
+  findGroupForWorktree,
+  resolveGroupRepoNames,
+  resolveTerminalCwd
+} from '../workspace-group-runtime'
 
 // ─── Provider Registry ──────────────────────────────────────────────
 // Routes PTY operations by connectionId. null = local provider.
@@ -1076,6 +1077,11 @@ export function registerPtyHandlers(
           launch_source?: unknown
           request_kind?: unknown
         }
+        // Why (Ask C, grouped-workspaces member-scoped runs): caller opts
+        // out of Phase J1's grouped-worktree cwd override so the agent
+        // stays rooted at the member worktree's path. See
+        // src/preload/api-types.ts pty.spawn for the contract.
+        keepCwd?: boolean
       }
     ) => {
       const provider = getProvider(args.connectionId)
@@ -1197,16 +1203,50 @@ export function registerPtyHandlers(
           throw err
         }
       }
+      // Why (grouped workspaces): when the worktree is a group member, default
+      // new terminals land at the group's `parentPath` so `pwd` shows the shared
+      // workspace folder and users can `cd <repo>` into any sibling. Explicit
+      // overrides — "Open terminal here" from a file pane, or a Cmd+D split
+      // inheriting a live cwd — keep whatever the caller supplied. Non-grouped
+      // worktrees are unaffected. We also surface the sibling repo names via
+      // CONDUCTOR_WORKSPACE_REPOS so user shell scripts can fan out across the
+      // group without having to re-read Orca's state.
+      //
+      // Ask C (member-scoped runs): when the caller passes `keepCwd: true`,
+      // skip the override entirely — the supplied cwd IS the member's path
+      // and the caller wants the agent rooted there while the tab stays
+      // bound to the member worktreeId. CONDUCTOR_WORKSPACE_REPOS is still
+      // surfaced because the run is logically part of the group's session.
+      let effectiveCwd = args.cwd
+      let groupEnvPatch: Record<string, string> | undefined
+      if (store && args.worktreeId !== undefined && !args.connectionId) {
+        const group = findGroupForWorktree(args.worktreeId, store.getWorkspaceGroups())
+        if (group) {
+          if (!args.keepCwd) {
+            const worktreePath = splitWorktreeId(args.worktreeId)?.worktreePath
+            effectiveCwd = resolveTerminalCwd({
+              worktreePath,
+              group,
+              suppliedCwd: args.cwd
+            })
+          }
+          const repos = resolveGroupRepoNames(group)
+          if (repos.length > 0) {
+            groupEnvPatch = { CONDUCTOR_WORKSPACE_REPOS: repos.join(',') }
+          }
+        }
+      }
+      const envWithGroup = groupEnvPatch ? { ...env, ...groupEnvPatch } : env
       const spawnEnv = preAllocatedHandle
-        ? { ...env, ORCA_TERMINAL_HANDLE: preAllocatedHandle }
-        : env
+        ? { ...envWithGroup, ORCA_TERMINAL_HANDLE: preAllocatedHandle }
+        : envWithGroup
       const envToDelete = claudeAuth?.stripAuthEnv
         ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
         : undefined
       const spawnOptions: PtySpawnOptions = {
         cols: args.cols,
         rows: args.rows,
-        cwd: args.cwd,
+        cwd: effectiveCwd,
         env: spawnEnv
       }
       if (envToDelete) {

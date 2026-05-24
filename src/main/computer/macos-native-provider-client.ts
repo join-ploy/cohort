@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the macOS provider transport owns one lifecycle across stdio fallback and helper-app socket mode. */
 import { spawn } from 'child_process'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import type net from 'net'

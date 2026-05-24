@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/store'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import NewWorkspaceComposerCard from '@/components/NewWorkspaceComposerCard'
 import AgentSettingsDialog from '@/components/agent/AgentSettingsDialog'
+import GroupedComposerForm from '@/components/GroupedComposerForm'
 import { useComposerState } from '@/hooks/useComposerState'
 import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
@@ -11,6 +13,8 @@ import {
   shouldSuppressEnterSubmit
 } from '@/lib/new-workspace-enter-guard'
 import type { TuiAgent, WorkspaceCreateTelemetrySource } from '../../../shared/types'
+
+type ComposerMode = 'single' | 'group'
 
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 
@@ -65,6 +69,12 @@ function ComposerModalBody({
   onClose: () => void
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
+  // Why: grouped-workspace composer is gated behind the experimental flag.
+  // When off, the toggle is hidden entirely so the modal behaves exactly as
+  // the pre-flag single-repo flow.
+  const groupedEnabled = useAppStore((s) => s.settings?.experimentalGroupedWorkspaces === true)
+  const [mode, setMode] = useState<ComposerMode>('single')
+
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
@@ -86,7 +96,24 @@ function ComposerModalBody({
           <DialogTitle className="text-base font-semibold">Create Workspace</DialogTitle>
         </DialogHeader>
 
-        <QuickTabBody modalData={modalData} onClose={onClose} active />
+        {groupedEnabled ? (
+          <Tabs
+            value={mode}
+            onValueChange={(value) => setMode(value as ComposerMode)}
+            className="gap-0"
+          >
+            <TabsList className="w-full">
+              <TabsTrigger value="single">Single repo</TabsTrigger>
+              <TabsTrigger value="group">Group of repos</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        ) : null}
+
+        {mode === 'group' && groupedEnabled ? (
+          <GroupedComposerForm onCancel={onClose} onCreated={onClose} />
+        ) : (
+          <QuickTabBody modalData={modalData} onClose={onClose} active />
+        )}
       </DialogContent>
     </Dialog>
   )

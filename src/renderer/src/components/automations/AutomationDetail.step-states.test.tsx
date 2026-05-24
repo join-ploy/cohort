@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: this file covers step-state rendering,
- * trigger-badge variants, restart-button gating, restart lineage links, and
- * the isRestartable helper for AutomationDetail. Splitting would force
- * shared fixtures (chainRun, worktreeMap, mocks) to be duplicated. */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, it, expect, vi } from 'vitest'
 import type {

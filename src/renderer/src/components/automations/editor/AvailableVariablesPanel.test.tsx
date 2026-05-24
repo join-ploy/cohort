@@ -42,4 +42,31 @@ describe('AvailableVariablesPanel', () => {
     expect(markup).toMatch(/projectId.*string/)
     expect(markup).toMatch(/firedAt.*number/)
   })
+
+  it('renders a Group section with member paths when the group namespace is present', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: {},
+      steps: {},
+      group: {
+        id: 'string',
+        parentPath: 'string',
+        members: {
+          orca: { worktreeId: 'string', scoped: 'string' }
+        }
+      }
+    }
+    const markup = renderToStaticMarkup(<AvailableVariablesPanel available={schema} />)
+    expect(markup).toMatch(/Group/)
+    expect(markup).toContain('group.id')
+    expect(markup).toContain('group.parentPath')
+    expect(markup).toContain('group.members.orca.scoped')
+    expect(markup).toContain('group.members.orca.worktreeId')
+  })
+
+  it('omits the Group section when the namespace is absent', () => {
+    const markup = renderToStaticMarkup(<AvailableVariablesPanel available={SCHEMA} />)
+    // Why: the SCHEMA fixture has no group key, so no Group header should render.
+    expect(markup).not.toMatch(/>Group</)
+  })
 })

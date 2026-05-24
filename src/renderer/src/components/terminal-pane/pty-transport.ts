@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: the PTY transport manages lifecycle, data flow,
-agent status extraction, and title tracking for terminal panes. Splitting would
-scatter the tightly coupled IPC ↔ xterm data pipeline across files with no clear
-module boundary, making the data flow harder to trace during debugging. */
 import {
   detectAgentStatusFromTitle,
   clearWorkingIndicators,

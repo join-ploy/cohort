@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: co-locating issue list/create/update/
-comment operations keeps the shared acquire/release + error-classification
-pattern obvious. Each function is short; the file is long because the
-surface is broad. */
 import type {
   ClassifiedError,
   GitHubAssignableUser,

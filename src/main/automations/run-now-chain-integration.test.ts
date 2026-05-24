@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: end-to-end runNow chain coverage lives
-   here as one suite so the makeFakeIpc helper and Electron/git mocks stay
-   single-source. Splitting would force fixture duplication. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
@@ -226,9 +223,7 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     expect(afterImmediate.status).toBe('running')
     // openPromptPane fired exactly once. (`automations:changed` nudges share
     // the same `send` mock; filter so the assertion is precise.)
-    const openPromptPaneCalls = send.mock.calls.filter(
-      (c) => c[0] === 'automations:openPromptPane'
-    )
+    const openPromptPaneCalls = send.mock.calls.filter((c) => c[0] === 'automations:openPromptPane')
     expect(openPromptPaneCalls).toHaveLength(1)
 
     // Subsequent ticks happen on the 60s cadence; for the test we tickle the
@@ -418,10 +413,7 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     // open-command-pane.ts / send-prompt-to-pane.ts). The fake `send` here
     // routes by channel and synthesizes the appropriate reply payload.
     const send = vi.fn(
-      (
-        channel: string,
-        payload?: { requestId?: string; paneKey?: string; prompt?: string }
-      ) => {
+      (channel: string, payload?: { requestId?: string; paneKey?: string; prompt?: string }) => {
         if (!payload?.requestId) {
           // Why: the service also broadcasts `automations:changed` with no
           // payload as a UI live-update nudge — ignore non-pane channels.

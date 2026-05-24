@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import { HeadlessEmulator } from './headless-emulator'
 import { isValidPtySize, normalizePtySize } from './daemon-pty-size'
 import { PostReadyFlushGate } from './post-ready-flush-gate'

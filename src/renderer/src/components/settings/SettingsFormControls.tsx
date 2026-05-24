@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: these small settings form primitives and controls
-co-locate shared layout and keyboard interaction logic, which keeps the settings
-panel wiring simple even though the file exceeds the default line limit. */
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ScrollArea } from '../ui/scroll-area'
 import { Input } from '../ui/input'

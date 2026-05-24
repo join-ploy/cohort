@@ -3,9 +3,17 @@ import { Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
-import { useActiveWorktree, useRepoById } from '@/store/selectors'
+import { useShallow } from 'zustand/react/shallow'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useActiveWorktree,
+  useRepoById
+} from '@/store/selectors'
 import type { ScriptState } from '@/store/slices/scripts'
 import SidebarPtyTerminal from './SidebarPtyTerminal'
+import { SetupPanelGroupContainer } from './SetupPanelGroupView'
 import type { OrcaHooks } from '../../../../shared/types'
 import type {
   SetupStartArgs,
@@ -167,7 +175,9 @@ export function SetupPanelView({
 // rendering the component or stubbing window.api globally. `not-running`
 // from a stop call is intentionally swallowed — clicking Stop on an
 // already-exited PTY is a benign race, not a user-facing error.
-async function callSetupStart(
+// Exported so the grouped shell in SetupPanelGroupView.tsx can reuse the
+// same branching without a circular `_testing` re-export.
+export async function callSetupStart(
   args: SetupStartArgs,
   deps: {
     start: (args: SetupStartArgs) => Promise<SetupStartResult>
@@ -181,7 +191,7 @@ async function callSetupStart(
   return result
 }
 
-async function callSetupStop(
+export async function callSetupStop(
   args: SetupStopArgs,
   deps: {
     stop: (args: SetupStopArgs) => Promise<SetupStopResult>
@@ -203,6 +213,30 @@ export default function SetupPanel(): React.JSX.Element {
   const setupState = useAppStore((s) =>
     activeWorktree ? (s.scriptsByWorktree[activeWorktree.id]?.setup ?? null) : null
   )
+  // Why: detect whether the active worktree belongs to a group; if so we
+  // render the segmented per-member shell instead of the single-worktree
+  // panel. The members list is resolved through the same selectors used by
+  // the workspace tree so ordering matches.
+  const group = useAppStore((s) =>
+    activeWorktree ? getGroupByWorktreeId(s, activeWorktree.id) : null
+  )
+  // Why: useShallow — getMemberWorktreesForGroup returns a fresh array each
+  // call. Without element-wise comparison, useSyncExternalStore re-enters on
+  // every state mutation and trips React's max-update-depth guard. Same for
+  // memberSetupStates which maps over groupMembers.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
+  const repoMap = useAppStore((s) => getRepoMapFromState(s))
+  const memberSetupStates = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.setup ?? null)
+    })
+  )
+
   // Why: `orca.yaml` is parsed in main; we read it via the existing
   // hooks:check IPC and cache the trimmed setup script in local state.
   // Re-fetched whenever the active repo changes so switching repos picks
@@ -260,6 +294,21 @@ export default function SetupPanel(): React.JSX.Element {
   // (or a new IPC) to surface orca.yaml in the editor. Left as a no-op so
   // the empty-state CTA is visible but inert until that infra exists.
   const onOpenOrcaYaml = useCallback(() => {}, [])
+
+  // Why: branch AFTER all hooks fire so React's rule-of-hooks isn't
+  // violated when the active worktree toggles between grouped and ungrouped.
+  // The group container then takes over the per-member hooks-check + state
+  // wiring on its own.
+  if (group && groupMembers && groupMembers.length > 0) {
+    return (
+      <SetupPanelGroupContainer
+        members={groupMembers}
+        memberSetupStates={memberSetupStates ?? []}
+        repoMap={repoMap}
+        defaultActiveWorktreeId={activeWorktree?.id ?? null}
+      />
+    )
+  }
 
   return (
     <SetupPanelView

@@ -1,10 +1,19 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { WaitForSetupConfig } from '../../../shared/automations-types'
 import type { SetupScriptEntry } from '../../setup-script/registry'
+import type { WorkspaceGroup } from '../../../shared/types'
+import { parseMemberScopedRef } from '../../../shared/automation-member-scoped-ref'
+import { findGroupById } from '../../workspace-group-runtime'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 export type WaitForSetupDeps = {
   getSetupScript: (worktreeId: string) => SetupScriptEntry | undefined
+  /** Snapshot of all workspace groups so the runner can resolve a
+   *  `group:<uuid>` worktreeRef to its ordered member worktreeIds without an
+   *  IPC roundtrip. Optional so legacy single-worktree tests don't need to
+   *  wire it; absent + a group ref ⇒ the group lookup naturally returns
+   *  undefined and the runner fails-fast. */
+  getWorkspaceGroups?: () => readonly WorkspaceGroup[]
   now: () => number
 }
 
@@ -24,9 +33,9 @@ export class WaitForSetupRunner implements StepRunner {
   async tick(ctx: StepRunnerCtx): Promise<StepRunnerResult> {
     const config = ctx.step.config as WaitForSetupConfig
 
-    let worktreeId: string
+    let resolvedRef: string
     try {
-      worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
+      resolvedRef = resolveTemplate(config.worktreeRef, ctx.context)
     } catch (e) {
       // Template resolution errors can never succeed on retry (bad authoring
       // or missing context), so fail-fast instead of looping forever.
@@ -51,7 +60,8 @@ export class WaitForSetupRunner implements StepRunner {
 
     // Per design § "Agent step lifecycle": the step-level timeout is the only
     // hard escape valve. Check it BEFORE reading the registry so a permanently
-    // running setup script can still time out cleanly.
+    // running setup script can still time out cleanly. The timeout applies to
+    // the whole wait (group or single), not to any individual member.
     if (ctx.step.timeoutSeconds != null) {
       const elapsedMs = now - tracker.openedAt
       if (elapsedMs >= ctx.step.timeoutSeconds * 1000) {
@@ -63,6 +73,32 @@ export class WaitForSetupRunner implements StepRunner {
       }
     }
 
+    // Why: a member-scoped ref (`member:<groupId>:<worktreeId>`, Ask C / Phase
+    // L3) deliberately narrows the wait to ONE member's setup script — same
+    // semantics as a single worktreeId wait, but with the group-aware prefix
+    // peeled off.
+    const memberScoped = parseMemberScopedRef(resolvedRef)
+    if (memberScoped) {
+      return this.tickSingleWorktree(memberScoped.worktreeId, config)
+    }
+
+    // Why: a `group:<uuid>` ref (produced by `{{steps.<cwg>.groupId}}`) must
+    // wait on EVERY group member's setup script. Without this branch the
+    // registry lookup returns undefined (the registry is keyed by member
+    // worktreeId, never by group id) and the runner silently resolved as
+    // success — the bug this branch fixes.
+    if (resolvedRef.startsWith('group:')) {
+      return this.tickGroup(resolvedRef, config)
+    }
+
+    return this.tickSingleWorktree(resolvedRef, config)
+  }
+
+  /** Single-worktree (or member-scoped) wait. Mirrors the legacy behavior:
+   *  missing registry entry ⇒ resolve immediately as "no setup script
+   *  configured", pending/running ⇒ needs-more-time, exit ⇒ resolve per
+   *  `requireSuccess`. */
+  private tickSingleWorktree(worktreeId: string, config: WaitForSetupConfig): StepRunnerResult {
     const entry = this.deps.getSetupScript(worktreeId)
 
     if (!entry) {
@@ -108,6 +144,70 @@ export class WaitForSetupRunner implements StepRunner {
       outcome: 'done',
       status: 'succeeded',
       output: { exitCode, durationMs }
+    }
+  }
+
+  /** Group wait — iterates members in `group.memberWorktreeIds` order (stable
+   *  at create time). Per-member missing-entry semantics match
+   *  `tickSingleWorktree`: a member with no registry entry is treated as "no
+   *  setup script configured" and doesn't block. */
+  private tickGroup(groupId: string, config: WaitForSetupConfig): StepRunnerResult {
+    const groups = this.deps.getWorkspaceGroups?.() ?? []
+    const group = findGroupById(groupId, groups)
+    if (!group) {
+      // Fail-fast: this used to silently succeed (the bug). A missing group at
+      // tick time means the chain author referenced something the store can't
+      // resolve; retrying won't help.
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: `Group not found for worktreeRef "${groupId}".`
+      }
+    }
+
+    let maxDurationMs = 0
+    let worstExitCode = 0
+    const failedMembers: { id: string; exitCode: number }[] = []
+
+    for (const memberId of group.memberWorktreeIds) {
+      const entry = this.deps.getSetupScript(memberId)
+      if (!entry) {
+        // Same as single-worktree branch: missing entry ⇒ "no script
+        // configured" for this member. Skip without blocking the wait.
+        continue
+      }
+      if (entry.state === 'pending' || entry.state === 'running') {
+        return { outcome: 'needs-more-time', status: 'running' }
+      }
+      const memberDuration =
+        entry.startedAt != null && entry.finishedAt != null ? entry.finishedAt - entry.startedAt : 0
+      const memberExitCode = entry.exitCode ?? 0
+      if (memberDuration > maxDurationMs) {
+        maxDurationMs = memberDuration
+      }
+      // Why: any non-zero exit code wins over 0; if multiple non-zero, keep
+      // the first one encountered (deterministic, ordered by member list).
+      if (worstExitCode === 0 && memberExitCode !== 0) {
+        worstExitCode = memberExitCode
+      }
+      if (entry.state === 'exited-failure') {
+        failedMembers.push({ id: memberId, exitCode: memberExitCode })
+      }
+    }
+
+    if (failedMembers.length > 0 && config.requireSuccess) {
+      const detail = failedMembers.map((m) => `${m.id} (exit code ${m.exitCode})`).join(', ')
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: `Setup script failed for group member(s): ${detail}.`
+      }
+    }
+
+    return {
+      outcome: 'done',
+      status: 'succeeded',
+      output: { exitCode: worstExitCode, durationMs: maxDurationMs }
     }
   }
 

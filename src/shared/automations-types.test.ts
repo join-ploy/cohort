@@ -12,8 +12,10 @@ import type {
   StepRunState,
   RunPromptConfig,
   CreateWorktreeConfig,
+  CreateWorkspaceGroupConfig,
   WaitForSetupConfig,
   RunCommandConfig,
+  UpdateLinearIssueConfig,
   LinearIssuePayload
 } from './automations-types'
 import type { TuiAgent } from './types'
@@ -53,9 +55,25 @@ describe('chain types', () => {
 })
 
 describe('Phase 2 step configs', () => {
-  it('StepKind covers all 4 kinds', () => {
+  it('StepKind covers all 6 kinds', () => {
     expectTypeOf<StepKind>().toEqualTypeOf<
-      'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
+      | 'run-prompt'
+      | 'create-worktree'
+      | 'create-workspace-group'
+      | 'wait-for-setup'
+      | 'run-command'
+      | 'update-linear-issue'
+    >()
+  })
+
+  it('CreateWorkspaceGroupConfig shape', () => {
+    expectTypeOf<CreateWorkspaceGroupConfig['branchName']>().toEqualTypeOf<string>()
+    expectTypeOf<CreateWorkspaceGroupConfig['displayName']>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<CreateWorkspaceGroupConfig['linkLinearIssue']>().toEqualTypeOf<
+      boolean | undefined
+    >()
+    expectTypeOf<CreateWorkspaceGroupConfig['members']>().toMatchTypeOf<
+      { repoId: string; baseBranch: string }[]
     >()
   })
 
@@ -77,13 +95,26 @@ describe('Phase 2 step configs', () => {
     expectTypeOf<RunCommandConfig['worktreeRef']>().toEqualTypeOf<string>()
   })
 
-  it('StepConfig is a union of all four configs', () => {
-    // A value of any of the four shapes should be assignable to StepConfig.
+  it('UpdateLinearIssueConfig shape', () => {
+    expectTypeOf<UpdateLinearIssueConfig['issueRef']>().toEqualTypeOf<string>()
+    expectTypeOf<UpdateLinearIssueConfig['assigneeRef']>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<UpdateLinearIssueConfig['stateRef']>().toEqualTypeOf<string | undefined>()
+  })
+
+  it('StepConfig is a union of all six configs', () => {
+    // A value of any of the six shapes should be assignable to StepConfig.
     const cw: StepConfig = {
       baseBranch: 'main',
       branchName: 'b',
       displayName: 'd',
       linkLinearIssue: false
+    }
+    const cwg: StepConfig = {
+      branchName: 'b',
+      members: [
+        { repoId: 'r1', baseBranch: 'main' },
+        { repoId: 'r2', baseBranch: 'main' }
+      ]
     }
     const wfs: StepConfig = { worktreeRef: 'wt', requireSuccess: true }
     const rc: StepConfig = { worktreeRef: 'wt', source: 'custom', captureStdout: false }
@@ -93,10 +124,17 @@ describe('Phase 2 step configs', () => {
       prompt: 'p',
       doneDebounceSeconds: 15
     }
+    const uli: StepConfig = {
+      issueRef: '{{trigger.linear.issue.id}}',
+      assigneeRef: 'user-1',
+      stateRef: 'state-1'
+    }
     expectTypeOf(cw).toMatchTypeOf<StepConfig>()
+    expectTypeOf(cwg).toMatchTypeOf<StepConfig>()
     expectTypeOf(wfs).toMatchTypeOf<StepConfig>()
     expectTypeOf(rc).toMatchTypeOf<StepConfig>()
     expectTypeOf(rp).toMatchTypeOf<StepConfig>()
+    expectTypeOf(uli).toMatchTypeOf<StepConfig>()
   })
 })
 

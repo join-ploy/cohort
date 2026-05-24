@@ -154,6 +154,40 @@ describe('AutoTriggerCard rendering', () => {
     expect(/aria-label="View fired issues"[^>]*disabled/i.test(html)).toBe(true)
   })
 
+  it('renders the "Select project" placeholder by default', () => {
+    const trig = mkTrigger({ rules: [{ id: 'rl1', projectId: '', conditions: [] }] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Select project')
+  })
+
+  it('relaxes the per-rule project placeholder to "Inferred from group" when the chain supplies projects', () => {
+    const trig = mkTrigger({ rules: [{ id: 'rl1', projectId: '', conditions: [] }] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+        chainProvidesProject
+      />
+    )
+    expect(html).toContain('Inferred from group')
+    expect(html).not.toContain('Select project')
+  })
+
   it('disables Move up on first rule and Move down on last rule', () => {
     const trig = mkTrigger({
       rules: [

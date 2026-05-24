@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: computer RPC coverage shares one mocked registry setup across all method contracts. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildRegistry } from '../core'
 

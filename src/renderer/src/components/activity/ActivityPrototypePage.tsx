@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this prototype keeps the real-data adapter
-and current visual skeleton together until the next refinement pass decides
-which pieces become production modules. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {

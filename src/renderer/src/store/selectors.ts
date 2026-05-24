@@ -1,6 +1,6 @@
 import { useAppStore } from './index'
 import { useShallow } from 'zustand/react/shallow'
-import type { Repo, Worktree, TerminalTab } from '../../../shared/types'
+import type { Repo, Worktree, TerminalTab, WorkspaceGroup } from '../../../shared/types'
 import type { AppState } from './types'
 
 const EMPTY_WORKTREES: Worktree[] = []
@@ -123,3 +123,106 @@ export const useFilterRepoIds = () => useAppStore((s) => s.filterRepoIds)
 // ─── GitHub ─────────────────────────────────────────────────────────
 export const usePRCache = () => useAppStore((s) => s.prCache)
 export const useIssueCache = () => useAppStore((s) => s.issueCache)
+
+// ─── Workspace Groups ───────────────────────────────────────────────
+export function getGroupById(
+  state: Pick<AppState, 'workspaceGroups'>,
+  groupId: string
+): WorkspaceGroup | null {
+  return state.workspaceGroups.find((g) => g.id === groupId) ?? null
+}
+
+export function getGroupByWorktreeId(
+  state: Pick<AppState, 'workspaceGroups'>,
+  worktreeId: string
+): WorkspaceGroup | null {
+  return state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(worktreeId)) ?? null
+}
+
+export function getMemberWorktreesForGroup(
+  state: Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+  groupId: string
+): Worktree[] {
+  const group = getGroupById(state, groupId)
+  if (!group) {
+    return []
+  }
+  // Why: defensive — a member id may not resolve to a live worktree mid-fetch
+  // or after an out-of-band cleanup; drop the gap rather than emit holes.
+  const worktreeMap = getCachedWorktreeMap(state.worktreesByRepo)
+  const members: Worktree[] = []
+  for (const id of group.memberWorktreeIds) {
+    const worktree = worktreeMap.get(id)
+    if (worktree) {
+      members.push(worktree)
+    }
+  }
+  return members
+}
+
+export function isWorktreeGrouped(
+  state: Pick<AppState, 'workspaceGroups'>,
+  worktreeId: string
+): boolean {
+  return state.workspaceGroups.some((g) => g.memberWorktreeIds.includes(worktreeId))
+}
+
+/**
+ * Sibling worktree ids that share a WorkspaceGroup with the given worktree,
+ * in the group's declared member order, excluding the input worktree itself.
+ *
+ * Why: the group-aware tab strip needs to enumerate which OTHER members
+ * contribute tabs to surface, and it must skip members whose worktree is
+ * archived or missing — those members no longer have a renderable surface,
+ * so their tabs would be unreachable from the strip even if listed.
+ */
+export function getSiblingWorktreeIdsForGroupMember(
+  state: Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+  worktreeId: string
+): string[] {
+  return getOrderedGroupMemberIdsForWorktree(state, worktreeId).filter((id) => id !== worktreeId)
+}
+
+/**
+ * All live, non-archived member worktree ids of the WorkspaceGroup that
+ * contains the given worktree, in the group's declared member order. Returns
+ * an empty array when the worktree isn't grouped.
+ *
+ * Why: the aggregated group tab strip needs the full member order (including
+ * the active member's own slot) so sibling-tab positions stay stable when the
+ * active member switches. The active member's local tabs are spliced into
+ * their canonical slot rather than always appearing first — without that,
+ * clicking a sibling tab causes the strip to reshuffle and the just-clicked
+ * tab visually jumps to a different position than the one the user touched.
+ */
+export function getOrderedGroupMemberIdsForWorktree(
+  state: Pick<AppState, 'workspaceGroups' | 'worktreesByRepo'>,
+  worktreeId: string
+): string[] {
+  const group = getGroupByWorktreeId(state, worktreeId)
+  if (!group) {
+    return []
+  }
+  const worktreeMap = getCachedWorktreeMap(state.worktreesByRepo)
+  const ordered: string[] = []
+  for (const id of group.memberWorktreeIds) {
+    const wt = worktreeMap.get(id)
+    if (!wt || wt.isArchived) {
+      continue
+    }
+    ordered.push(id)
+  }
+  return ordered
+}
+
+export const useWorkspaceGroups = () => useAppStore((s) => s.workspaceGroups)
+export const useGroupById = (groupId: string | null) =>
+  useAppStore((s) => (groupId ? getGroupById(s, groupId) : null))
+
+// Why: GroupCard's active style needs the *group* that owns the active
+// worktree, not the worktree itself. Returning a string|null keeps the
+// shallow-equality check trivial — no need for useShallow.
+export const useActiveGroupId = (): string | null =>
+  useAppStore((s) =>
+    s.activeWorktreeId ? (getGroupByWorktreeId(s, s.activeWorktreeId)?.id ?? null) : null
+  )

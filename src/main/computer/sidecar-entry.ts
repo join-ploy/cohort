@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: sidecar dispatch keeps one method table shared across native providers. */
 import {
   MacOSNativeProviderClient,
   shouldUseMacOSNativeProvider

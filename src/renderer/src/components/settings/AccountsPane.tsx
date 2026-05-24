@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: AccountsPane owns all per-provider account UI
-   (Claude, Codex, Gemini, OpenCode Go, and future providers). Each provider's
-   add/select/reauth/remove flow is tightly coupled to the provider-specific
-   error handling and restart prompts below; splitting them into separate files
-   would scatter those flows without a meaningful abstraction boundary. */
 import { useEffect, useState } from 'react'
 import type {
   ClaudeRateLimitAccountsState,

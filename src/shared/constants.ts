@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: this file is the single source of truth
-   for default global settings, default repo hook settings, default
-   onboarding state, default UI state, default workspace session, and a
-   handful of related shared constants. Splitting it would only spread the
-   defaults across multiple files without a meaningful boundary. */
 import type {
   GlobalSettings,
   NotificationSettings,
@@ -254,7 +249,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalLigatures: 'auto',
     terminalCursorStyle: 'bar',
     terminalCursorBlink: true,
-    terminalThemeDark: 'Ghostty Default Style Dark',
+    terminalThemeDark: 'Melty',
     terminalDividerColorDark: '#3f3f46',
     terminalUseSeparateLightTheme: false,
     terminalThemeLight: 'Builtin Tango Light',
@@ -328,6 +323,10 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     experimentalPet: false,
     experimentalActivity: true,
     experimentalWorktreeSymlinks: false,
+    // Why: opt-in while the grouped-workspaces sidebar UX is in flight.
+    // GroupsSection already self-hides when empty; the flag exists so the
+    // section doesn't render at all for users who haven't opted in.
+    experimentalGroupedWorkspaces: false,
     // Why: ship one seeded entry for each dropdown so the buttons render with
     // something usable out of the box. Users can rename / replace / delete
     // from the General settings pane.
@@ -391,6 +390,7 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     repos: [],
     sparsePresetsByRepo: {},
     worktreeMeta: {},
+    workspaceGroups: [],
     settings: getDefaultSettings(homedir),
     ui: getDefaultUIState(),
     githubCache: { pr: {}, issue: {} },

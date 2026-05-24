@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/store'
-import { getRepoMapFromState, useActiveWorktree, useRepoById } from '@/store/selectors'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useActiveWorktree,
+  useRepoById
+} from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import type { CheckStatus } from '../../../../shared/types'
@@ -69,6 +75,31 @@ function getActiveScriptStatus(
   const id = state.activeWorktreeId
   if (!id) {
     return 'idle'
+  }
+  // Why: for grouped workspaces, aggregate per-member status so the
+  // sidebar tab indicator mirrors the segmented panel's overall health:
+  // any failed → failed, else any running → running, else done when
+  // every member has succeeded, otherwise idle. Mirrors
+  // aggregateGroupSetupStatus in SetupPanel.tsx so they cannot drift.
+  // The activity-bar dot today only renders the 'running' state (see
+  // scriptStatusToCheckStatus); a future task can extend that mapping
+  // to surface failed/done globally if the design calls for it.
+  const group = getGroupByWorktreeId(state, id)
+  if (group) {
+    const members = getMemberWorktreesForGroup(state, group.id)
+    if (members.length > 0) {
+      const statuses = members.map((m) => state.scriptsByWorktree[m.id]?.[kind].status ?? 'idle')
+      if (statuses.some((s) => s === 'exited-failure')) {
+        return 'exited-failure'
+      }
+      if (statuses.some((s) => s === 'running')) {
+        return 'running'
+      }
+      if (statuses.every((s) => s === 'exited-success')) {
+        return 'exited-success'
+      }
+      return 'idle'
+    }
   }
   return state.scriptsByWorktree[id]?.[kind].status ?? 'idle'
 }

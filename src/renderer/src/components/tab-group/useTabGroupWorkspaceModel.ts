@@ -1,19 +1,17 @@
-/* eslint-disable max-lines -- Why: the split-group workspace model intentionally keeps
-   group-scoped activation, close, split, and tab-order rules together so the extracted
-   controller cannot drift from the TabGroupPanel surface it coordinates. */
 import { useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import type { OpenFile } from '@/store/slices/editor'
 import type { BrowserTab as BrowserTabState, Tab, TabGroup } from '../../../../shared/types'
 import { useAppStore } from '../../store'
-import { useAllWorktrees } from '../../store/selectors'
+import { getOrderedGroupMemberIdsForWorktree, useAllWorktrees } from '../../store/selectors'
 import { createUntitledMarkdownFile } from '../../lib/create-untitled-markdown'
 import { getConnectionId } from '../../lib/connection-context'
 import { extractIpcErrorMessage } from '../../lib/ipc-error'
 import { destroyWorkspaceWebviews } from '../../store/slices/browser-webview-cleanup'
 import { requestEditorFileClose } from '../editor/editor-autosave'
 import { focusTerminalTabSurface } from '../../lib/focus-terminal-tab-surface'
+import { aggregateGroupTabBar } from '../tab-bar/aggregate-group-tab-bar'
 
 export type GroupEditorItem = OpenFile & { tabId: string }
 export type GroupBrowserItem = BrowserTabState & { tabId: string }
@@ -21,6 +19,18 @@ export type GroupBrowserItem = BrowserTabState & { tabId: string }
 const EMPTY_GROUPS: readonly TabGroup[] = []
 const EMPTY_UNIFIED_TABS: readonly Tab[] = []
 const EMPTY_BROWSER_TABS: readonly BrowserTabState[] = []
+const EMPTY_IDS: readonly string[] = []
+const EMPTY_OPEN_FILES: readonly OpenFile[] = []
+// Why: snapshot returned when aggregateGroupMemberTabs is off so the
+// useShallow selector’s no-aggregation path keeps a stable reference and
+// useMemo downstream doesn't rebuild on every store write.
+const EMPTY_SIBLING_STATE = {
+  unifiedTabsByWorktree: {} as Record<string, Tab[]>,
+  groupsByWorktree: {} as Record<string, TabGroup[]>,
+  tabsByWorktree: {} as Record<string, never[]>,
+  browserTabsByWorktree: {} as Record<string, BrowserTabState[]>,
+  openFiles: EMPTY_OPEN_FILES
+}
 
 type TerminalTabItem = {
   id: string
@@ -36,10 +46,18 @@ type TerminalTabItem = {
 
 export function useTabGroupWorkspaceModel({
   groupId,
-  worktreeId
+  worktreeId,
+  aggregateGroupMemberTabs = false
 }: {
   groupId: string
   worktreeId: string
+  /**
+   * When true, the tab strip surfaces tabs from every sibling worktree that
+   * shares a WorkspaceGroup with `worktreeId`, in addition to this group's
+   * own tabs. Owned by the focused TabGroupPanel only — sibling-member tabs
+   * appear in exactly one strip across all split panes to avoid duplicates.
+   */
+  aggregateGroupMemberTabs?: boolean
 }) {
   const allWorktrees = useAllWorktrees()
   const worktreeState = useAppStore(
@@ -140,6 +158,179 @@ export function useTabGroupWorkspaceModel({
     [groupTabs, worktreeState.browserTabs]
   )
 
+  // Why: only the focused pane aggregates sibling-member tabs. Splits within
+  // the same worktree each render their own TabBar; surfacing sibling tabs in
+  // every strip would duplicate them across panes and confuse drag/close.
+  // Subscribing to the member ids (and slices) only when this flag is true
+  // also keeps unrelated panes from re-rendering when a sibling member’s tabs
+  // change. The full ordered member list (INCLUDING this worktree) is used to
+  // splice local tabs at the active member's canonical slot so the strip's
+  // visual order stays stable as the active member switches — without that,
+  // clicking a sibling tab would reshuffle every tab's position.
+  const memberWorktreeIdsInOrder = useAppStore(
+    useShallow((state) =>
+      aggregateGroupMemberTabs ? getOrderedGroupMemberIdsForWorktree(state, worktreeId) : EMPTY_IDS
+    )
+  )
+  const hasSiblings = useMemo(
+    () => memberWorktreeIdsInOrder.some((id) => id !== worktreeId),
+    [memberWorktreeIdsInOrder, worktreeId]
+  )
+
+  // Why: subscribe to each raw slice individually so each one is a stable
+  // reference (Zustand returns the same Record until it actually mutates).
+  // The previous useShallow over a single object that contained freshly-built
+  // inner records always allocated new sub-objects every store write — the
+  // shallow comparison only checks the OUTER keys, sees fresh inner refs, and
+  // flagged every render as a change → useSyncExternalStore re-entered →
+  // React's max-update-depth crashed. Filtering moves out of the selector
+  // into the useMemo below where it's purely derivational.
+  const allUnifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
+  const allGroupsByWorktree = useAppStore((s) => s.groupsByWorktree)
+  const allTabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const allBrowserTabsByWorktree = useAppStore((s) => s.browserTabsByWorktree)
+  const allOpenFiles = useAppStore((s) => s.openFiles)
+
+  const siblingState = useMemo(() => {
+    if (!hasSiblings) {
+      return EMPTY_SIBLING_STATE
+    }
+    const unifiedTabsByWorktree: Record<string, Tab[]> = {}
+    const groupsByWorktree: Record<string, TabGroup[]> = {}
+    const tabsByWorktree: Record<string, (typeof allTabsByWorktree)[string]> = {}
+    const browserTabsByWorktree: Record<string, BrowserTabState[]> = {}
+    for (const id of memberWorktreeIdsInOrder) {
+      if (id === worktreeId) {
+        continue
+      }
+      const u = allUnifiedTabsByWorktree[id]
+      if (u) {
+        unifiedTabsByWorktree[id] = u
+      }
+      const g = allGroupsByWorktree[id]
+      if (g) {
+        groupsByWorktree[id] = g
+      }
+      const t = allTabsByWorktree[id]
+      if (t) {
+        tabsByWorktree[id] = t
+      }
+      const b = allBrowserTabsByWorktree[id]
+      if (b) {
+        browserTabsByWorktree[id] = b
+      }
+    }
+    const openFiles = allOpenFiles.filter(
+      (f) => f.worktreeId !== worktreeId && memberWorktreeIdsInOrder.includes(f.worktreeId)
+    )
+    return {
+      unifiedTabsByWorktree,
+      groupsByWorktree,
+      tabsByWorktree,
+      browserTabsByWorktree,
+      openFiles
+    }
+  }, [
+    hasSiblings,
+    memberWorktreeIdsInOrder,
+    worktreeId,
+    allUnifiedTabsByWorktree,
+    allGroupsByWorktree,
+    allTabsByWorktree,
+    allBrowserTabsByWorktree,
+    allOpenFiles
+  ])
+
+  const aggregatedSiblings = useMemo(
+    () =>
+      aggregateGroupTabBar({
+        activeMemberWorktreeId: worktreeId,
+        memberWorktreeIdsInOrder,
+        unifiedTabsByWorktree: siblingState.unifiedTabsByWorktree,
+        groupsByWorktree: siblingState.groupsByWorktree,
+        tabsByWorktree: siblingState.tabsByWorktree,
+        openFiles: siblingState.openFiles,
+        browserTabsByWorktree: siblingState.browserTabsByWorktree
+      }),
+    [memberWorktreeIdsInOrder, siblingState, worktreeId]
+  )
+
+  // Why: splice local tabs into the active member's canonical slot rather
+  // than always at the head. Without this, every active-member switch would
+  // reshuffle the strip and the just-clicked tab would jump to a different
+  // visible column — see the "selecting the group tabs is broken" bug.
+  const aggregatedTerminalTabs = useMemo(
+    () =>
+      aggregatedSiblings.beforeLocal.terminalTabs.length === 0 &&
+      aggregatedSiblings.afterLocal.terminalTabs.length === 0
+        ? terminalTabs
+        : [
+            ...aggregatedSiblings.beforeLocal.terminalTabs,
+            ...terminalTabs,
+            ...aggregatedSiblings.afterLocal.terminalTabs
+          ],
+    [
+      aggregatedSiblings.afterLocal.terminalTabs,
+      aggregatedSiblings.beforeLocal.terminalTabs,
+      terminalTabs
+    ]
+  )
+  const aggregatedEditorItems = useMemo(
+    () =>
+      aggregatedSiblings.beforeLocal.editorItems.length === 0 &&
+      aggregatedSiblings.afterLocal.editorItems.length === 0
+        ? editorItems
+        : [
+            ...aggregatedSiblings.beforeLocal.editorItems,
+            ...editorItems,
+            ...aggregatedSiblings.afterLocal.editorItems
+          ],
+    [
+      aggregatedSiblings.afterLocal.editorItems,
+      aggregatedSiblings.beforeLocal.editorItems,
+      editorItems
+    ]
+  )
+  const aggregatedBrowserItems = useMemo(
+    () =>
+      aggregatedSiblings.beforeLocal.browserItems.length === 0 &&
+      aggregatedSiblings.afterLocal.browserItems.length === 0
+        ? browserItems
+        : [
+            ...aggregatedSiblings.beforeLocal.browserItems,
+            ...browserItems,
+            ...aggregatedSiblings.afterLocal.browserItems
+          ],
+    [
+      aggregatedSiblings.afterLocal.browserItems,
+      aggregatedSiblings.beforeLocal.browserItems,
+      browserItems
+    ]
+  )
+
+  // Why: the click handlers need to find a sibling tab’s unifiedTabId from
+  // either a terminal/browser entityId or an editor tabId. Pre-build the
+  // lookup once per render so the per-click work is O(1) regardless of how
+  // many sibling tabs exist.
+  const siblingTabByVisibleId = useMemo(() => {
+    const map = new Map<string, { ownerWorktreeId: string; tab: Tab }>()
+    for (const siblingId of memberWorktreeIdsInOrder) {
+      if (siblingId === worktreeId) {
+        continue
+      }
+      const tabs = siblingState.unifiedTabsByWorktree[siblingId]
+      if (!tabs) {
+        continue
+      }
+      for (const t of tabs) {
+        const visibleId =
+          t.contentType === 'terminal' || t.contentType === 'browser' ? t.entityId : t.id
+        map.set(visibleId, { ownerWorktreeId: siblingId, tab: t })
+      }
+    }
+    return map
+  }, [memberWorktreeIdsInOrder, siblingState.unifiedTabsByWorktree, worktreeId])
+
   const closeEditorIfUnreferenced = useCallback(
     (entityId: string, closingTabId: string) => {
       const otherReference = (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).some(
@@ -182,10 +373,62 @@ export function useTabGroupWorkspaceModel({
     }
   }, [setActiveWorktree, worktreeId])
 
+  // Why: sibling-member tabs route through the aggregated strip but use the
+  // same cross-worktree store close helpers as the legacy terminal/browser/
+  // editor paths. The visible id we receive is whatever TabBar emitted —
+  // entityId for terminals/browsers, unifiedTabId for editors — so we map it
+  // back to the unified tab to decide which close path applies.
+  const closeAggregatedSiblingTab = useCallback(
+    (visibleId: string) => {
+      const sibling = siblingTabByVisibleId.get(visibleId)
+      if (!sibling) {
+        return
+      }
+      const { tab } = sibling
+      if (tab.contentType === 'terminal') {
+        closeTab(tab.entityId)
+      } else if (tab.contentType === 'browser') {
+        destroyWorkspaceWebviews(useAppStore.getState().browserPagesByWorkspace, tab.entityId)
+        closeBrowserTab(tab.entityId)
+      } else {
+        // Editor-family: ask the file's own model whether the file should
+        // close (handles dirty-state save dialog), then drop the unified tab.
+        const otherReference = (
+          useAppStore.getState().unifiedTabsByWorktree[sibling.ownerWorktreeId] ?? []
+        ).some(
+          (other) =>
+            other.id !== tab.id &&
+            other.entityId === tab.entityId &&
+            (other.contentType === 'editor' ||
+              other.contentType === 'diff' ||
+              other.contentType === 'conflict-review')
+        )
+        if (!otherReference) {
+          const file = useAppStore
+            .getState()
+            .openFiles.find((candidate) => candidate.id === tab.entityId)
+          if (file?.isDirty) {
+            requestEditorFileClose(tab.entityId)
+            return
+          }
+          closeFile(tab.entityId)
+        }
+        closeUnifiedTab(tab.id)
+      }
+    },
+    [closeBrowserTab, closeFile, closeTab, closeUnifiedTab, siblingTabByVisibleId]
+  )
+
   const closeItem = useCallback(
     (itemId: string, opts?: { skipEmptyCheck?: boolean }) => {
       const item = groupTabs.find((candidate) => candidate.id === itemId)
       if (!item) {
+        // Why: a sibling-member tab is being closed via the aggregated strip.
+        // The store-level close helpers walk every worktree by tabId, so we
+        // can route directly without needing the local groupTabs hit.
+        // leaveWorktreeIfEmpty is intentionally skipped here — the sibling's
+        // own model handles its emptiness when its surface activates.
+        closeAggregatedSiblingTab(itemId)
         return
       }
       if (item.contentType === 'terminal') {
@@ -205,6 +448,7 @@ export function useTabGroupWorkspaceModel({
       }
     },
     [
+      closeAggregatedSiblingTab,
       closeBrowserTab,
       closeEditorIfUnreferenced,
       closeTab,
@@ -243,6 +487,19 @@ export function useTabGroupWorkspaceModel({
         (candidate) => candidate.entityId === terminalId && candidate.contentType === 'terminal'
       )
       if (!item) {
+        // Sibling-member terminal tab routed through the aggregated strip.
+        const sibling = siblingTabByVisibleId.get(terminalId)
+        if (sibling && sibling.tab.contentType === 'terminal') {
+          // Why: switch the active worktree FIRST so when the sibling member's
+          // surface becomes visible, its activate calls land on the right
+          // worktree's PTY/tab maps. activateTab() then fixes up the sibling's
+          // own activeGroupIdByWorktree/activeTabId via its cross-worktree
+          // lookup, so the user lands on the clicked tab inside that surface.
+          setActiveWorktree(sibling.ownerWorktreeId)
+          activateTab(sibling.tab.id)
+          setActiveTab(terminalId)
+          setActiveTabType('terminal')
+        }
         return
       }
       focusGroup(worktreeId, groupId)
@@ -250,13 +507,34 @@ export function useTabGroupWorkspaceModel({
       setActiveTab(terminalId)
       setActiveTabType('terminal')
     },
-    [activateTab, focusGroup, groupId, groupTabs, setActiveTab, setActiveTabType, worktreeId]
+    [
+      activateTab,
+      focusGroup,
+      groupId,
+      groupTabs,
+      setActiveTab,
+      setActiveTabType,
+      setActiveWorktree,
+      siblingTabByVisibleId,
+      worktreeId
+    ]
   )
 
   const activateEditor = useCallback(
     (tabId: string) => {
       const item = groupTabs.find((candidate) => candidate.id === tabId)
       if (!item) {
+        const sibling = siblingTabByVisibleId.get(tabId)
+        if (
+          sibling &&
+          sibling.tab.contentType !== 'terminal' &&
+          sibling.tab.contentType !== 'browser'
+        ) {
+          setActiveWorktree(sibling.ownerWorktreeId)
+          activateTab(sibling.tab.id)
+          setActiveFile(sibling.tab.entityId)
+          setActiveTabType('editor')
+        }
         return
       }
       focusGroup(worktreeId, groupId)
@@ -264,7 +542,17 @@ export function useTabGroupWorkspaceModel({
       setActiveFile(item.entityId)
       setActiveTabType('editor')
     },
-    [activateTab, focusGroup, groupId, groupTabs, setActiveFile, setActiveTabType, worktreeId]
+    [
+      activateTab,
+      focusGroup,
+      groupId,
+      groupTabs,
+      setActiveFile,
+      setActiveTabType,
+      setActiveWorktree,
+      siblingTabByVisibleId,
+      worktreeId
+    ]
   )
 
   const activateBrowser = useCallback(
@@ -273,6 +561,13 @@ export function useTabGroupWorkspaceModel({
         (candidate) => candidate.entityId === browserTabId && candidate.contentType === 'browser'
       )
       if (!item) {
+        const sibling = siblingTabByVisibleId.get(browserTabId)
+        if (sibling && sibling.tab.contentType === 'browser') {
+          setActiveWorktree(sibling.ownerWorktreeId)
+          activateTab(sibling.tab.id)
+          setActiveBrowserTab(browserTabId)
+          setActiveTabType('browser')
+        }
         return
       }
       focusGroup(worktreeId, groupId)
@@ -280,7 +575,17 @@ export function useTabGroupWorkspaceModel({
       setActiveBrowserTab(browserTabId)
       setActiveTabType('browser')
     },
-    [activateTab, focusGroup, groupId, groupTabs, setActiveBrowserTab, setActiveTabType, worktreeId]
+    [
+      activateTab,
+      focusGroup,
+      groupId,
+      groupTabs,
+      setActiveBrowserTab,
+      setActiveTabType,
+      setActiveWorktree,
+      siblingTabByVisibleId,
+      worktreeId
+    ]
   )
 
   const createSplitGroup = useCallback(
@@ -402,28 +707,43 @@ export function useTabGroupWorkspaceModel({
     [closeMany, group, groupTabs]
   )
 
-  const tabBarOrder = useMemo(
-    () =>
-      (group?.tabOrder ?? []).map((itemId) => {
-        const item = groupTabs.find((candidate) => candidate.id === itemId)
-        if (!item) {
-          return itemId
-        }
-        return item.contentType === 'terminal' || item.contentType === 'browser'
-          ? item.entityId
-          : item.id
-      }),
-    [group, groupTabs]
-  )
+  const tabBarOrder = useMemo(() => {
+    const localOrder = (group?.tabOrder ?? []).map((itemId) => {
+      const item = groupTabs.find((candidate) => candidate.id === itemId)
+      if (!item) {
+        return itemId
+      }
+      return item.contentType === 'terminal' || item.contentType === 'browser'
+        ? item.entityId
+        : item.id
+    })
+    const before = aggregatedSiblings.beforeLocal.tabBarOrder
+    const after = aggregatedSiblings.afterLocal.tabBarOrder
+    return before.length === 0 && after.length === 0
+      ? localOrder
+      : [...before, ...localOrder, ...after]
+  }, [
+    aggregatedSiblings.afterLocal.tabBarOrder,
+    aggregatedSiblings.beforeLocal.tabBarOrder,
+    group,
+    groupTabs
+  ])
 
   return {
     group,
     activeTab,
-    browserItems,
-    editorItems,
-    terminalTabs,
+    browserItems: aggregatedBrowserItems,
+    editorItems: aggregatedEditorItems,
+    terminalTabs: aggregatedTerminalTabs,
     tabBarOrder,
     groupTabs,
+    /**
+     * Maps a sibling-member tab’s visible id (entityId for terminals/browsers,
+     * unifiedTabId for editors) to the worktree that owns it. Consumed by
+     * TabBar surfaces that need to render a per-tab member affordance
+     * (e.g. the repo badge) without re-deriving the lookup themselves.
+     */
+    ownerByVisibleId: aggregatedSiblings.ownerByVisibleId,
     expandedPaneByTabId: worktreeState.expandedPaneByTabId,
     commands: {
       focusGroup: () => {
@@ -432,6 +752,7 @@ export function useTabGroupWorkspaceModel({
       activateBrowser,
       activateEditor,
       activateTerminal,
+      closeAggregatedSiblingTab,
       closeAllEditorTabsInGroup,
       closeGroup,
       closeItem,

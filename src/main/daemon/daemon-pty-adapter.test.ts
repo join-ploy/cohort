@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'os'
 import { join } from 'path'

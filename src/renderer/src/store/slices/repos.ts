@@ -21,6 +21,7 @@ export type RepoSlice = {
         Repo,
         | 'displayName'
         | 'badgeColor'
+        | 'description'
         | 'hookSettings'
         | 'worktreeBaseRef'
         | 'kind'

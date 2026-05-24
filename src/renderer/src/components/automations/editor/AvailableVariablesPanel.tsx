@@ -17,6 +17,7 @@ export function AvailableVariablesPanel(props: AvailableVariablesPanelProps): Re
   const paths = React.useMemo(() => buildPaths(props.available), [props.available])
   const automation = paths.filter((p) => p.namespace === 'automation')
   const trigger = paths.filter((p) => p.namespace === 'trigger')
+  const group = paths.filter((p) => p.namespace === 'group')
   const steps = paths.filter((p) => p.namespace === 'steps')
 
   return (
@@ -36,6 +37,7 @@ export function AvailableVariablesPanel(props: AvailableVariablesPanelProps): Re
           <>
             {renderSection('Automation', automation, false)}
             {renderSection('Trigger', trigger, false)}
+            {renderSection('Group', group, false)}
             {renderSection('Steps', steps, true)}
           </>
         )}

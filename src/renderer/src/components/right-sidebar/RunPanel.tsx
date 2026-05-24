@@ -3,9 +3,17 @@ import { Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
-import { useActiveWorktree, useRepoById } from '@/store/selectors'
+import { useShallow } from 'zustand/react/shallow'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useActiveWorktree,
+  useRepoById
+} from '@/store/selectors'
 import type { ScriptState } from '@/store/slices/scripts'
 import SidebarPtyTerminal from './SidebarPtyTerminal'
+import { RunPanelGroupContainer } from './RunPanelGroupView'
 import type { OrcaHooks } from '../../../../shared/types'
 import type {
   RunStartArgs,
@@ -182,6 +190,29 @@ export default function RunPanel(): React.JSX.Element {
   const runState = useAppStore((s) =>
     activeWorktree ? (s.scriptsByWorktree[activeWorktree.id]?.run ?? null) : null
   )
+  // Why: detect whether the active worktree belongs to a group; if so we
+  // render the segmented per-member shell with atomic Start/Stop instead of
+  // the single-worktree panel. Selectors mirror SetupPanel so ordering and
+  // resolution stays consistent across the two tabs.
+  const group = useAppStore((s) =>
+    activeWorktree ? getGroupByWorktreeId(s, activeWorktree.id) : null
+  )
+  // Why: useShallow — getMemberWorktreesForGroup returns a freshly-built
+  // array each call (it iterates memberWorktreeIds). Without element-wise
+  // comparison, useSyncExternalStore sees a new reference every render and
+  // re-enters → infinite update loop. Same applies to memberRunStates below.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
+  const repoMap = useAppStore((s) => getRepoMapFromState(s))
+  const memberRunStates = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => s.scriptsByWorktree[wt.id]?.run ?? null)
+    })
+  )
   // Why: `orca.yaml` is parsed in the main process; we read it via the
   // existing hooks:check IPC and cache the trimmed run script in local state.
   // Re-fetched whenever the active repo changes so switching repos picks up
@@ -237,6 +268,21 @@ export default function RunPanel(): React.JSX.Element {
   // (or a new IPC) to surface orca.yaml in the editor. Left as a no-op so
   // the empty-state CTA is visible but inert until that infra exists.
   const onOpenOrcaYaml = useCallback(() => {}, [])
+
+  // Why: branch AFTER all hooks fire so React's rule-of-hooks isn't violated
+  // when the active worktree toggles between grouped and ungrouped. The
+  // group container owns per-member hooks-check + state wiring on its own.
+  if (group && groupMembers && groupMembers.length > 0) {
+    return (
+      <RunPanelGroupContainer
+        groupId={group.id}
+        members={groupMembers}
+        memberRunStates={memberRunStates ?? []}
+        repoMap={repoMap}
+        defaultActiveWorktreeId={activeWorktree?.id ?? null}
+      />
+    )
+  }
 
   return (
     <RunPanelView

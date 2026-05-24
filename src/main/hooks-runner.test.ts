@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this suite covers every runner-script
-helper (setup, run, issue-command) plus the new CONDUCTOR env-var assertions
-in one place so a regression in the shared wrapper is caught against the
-full surface instead of being scattered. */
 import type { Repo } from '../shared/types'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -74,6 +70,62 @@ describe('CONDUCTOR env vars on the runner wrapper', () => {
     const result = createSetupRunnerScript(makeRepo(), '/test/repo-feature', 'pnpm install')
     expect(result.envVars).not.toHaveProperty('CONDUCTOR_WORKSPACE_NAME')
     expect(result.envVars).toHaveProperty('CONDUCTOR_ROOT_PATH')
+  })
+
+  it('omits CONDUCTOR_WORKSPACE_REPOS when the worktree is not in a group', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/setup-runner.sh')
+    const { createSetupRunnerScript } = await import('./hooks')
+    const result = createSetupRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm install',
+      'wise_panther'
+    )
+    expect(result.envVars).not.toHaveProperty('CONDUCTOR_WORKSPACE_REPOS')
+  })
+
+  it('emits CONDUCTOR_WORKSPACE_REPOS as comma-separated member subfolder names for grouped setup', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/setup-runner.sh')
+    const { createSetupRunnerScript } = await import('./hooks')
+    const result = createSetupRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm install',
+      'wise_panther',
+      ['orca', 'ploy-client']
+    )
+    expect(result.envVars).toMatchObject({
+      CONDUCTOR_WORKSPACE_NAME: 'wise_panther',
+      CONDUCTOR_WORKSPACE_REPOS: 'orca,ploy-client'
+    })
+  })
+
+  it('emits CONDUCTOR_WORKSPACE_REPOS for the run wrapper too', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/run-runner.sh')
+    const { createRunRunnerScript } = await import('./hooks')
+    const result = createRunRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm dev',
+      'wise_panther',
+      ['orca', 'ploy-client']
+    )
+    expect(result.envVars).toMatchObject({
+      CONDUCTOR_WORKSPACE_REPOS: 'orca,ploy-client'
+    })
+  })
+
+  it('omits CONDUCTOR_WORKSPACE_REPOS when the group repos list is empty', async () => {
+    execFileSyncMock.mockReturnValue('/test/repo/.git/worktrees/feature/orca/setup-runner.sh')
+    const { createSetupRunnerScript } = await import('./hooks')
+    const result = createSetupRunnerScript(
+      makeRepo(),
+      '/test/repo-feature',
+      'pnpm install',
+      'wise_panther',
+      []
+    )
+    expect(result.envVars).not.toHaveProperty('CONDUCTOR_WORKSPACE_REPOS')
   })
 })
 

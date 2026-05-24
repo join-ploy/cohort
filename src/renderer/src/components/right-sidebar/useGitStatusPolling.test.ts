@@ -55,7 +55,12 @@ async function usePollingOnce(status: GitStatusResult): Promise<PollState> {
     useActiveWorktree: () => worktree,
     useAllWorktrees: () => [worktree],
     useRepoById: () => repo,
-    useRepoMap: () => new Map([[repo.id, repo]])
+    useRepoMap: () => new Map([[repo.id, repo]]),
+    // Why: the polling hook fans out to sibling group members. With no
+    // workspaceGroups in the harness's PollState, this selector always
+    // returns an empty list, which is the correct expectation for these
+    // tests (they cover the active-worktree single-poll behavior only).
+    getOrderedGroupMemberIdsForWorktree: () => []
   }))
 
   vi.doMock('@/lib/connection-context', () => ({

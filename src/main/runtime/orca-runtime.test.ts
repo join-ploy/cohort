@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: runtime behavior is stateful and cross-cutting, so these tests stay in one file to preserve the end-to-end invariants around handles, waits, and graph sync. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorktreeMeta } from '../../shared/types'
 import { addWorktree, listWorktrees, removeWorktree } from '../git/worktree'
@@ -1939,6 +1938,8 @@ describe('OrcaRuntimeService', () => {
       TEST_WORKTREE_PATH,
       expect.objectContaining({ id: TEST_REPO_ID, path: TEST_REPO_PATH }),
       undefined,
+      undefined,
+      // groupRepos: undefined because this worktree is not in a group.
       undefined
     )
     expect(removeWorktree).toHaveBeenCalledWith(TEST_REPO_PATH, TEST_WORKTREE_PATH, false)

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- test suite covers config sync, login seeding, and fallback scenarios */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -98,6 +97,7 @@ function createSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings
     experimentalPet: false,
     experimentalActivity: true,
     experimentalWorktreeSymlinks: false,
+    experimentalGroupedWorkspaces: false,
     terminalWindowsShell: 'powershell.exe',
     terminalWindowsPowerShellImplementation: 'powershell.exe',
     enableGitHubAttribution: true,

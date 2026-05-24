@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ScriptState } from '@/store/slices/scripts'
+import type { SetupGroupMember } from './SetupPanelGroupView'
 
 // Why: mirrors RunPanel.test.tsx — the test env is `node` (no jsdom), so
 // we render the pure-view sibling SetupPanelView and walk the React
@@ -66,7 +67,15 @@ vi.mock('@/store', () => ({
 
 vi.mock('@/store/selectors', () => ({
   useActiveWorktree: () => ({ id: 'wt-1', repoId: 'repo-1', branch: 'main' }),
-  useRepoById: () => ({ id: 'repo-1', kind: 'git', path: '/tmp/repo' })
+  useRepoById: () => ({ id: 'repo-1', kind: 'git', path: '/tmp/repo' }),
+  // Why: getGroupByWorktreeId / getMemberWorktreesForGroup / getRepoMapFromState
+  // are read by the default-export container only. The empty/header/wiring
+  // tests in this file exercise SetupPanelView directly, so these stubs just
+  // need to be present (no group) — the dedicated group-mode tests below
+  // exercise SetupPanelGroupView directly without touching the store.
+  getGroupByWorktreeId: () => null,
+  getMemberWorktreesForGroup: () => [],
+  getRepoMapFromState: () => new Map()
 }))
 
 // Why: SidebarPtyTerminal pulls in xterm + the keyboard-layout probe + the
@@ -304,5 +313,139 @@ describe('SetupPanel default export — start/stop wiring', () => {
     const toastError = vi.fn()
     await _testing.callSetupStop({ worktreeId: 'wt-1' }, { stop, toastError })
     expect(toastError).toHaveBeenCalledOnce()
+  })
+})
+
+// Why: group-mode tests exercise SetupPanelGroupView directly — the pure view
+// receives already-resolved member metadata so we don't need to mock the
+// hooks:check IPC or the workspace-groups store slice here.
+function makeMember(overrides: {
+  worktreeId: string
+  repoId: string
+  repoName: string
+  setupScript?: string
+  status?: ScriptState['status']
+  isPrimaryWorktree?: boolean
+}): SetupGroupMember {
+  return {
+    worktreeId: overrides.worktreeId,
+    repoId: overrides.repoId,
+    repoName: overrides.repoName,
+    isPrimaryWorktree: overrides.isPrimaryWorktree ?? false,
+    setupScript: overrides.setupScript ?? 'pnpm install',
+    setupState: {
+      ptyId: null,
+      status: overrides.status ?? 'idle',
+      exitCode: null,
+      startedAt: null
+    }
+  }
+}
+
+describe('SetupPanelGroupView — segmented mode', () => {
+  it('renders one segment per member when the workspace is grouped', async () => {
+    const { SetupPanelGroupView } = await import('./SetupPanelGroupView')
+    const members = [
+      makeMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'frontend' }),
+      makeMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'backend' }),
+      makeMember({ worktreeId: 'wt-c', repoId: 'repo-c', repoName: 'shared' })
+    ]
+    const html = renderToStaticMarkup(
+      <SetupPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(html).toContain('frontend')
+    expect(html).toContain('backend')
+    expect(html).toContain('shared')
+  })
+
+  it('switching segments via activeRepoId shows that member’s setup state', async () => {
+    const { SetupPanelGroupView } = await import('./SetupPanelGroupView')
+    // Why: each member carries a distinct setup state — the running one
+    // must be the rendered body when its repoId is active, not the idle
+    // one. Header text "running…" vs "never run" disambiguates.
+    const members = [
+      makeMember({
+        worktreeId: 'wt-a',
+        repoId: 'repo-a',
+        repoName: 'alpha',
+        status: 'idle'
+      }),
+      makeMember({
+        worktreeId: 'wt-b',
+        repoId: 'repo-b',
+        repoName: 'bravo',
+        status: 'running'
+      })
+    ]
+    const htmlA = renderToStaticMarkup(
+      <SetupPanelGroupView
+        members={members}
+        activeRepoId="repo-a"
+        onSelectRepo={() => {}}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(htmlA).toMatch(/never run/i)
+    const htmlB = renderToStaticMarkup(
+      <SetupPanelGroupView
+        members={members}
+        activeRepoId="repo-b"
+        onSelectRepo={() => {}}
+        onReRun={() => {}}
+        onStop={() => {}}
+        onOpenOrcaYaml={() => {}}
+      />
+    )
+    expect(htmlB).toMatch(/running/i)
+  })
+
+  it('Re-run on the selected segment fires with that member’s worktreeId', async () => {
+    const { SetupPanelGroupView } = await import('./SetupPanelGroupView')
+    const members = [
+      makeMember({ worktreeId: 'wt-a', repoId: 'repo-a', repoName: 'alpha' }),
+      makeMember({ worktreeId: 'wt-b', repoId: 'repo-b', repoName: 'bravo' })
+    ]
+    const onReRun = vi.fn()
+    const element = SetupPanelGroupView({
+      members,
+      activeRepoId: 'repo-b',
+      onSelectRepo: () => {},
+      onReRun,
+      onStop: () => {},
+      onOpenOrcaYaml: () => {}
+    })
+    const button = findByAriaLabel(element, 'Re-run setup script')
+    ;(button.props.onClick as () => void)()
+    expect(onReRun).toHaveBeenCalledOnce()
+    expect(onReRun).toHaveBeenCalledWith('wt-b')
+  })
+})
+
+describe('aggregateGroupSetupStatus', () => {
+  it('returns failed when any member failed', async () => {
+    const { aggregateGroupSetupStatus } = await import('./SetupPanelGroupView')
+    expect(aggregateGroupSetupStatus(['done', 'failed', 'running'])).toBe('failed')
+  })
+  it('returns running when none failed but at least one is running', async () => {
+    const { aggregateGroupSetupStatus } = await import('./SetupPanelGroupView')
+    expect(aggregateGroupSetupStatus(['idle', 'running', 'done'])).toBe('running')
+  })
+  it('returns done only when every member finished successfully', async () => {
+    const { aggregateGroupSetupStatus } = await import('./SetupPanelGroupView')
+    expect(aggregateGroupSetupStatus(['done', 'done'])).toBe('done')
+    expect(aggregateGroupSetupStatus(['done', 'idle'])).toBe('idle')
+  })
+  it('returns idle for an empty member list', async () => {
+    const { aggregateGroupSetupStatus } = await import('./SetupPanelGroupView')
+    expect(aggregateGroupSetupStatus([])).toBe('idle')
   })
 })

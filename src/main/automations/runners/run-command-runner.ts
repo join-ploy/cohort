@@ -6,6 +6,7 @@ import { OpenCommandPaneError } from '../open-command-pane'
 import { SendCommandToPaneError } from '../send-command-to-pane'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 import { OutputTail } from '../output-tail'
+import { parseMemberScopedRef } from '../../../shared/automation-member-scoped-ref'
 
 /** Debounce window for the agent-done completion path. An agent that briefly
  *  flips done → working → done shouldn't satisfy the gate on its first idle
@@ -25,6 +26,11 @@ export type RunCommandDeps = {
     source: 'review' | 'create-pr' | 'custom'
     commandId?: string
     customCommand?: string
+    /** When the runner unwrapped a `member:<groupId>:<worktreeId>` ref, this
+     *  flag forwards to the renderer hook which threads `keepCwd: true` into
+     *  pty.spawn so Phase J1's CWD override is skipped and the agent runs at
+     *  the member's worktreePath. */
+    memberScoped?: boolean
   }) => Promise<{ ptyId: string; paneKey: string }>
   getPtyExit: (ptyId: string) => PtyExitEntry | undefined
   /** Subscribe to the main-process PTY data stream. Returns an unsubscribe
@@ -47,6 +53,13 @@ export type RunCommandDeps = {
    *  flips to `done`, which is the same completion signal run-prompt uses.
    *  Optional so existing test harnesses that don't wire it keep working. */
   getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
+  /** Resolves a `group:<uuid>` ref (the output of CreateWorkspaceGroupRunner)
+   *  to the group's first member worktreeId so the command pane has something
+   *  real to bind to. Phase J1's pty:spawn override then redirects CWD to the
+   *  group's parentPath automatically because the member has groupId set.
+   *  Optional so the unit-test harness that never addresses groups can skip
+   *  the wiring. */
+  getGroupSummary?: (groupId: string) => { firstMemberWorktreeId: string } | undefined
   now: () => number
 }
 
@@ -106,8 +119,35 @@ export class RunCommandRunner implements StepRunner {
       let worktreeId: string
       let customCommand: string | undefined
       let resolvedPaneRef = ''
+      let memberScoped = false
       try {
         worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
+        // Why (grouped-workspaces parity with run-prompt-runner): a resolved
+        // `group:<uuid>` ref must be redirected to a real member worktreeId
+        // before we hand it to openCommandPane, which fails with "Worktree is
+        // no longer available" because the registry is keyed by member
+        // worktreeId. The Phase J1 pty:spawn override then plants the CWD at
+        // the group's parentPath automatically because the member carries
+        // groupId. Member-scoped refs (`member:<groupId>:<worktreeId>`) are
+        // unwrapped to the inner worktreeId AND `memberScoped: true` is
+        // forwarded to the openCommandPane payload — the renderer hook then
+        // passes `keepCwd: true` to pty.spawn so Phase J1 skips the override
+        // and the agent runs at the member's path (not the group's parent).
+        const memberScopedRef = parseMemberScopedRef(worktreeId)
+        if (memberScopedRef) {
+          worktreeId = memberScopedRef.worktreeId
+          memberScoped = true
+        } else if (worktreeId.startsWith('group:')) {
+          const groupSummary = this.deps.getGroupSummary?.(worktreeId)
+          if (!groupSummary) {
+            return {
+              outcome: 'failed',
+              status: 'failed',
+              error: `Group not found for worktreeRef "${worktreeId}".`
+            }
+          }
+          worktreeId = groupSummary.firstMemberWorktreeId
+        }
         // Why: only the custom-source path carries a free-form command line;
         // for review / create-pr the commandId is a stable UUID into
         // settings.*Commands and does not need template resolution.
@@ -210,7 +250,8 @@ export class RunCommandRunner implements StepRunner {
           worktreeId,
           source: config.source,
           commandId: config.commandId,
-          customCommand
+          customCommand,
+          ...(memberScoped ? { memberScoped: true } : {})
         })
         ptyId = result.ptyId
         paneKey = result.paneKey

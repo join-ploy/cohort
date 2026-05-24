@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {

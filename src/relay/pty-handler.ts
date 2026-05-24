@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import type { IPty } from 'node-pty'
 import type * as NodePty from 'node-pty'
 import type { RelayDispatcher, RequestContext } from './dispatcher'

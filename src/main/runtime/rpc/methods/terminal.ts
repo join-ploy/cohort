@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines -- Why: terminal RPC methods are co-located for discoverability; splitting would scatter related handlers across files. */
 import { z } from 'zod'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
 import { OptionalFiniteNumber, OptionalString, requiredString } from '../schemas'

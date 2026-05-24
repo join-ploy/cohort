@@ -1,5 +1,6 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { RunPromptConfig } from '../../../shared/automations-types'
+import { parseMemberScopedRef } from '../../../shared/automation-member-scoped-ref'
 import type { AgentStatusEntry } from '../../agent-status/registry'
 import { OpenPromptPaneError } from '../open-prompt-pane'
 import { SendPromptToPaneError } from '../send-prompt-to-pane'
@@ -18,6 +19,13 @@ export type RunPromptDeps = {
     prompt: string
     worktreePath?: string
     connectionId?: string | null
+    /** Member-scoped marker (Ask C). When true, the renderer threads
+     *  `keepCwd: true` through to `pty.spawn` so the Phase J1 grouped-
+     *  worktree cwd override doesn't redirect the agent's CWD to the
+     *  group's parentPath. The tab itself is still bound to the member
+     *  worktreeId (so the group's card/stop-all/tab strip still own it).
+     *  Optional so non-grouped chains stay unaffected. */
+    memberScoped?: boolean
   }) => Promise<{ paneKey: string }>
   /** Reuses an existing pane by paneKey instead of opening a new one. Optional
    *  so legacy `paneRef`-less chains keep working without wiring the IPC; the
@@ -32,6 +40,21 @@ export type RunPromptDeps = {
    *  back to the legacy cache lookup. */
   getWorktreeSummary?: (worktreeId: string) => {
     path: string
+    connectionId: string | null
+  } | null
+  /** Resolves a `group:<uuid>` id (the output of CreateWorkspaceGroupRunner)
+   *  into the group's parent path plus the first member's worktreeId. The
+   *  agent is launched with CWD = `parentPath` so `pwd` shows the shared
+   *  workspace folder; the member worktreeId is what the pane is bound to in
+   *  the UI (status registry, tab activation). Returns null when the id is
+   *  not a group reference; the runner then falls through to the worktree
+   *  path. Optional so tests that never address a group can skip wiring. */
+  getGroupSummary?: (groupId: string) => {
+    parentPath: string
+    firstMemberWorktreeId: string
+    /** Connection id of the member's owning repo. Groups are uniform-
+     *  connection by construction (validated at create time), so the first
+     *  member is representative. */
     connectionId: string | null
   } | null
   /** Resolve a paneKey to its current ptyId so the runner can subscribe to
@@ -156,18 +179,72 @@ export class RunPromptRunner implements StepRunner {
 
       let paneKey: string
       try {
-        // Why: pre-resolve path + connectionId in main and hand them to the
-        // renderer so it doesn't have to look the worktree up in its cache.
-        // The chain creates the worktree milliseconds earlier; the renderer's
-        // `worktrees:changed` broadcast may not have settled yet.
-        const summary = this.deps.getWorktreeSummary?.(worktreeId) ?? null
+        // Why (grouped-workspaces L3): when the resolved worktreeRef is a
+        // `group:<uuid>` id (e.g. `{{steps.<create-workspace-group>.groupId}}`),
+        // the agent should run at the group's shared parent folder rather than
+        // any single member's worktree. Redirect both the worktreeId binding
+        // (to the first member, so UI tab/status lookups still find a real
+        // worktree) and the CWD (to parentPath) here. Phase J's pty:spawn
+        // override handles the inverse case — when the ref is a member
+        // worktreeId, it already redirects the CWD to parentPath if the
+        // worktree has groupId set — so we don't need a second branch for
+        // member-targeted runs.
+        //
+        // Ask C (member-scoped): a `member:<groupId>:<worktreeId>` ref means
+        // "run at the member worktree's path, but keep the terminal bound to
+        // the group". We bind the tab to the member worktreeId (the group's
+        // card already owns any tab whose worktreeId is a member), then pass
+        // `memberScoped: true` so the renderer threads `keepCwd: true` and
+        // Phase J1 doesn't bounce the CWD back up to parentPath.
+        let effectiveWorktreeId = worktreeId
+        let effectiveSummary: { path: string; connectionId: string | null } | null = null
+        let memberScoped = false
+        const parsedMemberScoped = parseMemberScopedRef(worktreeId)
+        if (parsedMemberScoped) {
+          // Why: ignore the renderer's possibly-stale cache here too — we
+          // need the member's path to plant the agent there even if the
+          // member was minted milliseconds earlier in the same chain.
+          const memberSummary =
+            this.deps.getWorktreeSummary?.(parsedMemberScoped.worktreeId) ?? null
+          if (!memberSummary) {
+            return {
+              outcome: 'failed',
+              status: 'failed',
+              error: `Member worktree not found for worktreeRef "${worktreeId}".`
+            }
+          }
+          effectiveWorktreeId = parsedMemberScoped.worktreeId
+          effectiveSummary = memberSummary
+          memberScoped = true
+        } else if (worktreeId.startsWith('group:')) {
+          const groupSummary = this.deps.getGroupSummary?.(worktreeId) ?? null
+          if (!groupSummary) {
+            return {
+              outcome: 'failed',
+              status: 'failed',
+              error: `Group not found for worktreeRef "${worktreeId}".`
+            }
+          }
+          effectiveWorktreeId = groupSummary.firstMemberWorktreeId
+          effectiveSummary = {
+            path: groupSummary.parentPath,
+            connectionId: groupSummary.connectionId
+          }
+        } else {
+          // Why: pre-resolve path + connectionId in main and hand them to the
+          // renderer so it doesn't have to look the worktree up in its cache.
+          // The chain creates the worktree milliseconds earlier; the renderer's
+          // `worktrees:changed` broadcast may not have settled yet.
+          effectiveSummary = this.deps.getWorktreeSummary?.(worktreeId) ?? null
+        }
         const result = await this.deps.openPromptPane({
-          worktreeId,
+          worktreeId: effectiveWorktreeId,
           agentId: config.agentId,
           prompt,
-          ...(summary
-            ? { worktreePath: summary.path, connectionId: summary.connectionId }
-            : {})
+          ...(effectiveSummary
+            ? { worktreePath: effectiveSummary.path, connectionId: effectiveSummary.connectionId }
+            : {}),
+          ...(memberScoped ? { memberScoped: true } : {})
         })
         paneKey = result.paneKey
       } catch (e) {
@@ -295,10 +372,7 @@ export class RunPromptRunner implements StepRunner {
    *  if the deps aren't wired or the pane isn't bound to a live PTY yet, we
    *  fall through with `outputTail = null` and downstream callsites surface
    *  an empty string. */
-  private buildTracker(
-    paneKey: string,
-    opts: { requiresWorkingFirst: boolean }
-  ): Tracker {
+  private buildTracker(paneKey: string, opts: { requiresWorkingFirst: boolean }): Tracker {
     const tracker: Tracker = {
       paneKey,
       openedAt: this.deps.now(),

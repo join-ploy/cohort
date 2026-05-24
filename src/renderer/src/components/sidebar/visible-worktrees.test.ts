@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { describe, expect, it } from 'vitest'
 import {
   computeClearFilterActions,
@@ -200,6 +199,22 @@ describe('computeVisibleWorktreeIds', () => {
     )
 
     expect(result).toEqual([feature.id])
+  })
+
+  it('filters out worktrees that belong to a workspace group', () => {
+    // Why: group members render inside the GroupsSection card, not under their
+    // repo's section, so they must be suppressed from the per-repo visible list.
+    const ungrouped = makeWorktree('a', 'repo1')
+    const member = makeWorktree('b', 'repo1')
+    member.groupId = 'group:x'
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [ungrouped, member] },
+      [ungrouped.id, member.id],
+      visibleOptions()
+    )
+
+    expect(result).toEqual([ungrouped.id])
   })
 
   it('composes with filterRepoIds: hides mains only within the selected repos', () => {

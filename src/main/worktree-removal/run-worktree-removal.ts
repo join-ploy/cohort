@@ -7,6 +7,7 @@ import { removeWorktree } from '../git/worktree'
 import { gitExecFileAsync } from '../git/runner'
 import { getSshGitProvider } from '../providers/ssh-git-dispatch'
 import { getEffectiveHooks, runHook } from '../hooks'
+import { findGroupForWorktree, resolveGroupRepoNames } from '../workspace-group-runtime'
 import {
   parseWorktreeId,
   formatWorktreeRemovalError,
@@ -105,7 +106,20 @@ export async function runWorktreeRemoval(
     // archive script sees $CONDUCTOR_WORKSPACE_NAME — same value setup/run
     // used. removeWorktreeMeta runs after this returns, so the read is safe.
     const archiveWorkspaceName = store.getWorktreeMeta(args.worktreeId)?.workspaceName
-    const result = await runHook('archive', worktreePath, repo, undefined, archiveWorkspaceName)
+    // Why: grouped worktrees also surface their sibling repos via
+    // $CONDUCTOR_WORKSPACE_REPOS so archive scripts can fan out across the
+    // group (e.g. drop Postgres DBs named after each sibling). Absent when
+    // the worktree isn't a group member.
+    const group = findGroupForWorktree(args.worktreeId, store.getWorkspaceGroups())
+    const groupRepos = group ? resolveGroupRepoNames(group) : undefined
+    const result = await runHook(
+      'archive',
+      worktreePath,
+      repo,
+      undefined,
+      archiveWorkspaceName,
+      groupRepos
+    )
     if (!result.success) {
       console.error(`[hooks] archive hook failed for ${worktreePath}:`, result.output)
     }

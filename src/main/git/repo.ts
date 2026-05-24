@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import { execSync } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import { join, basename } from 'path'

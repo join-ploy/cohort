@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: remove/list/sparse cleanup tests share one git runner
-   mock harness, and splitting them would duplicate setup without a clearer boundary. */
 import type * as FsPromises from 'fs/promises'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

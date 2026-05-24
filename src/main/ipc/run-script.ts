@@ -8,6 +8,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 
 import { createRunRunnerScript, getEffectiveHooks } from '../hooks'
+import { findGroupForWorktree, resolveGroupRepoNames } from '../workspace-group-runtime'
 import type { IPtyProvider } from '../providers/types'
 import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { Store } from '../persistence'
@@ -194,7 +195,12 @@ async function runStartLocked(
   // the freshly-spawned shell after it signals shell-ready. workspaceName
   // becomes $CONDUCTOR_WORKSPACE_NAME inside the wrapper.
   const workspaceName = deps.store.getWorktreeMeta(args.worktreeId)?.workspaceName
-  const wrapped = createRunRunnerScript(repo, worktreePath, script, workspaceName)
+  // Why: grouped workspaces also publish their sibling repos as
+  // $CONDUCTOR_WORKSPACE_REPOS so run scripts can iterate over the full
+  // group (e.g. boot every sibling's dev server).
+  const runGroup = findGroupForWorktree(args.worktreeId, deps.store.getWorkspaceGroups())
+  const runGroupRepos = runGroup ? resolveGroupRepoNames(runGroup) : undefined
+  const wrapped = createRunRunnerScript(repo, worktreePath, script, workspaceName, runGroupRepos)
   const generation = nextGen()
   // Why: self-terminating wrapper exits the parent shell when the runner exits,
   // so node-pty's onExit fires and run:exited is broadcast. Without this the

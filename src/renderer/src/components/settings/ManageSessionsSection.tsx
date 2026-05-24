@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this pane owns all admin controls for the
-   pty daemon (list, kill-all, kill-one, restart) plus the confirmation
-   dialog and table. Splitting would scatter the shared action state and
-   toast copy across files without a cleaner ownership seam. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: bridge schema, request mapping, and result normalization stay together so platform scripts have one audited contract. */
 import { execFile } from 'child_process'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'

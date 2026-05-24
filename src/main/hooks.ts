@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: hook parsing, layered issue-command resolution, and cross-platform runner setup share one execution surface, so keeping them together avoids subtle drift across create/read/write paths. */
 import { readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { exec, execFile } from 'child_process'
@@ -514,7 +513,8 @@ export function getSetupCommandSource(
 function getSetupEnvVars(
   repo: Repo,
   worktreePath: string,
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): Record<string, string> {
   return {
     ORCA_ROOT_PATH: repo.path,
@@ -526,6 +526,14 @@ function getSetupEnvVars(
     // worktrees synthesized before backfill omit it).
     CONDUCTOR_ROOT_PATH: repo.path,
     ...(workspaceName ? { CONDUCTOR_WORKSPACE_NAME: workspaceName } : {}),
+    // Why: grouped workspaces expose the sibling repos as
+    // CONDUCTOR_WORKSPACE_REPOS so setup/run/archive scripts can fan out
+    // across the group (e.g. `for r in $CONDUCTOR_WORKSPACE_REPOS; do ...`).
+    // Absent for non-grouped worktrees so existing single-repo scripts see
+    // no new variable.
+    ...(groupRepos && groupRepos.length > 0
+      ? { CONDUCTOR_WORKSPACE_REPOS: groupRepos.join(',') }
+      : {}),
     GHOSTX_ROOT_PATH: repo.path
   }
 }
@@ -563,16 +571,25 @@ export function createSetupRunnerScript(
   repo: Repo,
   worktreePath: string,
   script: string,
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): WorktreeSetupLaunch {
-  return createWorktreeRunnerScript(repo, worktreePath, script, 'setup-runner', workspaceName)
+  return createWorktreeRunnerScript(
+    repo,
+    worktreePath,
+    script,
+    'setup-runner',
+    workspaceName,
+    groupRepos
+  )
 }
 
 export function createIssueCommandRunnerScript(
   repo: Repo,
   worktreePath: string,
   command: string,
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): WorktreeSetupLaunch {
   // Why: long issue-automation commands are user-visible shell input when
   // written directly to the PTY, so terminal line editors can wrap or truncate
@@ -584,7 +601,8 @@ export function createIssueCommandRunnerScript(
     worktreePath,
     command,
     'issue-command-runner',
-    workspaceName
+    workspaceName,
+    groupRepos
   )
 }
 
@@ -592,11 +610,19 @@ export function createRunRunnerScript(
   repo: Repo,
   worktreePath: string,
   script: string,
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): WorktreeSetupLaunch {
   // Why: scripts.run is user-authored shell input; wrapping ensures non-zero
   // exits propagate and ORCA_WORKTREE_PATH is set before exec.
-  return createWorktreeRunnerScript(repo, worktreePath, script, 'run-runner', workspaceName)
+  return createWorktreeRunnerScript(
+    repo,
+    worktreePath,
+    script,
+    'run-runner',
+    workspaceName,
+    groupRepos
+  )
 }
 
 function createWorktreeRunnerScript(
@@ -604,9 +630,10 @@ function createWorktreeRunnerScript(
   worktreePath: string,
   script: string,
   runnerBaseName: 'setup-runner' | 'issue-command-runner' | 'run-runner',
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): WorktreeSetupLaunch {
-  const envVars = getSetupEnvVars(repo, worktreePath, workspaceName)
+  const envVars = getSetupEnvVars(repo, worktreePath, workspaceName, groupRepos)
   // Why: WSL worktrees run on a Linux filesystem even though process.platform
   // is 'win32'. Use bash scripts for WSL, .cmd for native Windows.
   const wslWorktree = isWslPath(worktreePath)
@@ -661,7 +688,8 @@ export function runHook(
   cwd: string,
   repo: Repo,
   hooksPath?: string,
-  workspaceName?: string
+  workspaceName?: string,
+  groupRepos?: readonly string[]
 ): Promise<{ success: boolean; output: string }> {
   const hooks = getEffectiveHooks(repo, hooksPath)
   const script = hooks?.scripts[hookName]
@@ -683,7 +711,7 @@ export function runHook(
     // Why: translate ORCA_ROOT_PATH / ORCA_WORKTREE_PATH to Linux paths so
     // hook scripts that reference $ORCA_WORKTREE_PATH get usable paths
     // inside WSL, not Windows UNC paths.
-    const envVars = getSetupEnvVars(repo, cwd, workspaceName)
+    const envVars = getSetupEnvVars(repo, cwd, workspaceName, groupRepos)
     const wslEnv: Record<string, string> = {}
     for (const [key, value] of Object.entries(envVars)) {
       wslEnv[key] = toLinuxPath(value)
@@ -726,7 +754,7 @@ export function runHook(
         shell: getHookShell(),
         env: {
           ...process.env,
-          ...getSetupEnvVars(repo, cwd, workspaceName)
+          ...getSetupEnvVars(repo, cwd, workspaceName, groupRepos)
         }
       },
       (error, stdout, stderr) => {

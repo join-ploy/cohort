@@ -109,4 +109,68 @@ describe('dryRunTemplate', () => {
     expect(errors).toHaveLength(1)
     expect(errors[0]).toMatchObject({ code: 'unknown-path' })
   })
+
+  describe('group namespace', () => {
+    const WITH_GROUP: AvailableVariables = {
+      automation: {},
+      trigger: {},
+      steps: {},
+      group: {
+        id: 'string',
+        parentPath: 'string',
+        members: {
+          orca: {
+            worktreeId: 'string',
+            path: 'string',
+            repoId: 'string',
+            scoped: 'string',
+            description: 'string'
+          }
+        }
+      }
+    }
+
+    it('accepts top-level group paths when the namespace is in scope', () => {
+      expect(dryRunTemplate('{{group.id}}', WITH_GROUP)).toEqual([])
+      expect(dryRunTemplate('{{group.parentPath}}', WITH_GROUP)).toEqual([])
+    })
+
+    it('accepts per-member group paths when the namespace is in scope', () => {
+      expect(dryRunTemplate('{{group.members.orca.scoped}}', WITH_GROUP)).toEqual([])
+      expect(dryRunTemplate('{{group.members.orca.worktreeId}}', WITH_GROUP)).toEqual([])
+    })
+
+    it('accepts group.members.<repo>.description as a string leaf', () => {
+      expect(dryRunTemplate('{{group.members.orca.description}}', WITH_GROUP)).toEqual([])
+    })
+
+    it('rejects group paths when the namespace is absent', () => {
+      const schema: AvailableVariables = {
+        automation: {},
+        trigger: {},
+        steps: {}
+      }
+      const errors = dryRunTemplate('{{group.members.orca.scoped}}', schema)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+    })
+
+    it('flags an unknown member key under group.members', () => {
+      const errors = dryRunTemplate('{{group.members.unknown.scoped}}', WITH_GROUP)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+    })
+
+    it('flags an unknown leaf on a known member', () => {
+      const errors = dryRunTemplate('{{group.members.orca.bogus}}', WITH_GROUP)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+    })
+
+    it('flags bare {{group}} as not a leaf', () => {
+      const errors = dryRunTemplate('{{group}}', WITH_GROUP)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ code: 'unknown-path' })
+    })
+  })
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { OrcaHooks, Repo, RepoHookSettings, SetupRunPolicy } from '../../../../shared/types'
 import { getRepoKindLabel, isFolderRepo } from '../../../../shared/repo-kind'
 import { REPO_COLORS } from '../../../../shared/constants'
@@ -37,6 +37,19 @@ export function getRepositoryPaneSearchEntries(repo: Repo): SettingsSearchEntry[
       title: 'Badge Color',
       description: 'Repo color used in the sidebar and tabs.',
       keywords: [repo.displayName, 'color', 'badge']
+    },
+    {
+      title: 'Description',
+      description: 'Optional repo description, surfaced in automation prompts.',
+      keywords: [
+        repo.displayName,
+        'description',
+        'about',
+        'summary',
+        'automation',
+        'template',
+        'prompt'
+      ]
     },
     ...(isFolder
       ? []
@@ -151,6 +164,26 @@ export function RepositoryPane({
   const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null)
   const [copiedTemplate, setCopiedTemplate] = useState(false)
 
+  // Why: mirror the RepositoryHooksSection draft pattern — keep the textarea's
+  // local state separate from the persisted value so users can type freely
+  // without each keystroke roundtripping through main. Re-sync when the repo
+  // id flips (settings page switches projects) or the persisted value changes
+  // (another window edited it). Commit on blur, only when the trimmed string
+  // actually differs from what's persisted.
+  const persistedDescription = repo.description ?? ''
+  const [descriptionDraft, setDescriptionDraft] = useState(persistedDescription)
+  useEffect(() => {
+    setDescriptionDraft(persistedDescription)
+  }, [persistedDescription, repo.id])
+  const commitDescription = useCallback((): void => {
+    const trimmed = descriptionDraft.trim()
+    if (trimmed === persistedDescription.trim()) {
+      return
+    }
+    setDescriptionDraft(trimmed)
+    updateRepo(repo.id, { description: trimmed })
+  }, [descriptionDraft, persistedDescription, repo.id, updateRepo])
+
   const handleRemoveRepo = (repoId: string) => {
     if (confirmingRemove === repoId) {
       removeRepo(repoId)
@@ -213,7 +246,9 @@ export function RepositoryPane({
 
   const allEntries = getRepositoryPaneSearchEntries(repo)
   const identityEntries = allEntries.filter((entry) =>
-    ['Display Name', 'Badge Color', 'Default Worktree Base', 'Remove Repo'].includes(entry.title)
+    ['Display Name', 'Badge Color', 'Description', 'Default Worktree Base', 'Remove Repo'].includes(
+      entry.title
+    )
   )
   const sparsePresetEntries = allEntries.filter((entry) =>
     ['Sparse Checkout Presets'].includes(entry.title)
@@ -305,6 +340,38 @@ export function RepositoryPane({
               />
             ))}
           </div>
+        </SearchableSetting>
+
+        <SearchableSetting
+          title="Description"
+          description="Optional repo description, surfaced in automation prompts."
+          keywords={[
+            repo.displayName,
+            'description',
+            'about',
+            'summary',
+            'automation',
+            'template',
+            'prompt'
+          ]}
+          className="space-y-2"
+        >
+          <Label className="text-sm font-semibold">Description</Label>
+          <textarea
+            value={descriptionDraft}
+            onChange={(e) => setDescriptionDraft(e.target.value)}
+            onBlur={commitDescription}
+            placeholder="e.g. Web app frontend (React + TS)"
+            rows={3}
+            className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          />
+          <p className="text-xs text-muted-foreground">
+            Shown to automations as{' '}
+            <code className="rounded bg-muted px-1 py-0.5">
+              {'{{'}group.members.&lt;repo&gt;.description{'}}'}
+            </code>
+            . Multi-line allowed.
+          </p>
         </SearchableSetting>
 
         {!isFolder ? (

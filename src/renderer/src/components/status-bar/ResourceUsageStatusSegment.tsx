@@ -1,9 +1,3 @@
-/* eslint-disable max-lines -- Why: consolidating memory + sessions into one
-   surface deliberately co-locates the sparkline, worktree tree, session list,
-   daemon actions, and kill-confirm dialog so the popover body and badge stay
-   consistent. Splitting across files would scatter render-state that only
-   exists to serve this one status-bar segment. See
-   docs/resource-usage-merge-spec.md for the full design. */
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,

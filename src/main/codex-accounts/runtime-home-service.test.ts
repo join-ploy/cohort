@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- test suite covers snapshot, migration, auth materialization, and error-resilience scenarios */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   chmodSync,
@@ -105,6 +104,7 @@ function createSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings
     experimentalPet: false,
     experimentalActivity: true,
     experimentalWorktreeSymlinks: false,
+    experimentalGroupedWorkspaces: false,
     terminalWindowsShell: 'powershell.exe',
     terminalWindowsPowerShellImplementation: 'powershell.exe',
     enableGitHubAttribution: true,

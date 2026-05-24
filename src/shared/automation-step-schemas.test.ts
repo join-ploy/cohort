@@ -7,6 +7,7 @@ import {
   WAIT_FOR_SETUP_OUTPUT_SCHEMA,
   RUN_PROMPT_OUTPUT_SCHEMA,
   RUN_COMMAND_OUTPUT_SCHEMA,
+  UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
   type SchemaLeafType
 } from './automation-step-schemas'
 
@@ -66,10 +67,15 @@ describe('automation step schemas', () => {
     })
   })
 
+  it('update-linear-issue schema is empty (no template-consumable output)', () => {
+    expect(UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA).toEqual({})
+  })
+
   it('getOutputSchemaForKind returns the schema for each kind', () => {
     expect(getOutputSchemaForKind('create-worktree')).toBe(CREATE_WORKTREE_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('wait-for-setup')).toBe(WAIT_FOR_SETUP_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('run-prompt')).toBe(RUN_PROMPT_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('run-command')).toBe(RUN_COMMAND_OUTPUT_SCHEMA)
+    expect(getOutputSchemaForKind('update-linear-issue')).toBe(UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA)
   })
 })

@@ -1,4 +1,4 @@
-import type { TuiAgent } from './types'
+import type { SetupDecision, TuiAgent } from './types'
 
 export type AutomationWorkspaceMode = 'existing' | 'new_per_run'
 export type AutomationExecutionTargetType = 'local' | 'ssh'
@@ -26,12 +26,24 @@ export type AutomationRunTrigger = 'scheduled' | 'manual' | 'auto'
 
 export type AutomationSchedulePreset = 'hourly' | 'daily' | 'weekdays' | 'weekly'
 
+// Grouped-workspaces discriminator: lets an automation address either a single
+// repo (`single`) or a set of repos run together (`group`). Legacy automations
+// have no `target`; readers should call `normalizeAutomationTarget` to inflate
+// `projectId` into a `{ kind: 'single' }` value so downstream code can branch
+// uniformly.
+export type AutomationTarget =
+  | { kind: 'single'; projectId: string }
+  | { kind: 'group'; projectIds: string[]; groupBranchName?: string }
+
 export type Automation = {
   id: string
   name: string
   prompt: string
   agentId: TuiAgent
   projectId: string
+  // Optional discriminator added for grouped-workspaces. When absent, treat the
+  // automation as `{ kind: 'single', projectId }` (see automation-target-migration).
+  target?: AutomationTarget
   executionTargetType: AutomationExecutionTargetType
   executionTargetId: string
   schedulerOwner: AutomationSchedulerOwner
@@ -92,6 +104,9 @@ export type AutomationCreateInput = {
   prompt: string
   agentId: TuiAgent
   projectId: string
+  // Optional at create time so legacy single-repo call sites stay unchanged;
+  // grouped-workspace creators pass a `{ kind: 'group', ... }` value.
+  target?: AutomationTarget
   workspaceMode: AutomationWorkspaceMode
   workspaceId?: string | null
   baseBranch?: string | null
@@ -115,6 +130,7 @@ export type AutomationUpdateInput = Partial<
     | 'prompt'
     | 'agentId'
     | 'projectId'
+    | 'target'
     | 'workspaceMode'
     | 'workspaceId'
     | 'baseBranch'
@@ -236,7 +252,13 @@ export type AutoDedupEntry = {
   lastRunId?: string
 }
 
-export type StepKind = 'run-prompt' | 'create-worktree' | 'wait-for-setup' | 'run-command'
+export type StepKind =
+  | 'run-prompt'
+  | 'create-worktree'
+  | 'create-workspace-group'
+  | 'wait-for-setup'
+  | 'run-command'
+  | 'update-linear-issue'
 
 export type RunPromptConfig = {
   worktreeRef: string
@@ -267,6 +289,27 @@ export type CreateWorktreeConfig = {
   linkLinearIssue: boolean
 }
 
+// Why (grouped-workspaces L3): parallel to CreateWorktreeConfig but addresses N
+// repos as members of a single WorkspaceGroup. `branchName` doubles as the
+// group's workspaceName, parent folder name, and the per-member branch name —
+// the IPC handler enforces that triple-purpose use, so we mirror it here so
+// templates only need to resolve a single string.
+export type CreateWorkspaceGroupConfig = {
+  /** One per repo. Each becomes a member worktree under the group's parent
+   *  folder. The IPC requires ≥2 members and rejects repo duplicates. */
+  members: {
+    repoId: string
+    baseBranch: string // template
+    setupDecision?: SetupDecision
+  }[]
+  /** Used as the group's workspaceName, parent folder name, and per-member
+   *  branch name. Templated. */
+  branchName: string
+  /** Optional human-readable label for the group card. Templated. */
+  displayName?: string
+  linkLinearIssue?: boolean
+}
+
 export type WaitForSetupConfig = {
   worktreeRef: string // template
   requireSuccess: boolean
@@ -287,11 +330,30 @@ export type RunCommandConfig = {
   paneRef?: string
 }
 
+// Mutates a Linear issue's assignee and/or stateId at run time. `issueRef` is
+// almost always `{{trigger.linear.issue.id}}` from a Linear auto-trigger; the
+// other two refs leave the existing value alone when unset/empty.
+export type UpdateLinearIssueConfig = {
+  issueRef: string // templated; usually {{trigger.linear.issue.id}}
+  /** Linear team id — required to scope the assignee/state pickers in the
+   *  editor. Optional because users can fall back to template-mode refs
+   *  (e.g. echoing values from the trigger context) without picking a team.
+   *  The runner ignores this field; it exists solely for editor UX. */
+  teamId?: string
+  /** Linear userId (literal, picker-selected) OR a templated string when the
+   *  user toggles to template mode. Empty/unset = leave assignee alone. */
+  assigneeRef?: string
+  /** Linear stateId (literal) OR templated. Empty/unset = leave state alone. */
+  stateRef?: string
+}
+
 export type StepConfig =
   | RunPromptConfig
   | CreateWorktreeConfig
+  | CreateWorkspaceGroupConfig
   | WaitForSetupConfig
   | RunCommandConfig
+  | UpdateLinearIssueConfig
 
 export type Step = {
   id: string

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: this module is the single source of truth for ProjectV2 shapes (settings, IPC payloads, view/field/value types) shared across main, preload, and renderer; splitting risks circular type imports. */
 // Why: ProjectV2 shapes are distinct enough from the issue/PR work-item types
 // that we keep them in a dedicated module. Preload and main-process callers
 // import from here directly — do not re-export through `./types.ts` just to

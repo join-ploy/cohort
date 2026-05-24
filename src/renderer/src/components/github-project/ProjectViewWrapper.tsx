@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: top-level Project-mode container coordinates picker, view selection, query overrides, fetch lifecycle, and toolbar interactions; splitting these would fragment shared state. */
 // Why: top-level container for Project mode. Handles the picker, header,
 // filter label, count pill, Open-in-GitHub, and all Interaction States
 // documented in the design doc.

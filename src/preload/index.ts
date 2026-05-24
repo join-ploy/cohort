@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the preload bridge is the audited contract between
-renderer and Electron. Keeping the IPC surface co-located in one file makes security
-review and type drift checks easier than scattering these bindings across modules. */
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
@@ -9,6 +6,8 @@ import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type {
   BaseRefDefaultResult,
   BrowserViewportOverride,
+  CreateWorkspaceGroupArgs,
+  CreateWorkspaceGroupResult,
   CreateWorktreeArgs,
   CustomPet,
   FsChangedPayload,
@@ -28,6 +27,7 @@ import type {
   OnboardingState,
   FloatingTerminalCwdRequest,
   SearchResult,
+  WorkspaceGroup,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
@@ -495,6 +495,24 @@ const api = {
     }
   },
 
+  workspaceGroups: {
+    list: (): Promise<WorkspaceGroup[]> => ipcRenderer.invoke('workspace-groups:list'),
+    create: (args: CreateWorkspaceGroupArgs): Promise<CreateWorkspaceGroupResult> =>
+      ipcRenderer.invoke('workspace-groups:create', args),
+    archive: (args: { groupId: string }): Promise<WorkspaceGroup> =>
+      ipcRenderer.invoke('workspace-groups:archive', args),
+    update: (args: {
+      groupId: string
+      partial: { displayName?: string; comment?: string; isPinned?: boolean }
+    }): Promise<WorkspaceGroup> => ipcRenderer.invoke('workspace-groups:update', args),
+
+    onChanged: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('workspaceGroups:changed', listener)
+      return () => ipcRenderer.removeListener('workspaceGroups:changed', listener)
+    }
+  },
+
   pty: {
     spawn: (opts: {
       cols: number
@@ -518,6 +536,10 @@ const api = {
       // truth for whether the launch happened. Loose typing here on
       // purpose: validation lives at the main-side schema validator.
       telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+      // Why (Ask C): caller opts out of Phase J1's grouped-worktree cwd
+      // override for member-scoped automation runs. See
+      // src/preload/api-types.ts for the contract.
+      keepCwd?: boolean
     }): Promise<{
       id: string
       snapshot?: string
@@ -2512,6 +2534,7 @@ const api = {
         prompt: string
         worktreePath?: string
         connectionId?: string | null
+        memberScoped?: boolean
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2523,6 +2546,7 @@ const api = {
           prompt: string
           worktreePath?: string
           connectionId?: string | null
+          memberScoped?: boolean
         }
       ) => callback(request)
       ipcRenderer.on('automations:openPromptPane', listener)
@@ -2574,6 +2598,7 @@ const api = {
         source: 'review' | 'create-pr' | 'custom'
         commandId?: string
         customCommand?: string
+        memberScoped?: boolean
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2584,6 +2609,7 @@ const api = {
           source: 'review' | 'create-pr' | 'custom'
           commandId?: string
           customCommand?: string
+          memberScoped?: boolean
         }
       ) => callback(request)
       ipcRenderer.on('automations:openCommandPane', listener)

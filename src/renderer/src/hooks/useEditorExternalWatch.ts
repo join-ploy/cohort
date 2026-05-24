@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: the editor external-watch hook co-locates
-   target diffing, fs:changed dispatch, tombstone coalescing, and rename
-   correlation so the end-to-end event-to-store mutation contract stays
-   readable in one file. */
 import { useEffect, useMemo, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { basename, joinPath } from '@/lib/path'

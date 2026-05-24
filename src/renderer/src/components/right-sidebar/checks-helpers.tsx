@@ -1,5 +1,3 @@
-/* eslint-disable max-lines -- Why: co-locating all checks-panel sub-components (checks list,
-conflict sections, threaded PR comments) keeps the shared icon/color maps in one place. */
 import React, { useCallback, useState } from 'react'
 import {
   CircleCheck,

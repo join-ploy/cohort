@@ -1,10 +1,21 @@
-/* eslint-disable max-lines -- Why: the chain editor modal co-locates its
-   header, body, footer, add-step picker, run-now confirm modal, and triggers
-   sub-modal so the full editor surface stays in one file as it evolves. */
 import * as React from 'react'
 import { Plus, Play, X } from 'lucide-react'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { useAppStore } from '@/store'
 
 // Why: the editor renders as a fullscreen overlay covering the native macOS
 // traffic lights. Reserve the same 80px pad used by .titlebar-left so the
@@ -27,14 +38,18 @@ import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
   type ChainDraft,
   generateDefaultStepId,
-  renameStepWithRewrites
+  renameStepWithRewrites,
+  reorderSteps
 } from '../../../lib/chain-editor-state'
 import {
+  chainHasStep,
   computeAllErrors,
   createBlankAutomation,
   defaultConfigForKind,
   getAvailableVariablesAtStep,
+  isProjectRequired,
   LEGACY_AUTOMATION_FIELDS,
+  pickDefaultWorktreeRef,
   seedDraft,
   STEP_KIND_LABELS,
   STEP_KIND_ORDER,
@@ -82,23 +97,25 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
   const [triggersModalOpen, setTriggersModalOpen] = React.useState(false)
 
-  const errors = React.useMemo<ChainEditorError[]>(() => {
-    const base = computeAllErrors(draft)
-    // Why: project is required to dispatch — surface the missing selection as
-    // a top-level error so Save is disabled until the user picks a project.
-    // When the trigger picks a project at Run Now time, the upfront projectId
-    // is intentionally empty, so don't gate Save on it.
-    if (!draft.projectId && !draft.trigger?.acceptsProjectSelection) {
-      base.push({
-        path: 'projectId',
-        code: 'unknown-path',
-        message: 'Project is required',
-        stepId: '',
-        field: 'projectId'
-      })
-    }
-    return base
-  }, [draft])
+  // Why: hide the `create-workspace-group` step from the picker when the
+  // experimental flag is off so the rest of the chain editor matches the
+  // pre-feature surface exactly.
+  const groupedEnabled = useAppStore((s) => s.settings?.experimentalGroupedWorkspaces === true)
+  const availableStepKinds = React.useMemo<StepKind[]>(
+    () =>
+      groupedEnabled
+        ? STEP_KIND_ORDER
+        : STEP_KIND_ORDER.filter((k) => k !== 'create-workspace-group'),
+    [groupedEnabled]
+  )
+
+  // Why: project-required gating now lives inside computeAllErrors so it can
+  // factor in chain shape (e.g. a create-workspace-group chain genuinely
+  // doesn't need an upfront projectId — see chain-editor-modal-state).
+  const errors = React.useMemo<ChainEditorError[]>(
+    () => computeAllErrors(draft, props.repos),
+    [draft, props.repos]
+  )
 
   const updateDraft = React.useCallback((patch: Partial<ChainDraft>) => {
     setDraft((current) => ({ ...current, ...patch }))
@@ -148,12 +165,48 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     setDirty(true)
   }, [])
 
+  const moveStep = React.useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) {
+      return
+    }
+    setDraft((current) => {
+      if (
+        fromIndex < 0 ||
+        fromIndex >= current.steps.length ||
+        toIndex < 0 ||
+        toIndex >= current.steps.length
+      ) {
+        return current
+      }
+      return { ...current, steps: reorderSteps(current.steps, fromIndex, toIndex) }
+    })
+    // Why: dirty stays unconditional so any reorder enables the save button —
+    // even a same-shape move that the executor would treat as a no-op should
+    // require an explicit save so the persisted order matches what the user
+    // sees. Future-reference validation re-runs via computeAllErrors's useMemo
+    // and will surface any newly-invalid {{steps.x}} reference produced by the
+    // reorder, instead of silently accepting an unrunnable chain.
+    setDirty(true)
+  }, [])
+
   const addStep = React.useCallback((kind: StepKind) => {
     setDraft((current) => {
+      const config = defaultConfigForKind(kind)
+      // Why: if this new step has a worktreeRef slot AND there's a prior
+      // create-worktree / create-workspace-group step in the chain, prefill
+      // the ref with that step's output. Saves the user from retyping the
+      // same {{steps.<id>.worktreeId}} / {{steps.<id>.groupId}} template
+      // every time they add a run-prompt / wait-for-setup / run-command.
+      if ('worktreeRef' in config && (config as { worktreeRef: string }).worktreeRef === '') {
+        const ref = pickDefaultWorktreeRef(current.steps)
+        if (ref) {
+          ;(config as { worktreeRef: string }).worktreeRef = ref
+        }
+      }
       const newStep: Step = {
         id: generateDefaultStepId(kind, current.steps),
         kind,
-        config: defaultConfigForKind(kind),
+        config,
         onFailure: 'halt',
         timeoutSeconds: null
       }
@@ -210,8 +263,37 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   }, [draft, errors.length, dirty, saving, props])
 
   const availableAtEnd = React.useMemo(
-    () => getAvailableVariablesAtStep(draft, draft.steps.length),
-    [draft]
+    () => getAvailableVariablesAtStep(draft, draft.steps.length, props.repos),
+    [draft, props.repos]
+  )
+
+  // Why: 5px activation distance matches TabBar's PointerSensor so a click on
+  // the grip without movement still falls through to focus/native behaviour.
+  // KeyboardSensor is added here (TabBar omits it) because automation editing
+  // is keyboard-heavy — arrow keys on a focused grip reorder a step. Both
+  // sensors are passed even when the chain has zero steps so the hook order
+  // remains stable across renders.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const stepIds = React.useMemo(() => draft.steps.map((s) => s.id), [draft.steps])
+
+  const handleDragEnd = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) {
+        return
+      }
+      const fromIndex = draft.steps.findIndex((s) => s.id === active.id)
+      const toIndex = draft.steps.findIndex((s) => s.id === over.id)
+      if (fromIndex === -1 || toIndex === -1) {
+        return
+      }
+      moveStep(fromIndex, toIndex)
+    },
+    [draft.steps, moveStep]
   )
 
   const canSave = errors.length === 0 && dirty && !saving
@@ -233,6 +315,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
         canRunNow={canRunNow}
+        projectOptional={!isProjectRequired(draft)}
         onNameChange={(name) => updateDraft({ name })}
         onProjectChange={(projectId) => updateDraft({ projectId })}
         onEnabledChange={(enabled) => updateDraft({ enabled })}
@@ -272,6 +355,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
         availableSources={AVAILABLE_TRIGGER_SOURCES}
+        chainProvidesProject={chainHasStep(draft, 'create-workspace-group')}
         onSave={(next) => {
           updateDraft({ trigger: next.trigger, autoTriggers: next.autoTriggers })
           setTriggersModalOpen(false)
@@ -286,23 +370,38 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
               No steps yet. Click &ldquo;Add step&rdquo; to start your chain.
             </div>
           ) : null}
-          {draft.steps.map((step, index) => (
-            <ChainEditorStepCardRouter
-              key={`${step.id}:${index}`}
-              step={step}
-              index={index}
-              available={getAvailableVariablesAtStep(draft, index)}
-              reviewCommands={props.reviewCommands}
-              createPrCommands={props.createPrCommands}
-              onIdChange={(newId) => renameStep(index, newId)}
-              onConfigChange={(config) => updateStepConfig(index, config)}
-              onOnFailureChange={(val) => updateStep(index, { onFailure: val })}
-              onTimeoutChange={(val) => updateStep(index, { timeoutSeconds: val })}
-              onDelete={() => deleteStep(index)}
-            />
-          ))}
+          {/* Why: DndContext wraps only the steps list so dnd-kit's pointer
+              listeners don't interfere with the header/footer controls. The
+              outer scroll container is the editor body div above, which
+              DndContext.autoScroll discovers automatically and scrolls while
+              the user drags near its edges. */}
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={stepIds} strategy={verticalListSortingStrategy}>
+              {draft.steps.map((step, index) => (
+                <ChainEditorStepCardRouter
+                  key={step.id}
+                  step={step}
+                  index={index}
+                  available={getAvailableVariablesAtStep(draft, index, props.repos)}
+                  repos={props.repos}
+                  reviewCommands={props.reviewCommands}
+                  createPrCommands={props.createPrCommands}
+                  onIdChange={(newId) => renameStep(index, newId)}
+                  onConfigChange={(config) => updateStepConfig(index, config)}
+                  onOnFailureChange={(val) => updateStep(index, { onFailure: val })}
+                  onTimeoutChange={(val) => updateStep(index, { timeoutSeconds: val })}
+                  onDelete={() => deleteStep(index)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
 
-          <AddStepControl open={addOpen} onToggle={setAddOpen} onPick={addStep} />
+          <AddStepControl
+            open={addOpen}
+            kinds={availableStepKinds}
+            onToggle={setAddOpen}
+            onPick={addStep}
+          />
 
           <AvailableVariablesPanel available={availableAtEnd} className="mt-2" />
         </div>
@@ -327,6 +426,10 @@ type ChainEditorHeaderProps = {
   trigger: TriggerConfig
   autoTriggers: AutoTrigger[]
   canRunNow: boolean
+  /** True when the chain doesn't consume `automation.projectId` (e.g. a
+   *  group-target chain with no create-worktree step). Drives the placeholder
+   *  copy so the operator isn't told to pick a project they don't need. */
+  projectOptional: boolean
   onNameChange: (name: string) => void
   onProjectChange: (projectId: string) => void
   onEnabledChange: (enabled: boolean) => void
@@ -358,7 +461,9 @@ function ChainEditorHeader(props: ChainEditorHeaderProps): React.JSX.Element {
           onChange={(e) => props.onProjectChange(e.target.value)}
           className="min-w-[10rem] rounded-md border border-input bg-background px-2 py-2 text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
         >
-          <option value="">Pick a project…</option>
+          <option value="">
+            {props.projectOptional ? 'No project (group)' : 'Pick a project…'}
+          </option>
           {props.repos.map((r) => (
             <option key={r.id} value={r.id}>
               {r.displayName}
@@ -432,6 +537,7 @@ function ChainEditorFooter(props: ChainEditorFooterProps): React.JSX.Element {
 
 type AddStepControlProps = {
   open: boolean
+  kinds: StepKind[]
   onToggle: (next: boolean) => void
   onPick: (kind: StepKind) => void
 }
@@ -455,7 +561,7 @@ function AddStepControl(props: AddStepControlProps): React.JSX.Element {
           aria-label="Step kinds"
           className="absolute top-full z-10 mt-1 flex flex-col rounded-md border border-border bg-background shadow-md"
         >
-          {STEP_KIND_ORDER.map((kind) => (
+          {props.kinds.map((kind) => (
             <button
               key={kind}
               type="button"

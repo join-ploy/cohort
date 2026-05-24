@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: repo IPC is intentionally centralized so SSH
-routing, clone lifecycle, and store persistence stay behind a single audited
-boundary. Splitting by line count would scatter tightly coupled repo behavior. */
 import type { BrowserWindow } from 'electron'
 import { dialog, ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
@@ -52,6 +49,34 @@ function emitRepoAdded(method: RepoMethod, alreadyExisted: boolean): void {
   // `getCohortAtEmit()` here returns the user's Nth `repo_added` as `N`.
   // See docs/onboarding-funnel-cohort-addendum.md §Read-vs-write ordering.
   track('repo_added', { method, ...getCohortAtEmit() })
+}
+
+/**
+ * Sanitize a user-authored repo description before it lands in persisted
+ * state. Trims, replaces C0/C1 control chars with spaces, strips bidi-
+ * override controls (mirrors `sanitizeWorktreeDisplayName` — the description
+ * gets dumped into automation prompts, so it shouldn't be able to smuggle
+ * escapes or visually reorder adjacent UI text), collapses internal
+ * whitespace, preserves newlines + tabs (so multi-line paragraph
+ * descriptions survive \u2014 they're dumped into automation prompts and the
+ * user may want structure), and has no length cap. Returns undefined when
+ * the string collapses to empty so the IPC layer can drop the key from the
+ * patch.
+ */
+export function sanitizeRepoDescription(input: string): string | undefined {
+  const withoutControls = Array.from(input, (char) => {
+    const code = char.charCodeAt(0)
+    // Why: keep newline (0x0a) and tab (0x09) so users can structure the
+    // description across lines. Every other low-ASCII control + DEL/C1
+    // range becomes a space (matches sanitizeWorktreeDisplayName's policy
+    // for the characters they DO strip).
+    if (code === 0x0a || code === 0x09) {
+      return char
+    }
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? ' ' : char
+  }).join('')
+  const sanitized = withoutControls.replace(/[\u202a-\u202e\u2066-\u2069]/g, '').trim()
+  return sanitized || undefined
 }
 
 // Why: module-scoped so the abort handle survives window re-creation on macOS.
@@ -451,6 +476,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             Repo,
             | 'displayName'
             | 'badgeColor'
+            | 'description'
             | 'hookSettings'
             | 'worktreeBaseRef'
             | 'kind'
@@ -475,6 +501,26 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
         updates.issueSourcePreference !== 'auto'
       ) {
         delete updates.issueSourcePreference
+      }
+      // Why: description ends up dumped into automation prompts via
+      // `group.members.<repo>.description`. Strip C0/C1 control chars and
+      // bidi-override controls so a pasted blob can't smuggle escape
+      // sequences into a terminal or visually reorder adjacent text the
+      // way `sanitizeWorktreeDisplayName` does for titles. No length cap
+      // (descriptions may be paragraphs); collapse to undefined when empty
+      // so the persisted record drops the key cleanly.
+      if ('description' in updates) {
+        const raw = updates.description
+        if (typeof raw !== 'string') {
+          delete updates.description
+        } else {
+          const sanitized = sanitizeRepoDescription(raw)
+          if (sanitized === undefined) {
+            delete updates.description
+          } else {
+            updates.description = sanitized
+          }
+        }
       }
       // Why: `symlinkPaths` is consumed by `createWorktreeSymlinks` which
       // calls `.trim()` on each entry. A renderer bug or preload-version skew

@@ -109,6 +109,10 @@ export function computeVisibleWorktreeIds(
   // Filter archived
   all = all.filter((w) => !w.isArchived)
 
+  // Why: group members render inside the GroupsSection card, not under their
+  // repo's section, so suppress them from the per-repo visible list.
+  all = all.filter((w) => !w.groupId)
+
   if (opts.hideDefaultBranchWorkspace) {
     all = all.filter((w) => !isDefaultBranchWorkspace(w))
   }

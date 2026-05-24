@@ -13,9 +13,11 @@ import type { OrcaHooks, SidebarPromptCommand } from '../../../shared/types'
  *     `customCommand` directly for source='custom').
  *  2. Writing the prompt body to `~/.orca/prompts/<label>.md` (for review /
  *     create-pr; skipped for custom).
- *  3. Creating an inactive background terminal tab in the target worktree.
- *  4. Spawning the PTY directly so we can capture `ptyId` synchronously and
+ *  3. Spawning the PTY directly so we can capture `ptyId` synchronously and
  *     hand it back to the runner for exit tracking.
+ *  4. Attaching an inactive background terminal tab to the live PTY (createTab
+ *     with initialPtyId — see the spawn-first WHY comment below for the race
+ *     this ordering avoids).
  *
  * Why a direct spawn (not `invokeSidebarPromptCommand`): that helper drives
  * the active worktree and either piggybacks on an existing terminal (for
@@ -27,7 +29,7 @@ import type { OrcaHooks, SidebarPromptCommand } from '../../../shared/types'
 export function useAutomationOpenCommandPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onOpenCommandPane(
-      async ({ requestId, worktreeId, source, commandId, customCommand }) => {
+      async ({ requestId, worktreeId, source, commandId, customCommand, memberScoped }) => {
         try {
           const store = useAppStore.getState()
           const worktree = findWorktreeById(store.worktreesByRepo, worktreeId)
@@ -96,34 +98,44 @@ export function useAutomationOpenCommandPaneEvents(): void {
             launchCommand = `${cmd.command} "$(cat "${promptPath}")"`
           }
 
-          // Why: spawn the PTY immediately and attach an inactive tab to the
-          // live session — mirrors `launchAgentBackgroundSession`'s pattern so
-          // automation runs do not steal the worktree's focus.
-          const tab = store.createTab(worktreeId, undefined, undefined, { activate: false })
-          const paneKey = `${tab.id}:${FIRST_PANE_ID}`
+          // Why: spawn-first to avoid a TerminalPane auto-spawn race. The
+          // chain executor immediately reveals the new tab in the member's
+          // group card; if we createTab → await pty.spawn, TerminalPane mounts
+          // mid-await against a tab whose ptyId is still null, hits its
+          // FRESH SPAWN path, and binds a phantom shell to the visible pane
+          // while our explicit run-command PTY runs invisibly. Pre-mint the
+          // tabId, spawn the PTY against it, then call createTab with
+          // initialPtyId so TerminalPane never observes a tab without a PTY.
+          // See user reproduction in commit 7d26a9c5 diagnostics.
+          const tabId = globalThis.crypto.randomUUID()
+          const paneKey = `${tabId}:${FIRST_PANE_ID}`
           const paneEnv = {
             ORCA_PANE_KEY: paneKey,
-            ORCA_TAB_ID: tab.id,
+            ORCA_TAB_ID: tabId,
             ORCA_WORKTREE_ID: worktreeId
           }
-          let result
-          try {
-            result = await window.api.pty.spawn({
-              cols: 120,
-              rows: 40,
-              cwd: worktree.path,
-              command: launchCommand,
-              env: paneEnv,
-              connectionId: repo?.connectionId ?? null,
-              worktreeId,
-              tabId: tab.id,
-              leafId: 'pane:1'
-            })
-          } catch (err) {
-            store.closeTab(tab.id)
-            throw err
-          }
-          store.updateTabPtyId(tab.id, result.id)
+          const result = await window.api.pty.spawn({
+            cols: 120,
+            rows: 40,
+            cwd: worktree.path,
+            command: launchCommand,
+            env: paneEnv,
+            connectionId: repo?.connectionId ?? null,
+            worktreeId,
+            tabId,
+            leafId: 'pane:1',
+            // Why: when the runner unwrapped a member-scoped ref, the agent
+            // should run at the member's worktreePath — not the group's
+            // parent. Forward as `keepCwd: true` so Phase J1 skips the
+            // standard grouped-member CWD lift. Parity with run-prompt's
+            // launchAgentBackgroundSession.
+            ...(memberScoped ? { keepCwd: true } : {})
+          })
+          store.createTab(worktreeId, undefined, undefined, {
+            activate: false,
+            id: tabId,
+            initialPtyId: result.id
+          })
 
           window.api.automations.replyOpenCommandPane(requestId, {
             ok: true,

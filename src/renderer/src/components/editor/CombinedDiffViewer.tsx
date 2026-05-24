@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: combined diff behavior depends on one
-component-level state machine that coordinates lazy loading, inline editing,
-restore-on-remount caching, and scroll preservation. Splitting those pieces
-across smaller files would make the lifecycle edges harder to reason about and
-more error-prone than keeping the whole viewer flow together. */
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import type { editor as monacoEditor } from 'monaco-editor'
 import { useAppStore } from '@/store'

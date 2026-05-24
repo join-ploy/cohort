@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines -- Why: this App-level IPC bridge intentionally keeps the renderer's main-process event contract in one place so shortcut, runtime, updater, and agent-status wiring do not drift across files. */
 import { useEffect } from 'react'
 import { useAppStore } from '../store'
 import { getWorktreeMapFromState, getRepoMapFromState } from '@/store/selectors'
@@ -54,6 +53,18 @@ export function useIpcEvents(): void {
     unsubs.push(
       window.api.repos.onChanged(() => {
         useAppStore.getState().fetchRepos()
+      })
+    )
+
+    // Why: main broadcasts this whenever the workspaceGroups slice mutates
+    // (create from automation, archive, update). Without this, an
+    // automation-created group stays invisible in the sidebar until app
+    // restart re-hydrates from disk — the only other refresh path for groups
+    // is the renderer's own optimistic upsert inside the createGroup action,
+    // which doesn't fire when main creates a group through a chain runner.
+    unsubs.push(
+      window.api.workspaceGroups.onChanged(() => {
+        void useAppStore.getState().fetchWorkspaceGroups()
       })
     )
 

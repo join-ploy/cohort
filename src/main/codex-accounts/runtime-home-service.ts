@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this service owns the single runtime-home
-contract for Codex inside Orca. Keeping path resolution, system-default
-snapshots, auth materialization, and recovery together prevents account-switch
-semantics from drifting across PTY launch, login, and quota fetch paths. */
 import {
   copyFileSync,
   existsSync,

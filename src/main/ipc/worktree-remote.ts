@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 // Why: extracted from worktrees.ts to keep the main IPC module under the
 // max-lines threshold. Worktree creation helpers (local and remote) live
 // here so the IPC dispatch file stays focused on handler wiring. The
@@ -555,8 +554,13 @@ export async function createLocalWorktree(
       }
     }
 
+    // Why: group-create callers supply an explicit path under
+    // `<workspaceDir>/<groupName>/<repoFolderName>` because the standard
+    // per-repo layout would scatter members across N repo folders. The
+    // override still goes through `ensurePathWithinWorkspace`, so it cannot
+    // escape the configured workspace root.
     worktreePath = ensurePathWithinWorkspace(
-      computeWorktreePath(effectiveSanitizedName, repo.path, settings),
+      args.pathOverride ?? computeWorktreePath(effectiveSanitizedName, repo.path, settings),
       workspaceRoot
     )
     if (existsSync(worktreePath)) {

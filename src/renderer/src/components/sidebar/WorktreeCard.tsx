@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the worktree card centralizes sidebar card state (selection, drag, agent status, git info, context menu) in one cohesive component so sidebar rendering doesn't fan out across files. */
 import React, { useEffect, useMemo, useCallback, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
@@ -40,6 +39,13 @@ import {
   EMPTY_BROWSER_TABS,
   FilledBellIcon
 } from './WorktreeCardHelpers'
+
+// Why: 60s sidebar PR refresh cadence agreed with the user. Lives next to
+// WorktreeCard (and is re-declared in GroupCard) instead of in
+// store/slices/github.ts because the cache TTL there is shared with other
+// surfaces (palette, jump-search) where 5min staleness is fine — only the
+// sidebar needed the more reactive cadence.
+const SIDEBAR_PR_REFRESH_INTERVAL_MS = 60_000
 import { IssueSection, PrSection, CommentSection } from './WorktreeCardMeta'
 import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 import {
@@ -341,20 +347,33 @@ const WorktreeCard = React.memo(function WorktreeCard({
   // This preference is purely presentational, so background refreshes would
   // spend rate limit budget on data the user cannot see.
   useEffect(() => {
-    if (repo && !isFolder && !worktree.isBare && prCacheKey && (showPR || showCI)) {
-      const linkedPRNumber = worktree.linkedPR ?? null
-      const previousLookup = previousPrLookupRef.current
-      const linkedPRChanged =
-        previousLookup !== null &&
-        previousLookup.cacheKey === prCacheKey &&
-        previousLookup.linkedPRNumber !== linkedPRNumber
-      previousPrLookupRef.current = { cacheKey: prCacheKey, linkedPRNumber }
-      // Why: pass linkedPR so worktrees created from a PR (whose new local
-      // branch differs from the PR's head ref) still resolve their PR via
-      // a number-based fallback in the main process. Force when that fallback
-      // changes so the branch cache stops showing stale linked-PR data.
-      fetchPRForBranch(repo.path, branch, { linkedPRNumber, force: linkedPRChanged })
+    if (!repo || isFolder || worktree.isBare || !prCacheKey || (!showPR && !showCI)) {
+      return
     }
+    const linkedPRNumber = worktree.linkedPR ?? null
+    const previousLookup = previousPrLookupRef.current
+    const linkedPRChanged =
+      previousLookup !== null &&
+      previousLookup.cacheKey === prCacheKey &&
+      previousLookup.linkedPRNumber !== linkedPRNumber
+    previousPrLookupRef.current = { cacheKey: prCacheKey, linkedPRNumber }
+    // Why: pass linkedPR so worktrees created from a PR (whose new local
+    // branch differs from the PR's head ref) still resolve their PR via
+    // a number-based fallback in the main process. Force when that fallback
+    // changes so the branch cache stops showing stale linked-PR data.
+    fetchPRForBranch(repo.path, branch, { linkedPRNumber, force: linkedPRChanged })
+    // Why: keep the sidebar PR additions/deletions, state, and checksStatus
+    // reactive while the user stays focused inside Orca. Before this
+    // interval, the only refresh trigger was a window visibility flip + the
+    // 5-minute cache TTL — so a focused session would render the same stale
+    // PR for hours. Force the refetch so the 5-min TTL doesn't short-circuit
+    // the periodic poll. 60s mirrors the user-requested cadence; the
+    // fetchPRForBranch path dedupes per-branch inflight requests so multiple
+    // cards on the same branch only result in one gh call per cycle.
+    const interval = setInterval(() => {
+      fetchPRForBranch(repo.path, branch, { linkedPRNumber, force: true })
+    }, SIDEBAR_PR_REFRESH_INTERVAL_MS)
+    return () => clearInterval(interval)
   }, [
     repo,
     isFolder,

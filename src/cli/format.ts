@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: CLI result formatters are centralized so handlers can stay thin RPC glue. */
 import { chmodSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'

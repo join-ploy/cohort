@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: root and generated command help text live together so CLI discovery stays greppable. */
 import type { CommandSpec } from './args'
 import { findCommandSpec, isCommandGroup, supportsBrowserPageFlag } from './args'
 

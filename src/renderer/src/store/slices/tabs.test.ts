@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { create } from 'zustand'
 import type { AppState } from '../types'
@@ -107,6 +106,8 @@ import { createDetectedAgentsSlice } from './detected-agents'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
 import { createScriptsSlice } from './scripts'
 import { createAutomationRunsSlice } from './automation-runs'
+import { createAutomationsSlice } from './automations'
+import { createWorkspaceGroupsSlice } from './workspace-groups'
 
 const WT = 'repo1::/tmp/feature'
 
@@ -134,7 +135,9 @@ function createTestStore() {
     ...createDetectedAgentsSlice(...a),
     ...createWorktreeNavHistorySlice(...a),
     ...createScriptsSlice(...a),
-    ...createAutomationRunsSlice(...a)
+    ...createAutomationRunsSlice(...a),
+    ...createAutomationsSlice(...a),
+    ...createWorkspaceGroupsSlice(...a)
   }))
 }
 

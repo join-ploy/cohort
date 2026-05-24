@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import { findPrevLiveWorktreeHistoryIndex } from './worktree-nav-history'
@@ -262,6 +261,7 @@ export type UISlice = {
     | 'none'
     | 'create-worktree'
     | 'edit-meta'
+    | 'edit-group-meta'
     | 'delete-worktree'
     | 'confirm-non-git-folder'
     | 'confirm-remove-folder'

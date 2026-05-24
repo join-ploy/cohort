@@ -23,7 +23,12 @@ vi.mock('../store/selectors', () => ({
   useWorktreeById: (id: string | null) =>
     id ? ((mockState.worktreesById as Map<string, Worktree>).get(id) ?? null) : null,
   useRepoById: (id: string | null) =>
-    id ? ((mockState.reposById as Map<string, Repo>).get(id) ?? null) : null
+    id ? ((mockState.reposById as Map<string, Repo>).get(id) ?? null) : null,
+  // Why: WorktreeContextBar now derives the breadcrumb's left segment from
+  // the active worktree's owning group when one exists. Tests don't seed any
+  // groups, so this stub always returns null and the bar falls back to the
+  // standard "<repo> > <worktree>" shape.
+  getGroupByWorktreeId: () => null
 }))
 
 vi.mock('./sidebar/WorktreeContextMenu', () => ({

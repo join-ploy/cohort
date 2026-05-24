@@ -1,8 +1,3 @@
-/* eslint-disable max-lines --
- * Why: this slice test keeps closely related browser-slice scenarios
- * (create/close, reopen, hydrate, shutdown) in one file so the shared
- * webview-registry mock setup stays consistent across behaviors.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../components/browser-pane/webview-registry', () => ({

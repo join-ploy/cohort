@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: keeps the registry, handleSetupStart,
-runSetup, and handleSetupStop suites together so a regression in any one
-path is caught against the full IPC surface instead of being split across
-files. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -137,7 +133,8 @@ describe('handleSetupStart', () => {
       repo,
       worktreePath,
       'pnpm install',
-      'wise_panther'
+      'wise_panther',
+      undefined
     )
     const spawnArgs = provider.spawn.mock.calls[0][0] as {
       cwd?: string

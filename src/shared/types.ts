@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
 import type { AutoDedupEntry, Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './telemetry-events'
@@ -48,6 +47,11 @@ export type Repo = {
   path: string
   displayName: string
   badgeColor: string
+  /** User-authored free-form description. Exposed to automation templates as
+   *  `group.members.<repoFolderName>.description` so chain authors can hand
+   *  repo context to agents. The IPC boundary caps + sanitizes the string;
+   *  the type stays loose so in-memory readers don't need to re-validate. */
+  description?: string
   addedAt: number
   kind?: RepoKind
   gitUsername?: string
@@ -149,6 +153,10 @@ export type Worktree = {
   baseRef?: string
   /** Remote/branch Orca should publish review commits to when it created this worktree. */
   pushTarget?: GitPushTarget
+  /** When set, this worktree is a member of the named group; card-level
+   *  state is read from the group rather than this record. Absent for
+   *  single-repo worktrees (today's shape). */
+  groupId?: string
   diffComments?: DiffComment[]
 } & GitWorktreeInfo
 
@@ -156,6 +164,35 @@ export type GitPushTarget = {
   remoteName: string
   branchName: string
   remoteUrl?: string
+}
+
+// ─── WorkspaceGroup ─────────────────────────────────────────────────
+/**
+ * A workspace that owns N worktrees from N distinct repos, co-located under
+ * a shared parent folder. Members share a branch name (set at create time);
+ * card-level state (pin, sort, activity, archive) lives on the group, not
+ * the members. See docs/plans/2026-05-22-grouped-workspaces-design.md.
+ */
+export type WorkspaceGroup = {
+  id: string // 'group:<uuid>'
+  workspaceName: string // also the parent folder name
+  displayName: string
+  parentPath: string // workspaces/<workspaceName>/
+  memberWorktreeIds: string[] // ordered; max one worktree per repo
+  branchName: string
+
+  isArchived: boolean
+  archivedAt: number | null
+  archiveCleanupError?: string | null
+  isPinned: boolean
+  sortOrder: number
+  lastActivityAt: number
+  isUnread: boolean
+  comment: string
+  createdAt: number
+  createdByAutomationRunId?: string
+  linkedIssue: number | null
+  linkedLinearIssue: string | null
 }
 
 // ─── Worktree metadata (persisted user-authored fields only) ─────────
@@ -191,6 +228,10 @@ export type WorktreeMeta = {
   baseRef?: string
   /** See {@link Worktree.pushTarget}. Persisted so refreshed worktree lists keep the target. */
   pushTarget?: GitPushTarget
+  /** When set, this worktree is a member of the named group; card-level
+   *  state is read from the group rather than this record. Absent for
+   *  single-repo worktrees (today's shape). */
+  groupId?: string
   diffComments?: DiffComment[]
   /** Last-known git branch name for this worktree. Optional because
    *  branch/path live authoritatively on disk (via `git worktree list`);
@@ -985,12 +1026,53 @@ export type CreateWorktreeArgs = {
    *  pre-date this prop default to `unknown` at the IPC boundary instead
    *  of failing typecheck. */
   telemetrySource?: WorkspaceSource
+  /** Explicit on-disk worktree path. When set, bypasses the standard
+   *  `<workspaceDir>/<repoName?>/<name>` derivation. Used by the
+   *  workspace-group create flow so member worktrees land under
+   *  `<workspaceDir>/<groupName>/<repoFolderName>` instead of the per-repo
+   *  layout. `ensurePathWithinWorkspace` still validates the resulting path. */
+  pathOverride?: string
 }
 
 export type CreateWorktreeResult = {
   worktree: Worktree
   warning?: string
   initialBaseStatus?: WorktreeBaseStatusEvent
+}
+
+export type CreateGroupMemberSpec = {
+  repoId: string
+  /** Base ref to branch from. null = use the repo's default base (worktreeBaseRef → main). */
+  baseRef: string | null
+  setupDecision: SetupDecision
+  /** Agent selected in the create surface. Stamped onto each member's
+   *  WorktreeMeta so reopening any member after the original terminal closes
+   *  re-seeds the same agent (mirrors the single-repo create flow). */
+  createdWithAgent?: TuiAgent
+}
+
+export type CreateWorkspaceGroupArgs = {
+  /** The group's workspaceName — also becomes the parent folder name and the
+   *  branch name in every member repo. Must pass `validateGroupName` against
+   *  the current repo + group namespace. */
+  workspaceName: string
+  displayName?: string
+  /** The branch name applied to every member repo. Typically equals
+   *  `workspaceName`; allowed to differ so a future composer override can
+   *  separate the two without breaking the create transaction. */
+  branchName: string
+  /** ≥2 members required. Each repoId must appear at most once. All members
+   *  must share the same connection target (all local OR all on the same SSH
+   *  target). */
+  members: CreateGroupMemberSpec[]
+  comment?: string
+  createdByAutomationRunId?: string
+  telemetrySource?: string
+}
+
+export type CreateWorkspaceGroupResult = {
+  group: WorkspaceGroup
+  memberWorktrees: Worktree[]
 }
 
 export type WorktreeBaseStatusKind = 'checking' | 'current' | 'drift' | 'base_changed' | 'unknown'
@@ -1407,6 +1489,11 @@ export type GlobalSettings = {
    *  configuration surface and edge cases (conflicts with existing paths,
    *  cleanup on worktree delete) are still being worked out. */
   experimentalWorktreeSymlinks: boolean
+  /** Experimental: render the Groups section above repo headers in the
+   *  sidebar. Off by default while the grouped-workspaces UX is still under
+   *  active development; the section's data layer (workspace groups,
+   *  aggregation) is always available, the flag only gates the call site. */
+  experimentalGroupedWorkspaces: boolean
   /** Right-sidebar Review dropdown entries. Each entry pairs a CLI command
    *  (e.g. "claude", "codex") with a markdown prompt; clicking writes the
    *  prompt to ~/.orca/prompts/<label>.md and opens a new central terminal
@@ -1780,6 +1867,7 @@ export type PersistedState = {
    *  presets are managed from the new-workspace composer and repo settings. */
   sparsePresetsByRepo: Record<string, SparsePreset[]>
   worktreeMeta: Record<string, WorktreeMeta>
+  workspaceGroups: WorkspaceGroup[]
   settings: GlobalSettings
   ui: PersistedUIState
   githubCache: {

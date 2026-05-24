@@ -1,9 +1,15 @@
-/* eslint-disable max-lines -- Why: the checks panel co-locates PR header, checks, comments,
-merge actions, and conflict state in one component to keep the data flow straightforward. */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { LoaderCircle, ExternalLink, RefreshCw, Check, X, Pencil } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
-import { useActiveWorktree, useRepoById } from '@/store/selectors'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useActiveWorktreeId,
+  useRepoById,
+  useWorktreeById
+} from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import { isFolderRepo } from '../../../../shared/repo-kind'
 import PRActions from './PRActions'
@@ -16,11 +22,23 @@ import {
   PRCommentsList
 } from './checks-helpers'
 import { ENTRY_REFRESH_GRACE_MS, shouldEntryRefresh } from './checks-entry-refresh'
+import { ChecksPanelGroupContainer } from './ChecksPanelGroupView'
 import type { PRInfo, PRCheckDetail, PRComment } from '../../../../shared/types'
 
-export default function ChecksPanel(): React.JSX.Element {
-  const activeWorktree = useActiveWorktree()
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+// Why: when an explicit worktreeId prop is supplied (group-mode segment view),
+// the panel renders THAT member's checks surface regardless of which worktree
+// is globally active. Mirrors SourceControlInner / FileExplorerInner so the
+// same prop override pattern works across right-sidebar panels.
+export type ChecksPanelInnerProps = {
+  worktreeId: string | null
+}
+
+export function ChecksPanelInner({ worktreeId }: ChecksPanelInnerProps): React.JSX.Element {
+  // Why: alias the prop to keep the many downstream references reading
+  // `activeWorktreeId` rather than rewriting each call site; the prop is the
+  // authoritative worktree for this instance (group segment or single panel).
+  const activeWorktreeId = worktreeId
+  const activeWorktree = useWorktreeById(worktreeId)
   const repo = useRepoById(activeWorktree?.repoId ?? null)
   const prCache = useAppStore((s) => s.prCache)
   const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
@@ -595,3 +613,56 @@ export default function ChecksPanel(): React.JSX.Element {
     </div>
   )
 }
+
+// Why: top-level wrapper detects whether the active worktree belongs to a
+// workspace group; if so, render the segmented per-member view. Otherwise
+// fall back to a single inner panel keyed off the global activeWorktreeId.
+// Mirrors the SourceControl / FileExplorer / SetupPanel / RunPanel branch.
+function ChecksPanel(): React.JSX.Element {
+  const activeWorktreeId = useActiveWorktreeId()
+  const group = useAppStore((s) =>
+    activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
+  )
+  // Why: useShallow — getMemberWorktreesForGroup builds a fresh array each
+  // call. Without element-wise comparison, useSyncExternalStore re-enters on
+  // every state mutation and trips React's max-update-depth guard. Same for
+  // memberPRCacheKeys / memberChecksStatuses below.
+  const groupMembers = useAppStore(
+    useShallow((s) => (group ? getMemberWorktreesForGroup(s, group.id) : null))
+  )
+  const repoMap = useAppStore((s) => getRepoMapFromState(s))
+  // Why: derive each member's PR cache key from the same (repo.path, branch)
+  // pair ChecksPanelInner uses. Recomputed lazily inside the selector so the
+  // segment status updates as soon as the PR cache mutates for any member.
+  const memberChecksStatuses = useAppStore(
+    useShallow((s) => {
+      if (!groupMembers) {
+        return null
+      }
+      return groupMembers.map((wt) => {
+        const memberRepo = repoMap.get(wt.repoId)
+        if (!memberRepo) {
+          return undefined
+        }
+        const memberBranch = wt.branch.replace(/^refs\/heads\//, '')
+        const memberPrCacheKey = `${memberRepo.path}::${memberBranch}`
+        return s.prCache[memberPrCacheKey]?.data?.checksStatus
+      })
+    })
+  )
+
+  if (group && groupMembers && groupMembers.length > 0) {
+    return (
+      <ChecksPanelGroupContainer
+        members={groupMembers}
+        memberChecksStatuses={memberChecksStatuses ?? []}
+        repoMap={repoMap}
+        defaultActiveWorktreeId={activeWorktreeId}
+      />
+    )
+  }
+
+  return <ChecksPanelInner worktreeId={activeWorktreeId} />
+}
+
+export default React.memo(ChecksPanel)

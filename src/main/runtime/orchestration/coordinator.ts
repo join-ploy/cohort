@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: the coordinator keeps message processing, task dispatch, gate handling, escalation, and convergence checking in one class so the polling loop can make atomic decisions across all these concerns without split-brain behavior. */
 import type { OrchestrationDb } from './db'
 import type { MessageRow, TaskRow, CoordinatorStatus } from './types'
 import { buildDispatchPreamble } from './preamble'

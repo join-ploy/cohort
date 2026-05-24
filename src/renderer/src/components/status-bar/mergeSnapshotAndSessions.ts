@@ -1,8 +1,3 @@
-/* eslint-disable max-lines -- Why: this module deliberately co-locates the
-   renderer-local view-model types, the merge function, and its supporting
-   string-manipulation helpers because they exist solely to feed the popover
-   in ResourceUsageStatusSegment.tsx. Splitting would scatter logic that has
-   exactly one consumer. See docs/resource-usage-merge-spec.md. */
 /**
  * Resource Usage popover merge helper.
  *

@@ -9,6 +9,7 @@
 import { toast as defaultToast } from 'sonner'
 import type { RunStartArgs, RunStartResult } from '../../../shared/script-types'
 import type { RightSidebarTab } from '../store/slices/editor'
+import type { WorkspaceGroup } from '../../../shared/types'
 
 // Why: read only the keys triggerRunShortcut touches. Avoids depending on the
 // full `AppState` import chain in tests — pulling that in transitively loads
@@ -20,6 +21,8 @@ export type TriggerRunShortcutStoreSlice = {
   setRightSidebarTab: (tab: RightSidebarTab) => void
   repos: readonly { id: string; displayName?: string }[]
   worktreesByRepo: Record<string, readonly { id: string; repoId: string }[]>
+  workspaceGroups: readonly WorkspaceGroup[]
+  startGroupRun: (groupId: string) => Promise<RunStartResult[]>
 }
 
 export type TriggerRunShortcutDeps = {
@@ -64,6 +67,35 @@ export async function triggerRunShortcut(deps: TriggerRunShortcutDeps): Promise<
     state.setRightSidebarOpen(true)
   }
   state.setRightSidebarTab('run')
+
+  // Why: when the active worktree belongs to a group, fan-out via
+  // startGroupRun so Cmd+R kicks every member atomically — matches the
+  // RunPanelGroupView "Start All" affordance. Skip the single-worktree
+  // start IPC in this case to avoid double-starting the active member.
+  const owningGroup = state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(worktree.id))
+  if (owningGroup) {
+    try {
+      const results = await state.startGroupRun(owningGroup.id)
+      for (const result of results) {
+        if (result.ok) {
+          continue
+        }
+        // Why: 'no-run-script' surfaces as a message (not error) — same
+        // convention as the single-worktree branch below. Other reasons toast
+        // as errors. The group RunPanel handles 'not-running' explicitly on
+        // stops, but starts never return that reason.
+        if (result.reason === 'no-run-script') {
+          deps.toast.message(`No run script configured for one of the group members`)
+          continue
+        }
+        deps.toast.error(`Could not start run script: ${result.reason}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown'
+      deps.toast.error(`Failed to start group run: ${message}`)
+    }
+    return
+  }
 
   const result = await deps.start({ repoId: repo.id, worktreeId: worktree.id })
   if (result.ok) {

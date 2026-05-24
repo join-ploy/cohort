@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines */
 import type * as React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POST_REPLAY_FOCUS_REPORTING_RESET, POST_REPLAY_MODE_RESET } from './layout-serialization'

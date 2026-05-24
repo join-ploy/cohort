@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: this persistence suite keeps defaulting,
-migration, mutation, and flush behavior in one file so schema changes are
-reviewed against the full storage contract instead of being scattered. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { writeFileSync, readFileSync, rmSync, mkdtempSync, mkdirSync } from 'fs'
 import { join } from 'path'
@@ -161,6 +158,10 @@ describe('Store', () => {
     expect(settings.rightSidebarOpenByDefault).toBe(true)
     expect(settings.showTasksButton).toBe(true)
     expect(settings.experimentalActivity).toBe(true)
+    // Why: grouped-workspaces sidebar section is opt-in while the UX is in
+    // flight. A regression flipping this to true would surface the section to
+    // users who never enabled it.
+    expect(settings.experimentalGroupedWorkspaces).toBe(false)
     expect(settings.floatingTerminalEnabled).toBe(true)
     expect(settings.floatingTerminalDefaultedForAllUsers).toBe(true)
     expect(settings.notifications.customSoundPath).toBeNull()
@@ -2330,5 +2331,186 @@ describe('Store', () => {
     expect(created.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
     const reloaded = store.listAutomations().find((a) => a.id === created.id)
     expect(reloaded?.autoTriggers?.[0]?.id).toBe('at1')
+  })
+
+  describe('workspaceGroups persistence', () => {
+    beforeEach(() => {
+      // Why: the malformed-entry branch in parseWorkspaceGroups logs a
+      // console.warn breadcrumb. Silence it here so the test output stays
+      // focused on the assertions.
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    it('defaults workspaceGroups to [] when absent from persisted file', async () => {
+      writeDataFile({
+        schemaVersion: 1,
+        repos: [],
+        worktreeMeta: {},
+        settings: {},
+        ui: {},
+        githubCache: { pr: {}, issue: {} },
+        workspaceSession: {}
+      })
+      const store = await createStore()
+      expect(store.getWorkspaceGroups()).toEqual([])
+    })
+
+    it('drops malformed workspaceGroups entries on load', async () => {
+      const validGroup = {
+        id: 'group:abc',
+        workspaceName: 'daring_tiger',
+        displayName: 'daring_tiger',
+        parentPath: '/tmp/daring_tiger',
+        memberWorktreeIds: ['orca::/a'],
+        branchName: 'daring_tiger',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0,
+        isUnread: false,
+        comment: '',
+        createdAt: 1000,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+      writeDataFile({
+        schemaVersion: 1,
+        repos: [],
+        worktreeMeta: {},
+        settings: {},
+        ui: {},
+        githubCache: { pr: {}, issue: {} },
+        workspaceSession: {},
+        workspaceGroups: [validGroup, { id: 'group:bad' }]
+      })
+      const store = await createStore()
+      const groups = store.getWorkspaceGroups()
+      expect(groups).toHaveLength(1)
+      expect(groups[0].id).toBe('group:abc')
+    })
+
+    // Why: M1 of the grouped-workspaces plan — when a member worktree's
+    // lastActivityAt is bumped, the owning group's lastActivityAt should
+    // roll up to max(new, existing) so smart-sort and the "Recent" surface
+    // see the group as freshly active.
+    it('setWorktreeMeta with lastActivityAt rolls up to the owning group', async () => {
+      const store = await createStore()
+      const memberId = 'orca::/group_a/wt1'
+      const group = {
+        id: 'group:a',
+        workspaceName: 'group_a',
+        displayName: 'group_a',
+        parentPath: '/tmp/group_a',
+        memberWorktreeIds: [memberId],
+        branchName: 'group_a',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 1000,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+      store.setWorkspaceGroup(group)
+
+      store.setWorktreeMeta(memberId, { lastActivityAt: 5000 })
+
+      const updated = store.getWorkspaceGroups().find((g) => g.id === 'group:a')
+      expect(updated?.lastActivityAt).toBe(5000)
+    })
+
+    it('setWorktreeMeta lastActivityAt rollup is max(new, existing)', async () => {
+      const store = await createStore()
+      const memberId = 'orca::/group_b/wt1'
+      const group = {
+        id: 'group:b',
+        workspaceName: 'group_b',
+        displayName: 'group_b',
+        parentPath: '/tmp/group_b',
+        memberWorktreeIds: [memberId],
+        branchName: 'group_b',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 9000,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+      store.setWorkspaceGroup(group)
+
+      // Older timestamp must not regress the group activity.
+      store.setWorktreeMeta(memberId, { lastActivityAt: 1000 })
+
+      const updated = store.getWorkspaceGroups().find((g) => g.id === 'group:b')
+      expect(updated?.lastActivityAt).toBe(9000)
+    })
+
+    it('setWorktreeMeta without lastActivityAt does not touch the group', async () => {
+      const store = await createStore()
+      const memberId = 'orca::/group_c/wt1'
+      const group = {
+        id: 'group:c',
+        workspaceName: 'group_c',
+        displayName: 'group_c',
+        parentPath: '/tmp/group_c',
+        memberWorktreeIds: [memberId],
+        branchName: 'group_c',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 1000,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+      store.setWorkspaceGroup(group)
+
+      // No lastActivityAt in the meta update — group must be untouched.
+      store.setWorktreeMeta(memberId, { comment: 'updated' })
+
+      const updated = store.getWorkspaceGroups().find((g) => g.id === 'group:c')
+      expect(updated?.lastActivityAt).toBe(1000)
+    })
+
+    it('setWorktreeMeta on a worktree with no owning group is a no-op for groups', async () => {
+      const store = await createStore()
+      const memberId = 'orca::/group_d/wt1'
+      const group = {
+        id: 'group:d',
+        workspaceName: 'group_d',
+        displayName: 'group_d',
+        parentPath: '/tmp/group_d',
+        memberWorktreeIds: [memberId],
+        branchName: 'group_d',
+        isArchived: false,
+        archivedAt: null,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 1000,
+        isUnread: false,
+        comment: '',
+        createdAt: 0,
+        linkedIssue: null,
+        linkedLinearIssue: null
+      }
+      store.setWorkspaceGroup(group)
+
+      // Bump a different worktree's activity — owning group unchanged.
+      store.setWorktreeMeta('orca::/unrelated', { lastActivityAt: 9999 })
+
+      const updated = store.getWorkspaceGroups().find((g) => g.id === 'group:d')
+      expect(updated?.lastActivityAt).toBe(1000)
+    })
   })
 })

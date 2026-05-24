@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: the smart name field owns source tabs,
-search orchestration, and result rendering so the unified create flow stays
-in one predictable form control instead of splitting state across fragments. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CaseSensitive,

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -180,7 +179,11 @@ describe('registerWorktreeHandlers', () => {
     getWorktreeMeta: vi.fn(),
     getAllWorktreeMeta: vi.fn(),
     setWorktreeMeta: vi.fn(),
-    removeWorktreeMeta: vi.fn()
+    removeWorktreeMeta: vi.fn(),
+    // Why: J1/J2 group lookups call this on every script/spawn path; default
+    // to an empty list so unrelated tests keep their pre-grouped-workspaces
+    // shape without each one having to declare it.
+    getWorkspaceGroups: vi.fn(() => [])
   }
   let runtimeStub: {
     resolveRemoteTrackingBase: ReturnType<typeof vi.fn>
@@ -1098,7 +1101,12 @@ describe('registerWorktreeHandlers', () => {
     expect(createIssueCommandRunnerScriptMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'repo-1' }),
       '/workspace/improve-dashboard',
-      'codex exec "long command"'
+      'codex exec "long command"',
+      // workspaceName and groupRepos are looked up via the store; this
+      // test's store mock returns no meta and no groups for the synthetic
+      // worktreeId, so both come through undefined.
+      undefined,
+      undefined
     )
     expect(result).toEqual({
       runnerScriptPath: '/workspace/repo/.git/orca/issue-command-runner.sh',
@@ -1678,13 +1686,15 @@ describe('registerWorktreeHandlers', () => {
 
     // Why: archive runs through the same hook helper as setup, so verify
     // workspaceName is forwarded as the 5th arg — that's how the
-    // CONDUCTOR_WORKSPACE_NAME env var flows into the archive shell.
+    // CONDUCTOR_WORKSPACE_NAME env var flows into the archive shell. The
+    // 6th arg is the group repos list (undefined for non-grouped worktrees).
     expect(runHookMock).toHaveBeenCalledWith(
       'archive',
       '/workspace/feature-wt',
       expect.objectContaining({ id: 'repo-1' }),
       undefined,
-      'wise_panther'
+      'wise_panther',
+      undefined
     )
     expect(removeWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',

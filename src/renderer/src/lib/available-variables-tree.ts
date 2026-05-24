@@ -6,7 +6,7 @@ import type { AvailableVariables } from './template-dry-run'
 // (read-only footer summary) so both surfaces present the same set in the same
 // order.
 export type PathEntry = {
-  namespace: 'automation' | 'trigger' | 'steps'
+  namespace: 'automation' | 'trigger' | 'steps' | 'group'
   stepId?: string
   // Full dotted path, e.g. 'automation.projectId' or 'steps.cw1.worktreeId'.
   path: string
@@ -15,15 +15,18 @@ export type PathEntry = {
 }
 
 // Flatten the namespaced schema into a list of dotted paths. Order matches the
-// shape of the input: automation -> trigger -> steps (in step-id iteration order).
-// Trigger can nest (e.g. `trigger.linear.issue.*`) so we walk it recursively;
+// shape of the input: automation -> trigger -> group -> steps (in step-id
+// iteration order). Trigger and group can nest so we walk them recursively;
 // automation + steps remain flat.
 export function buildPaths(available: AvailableVariables): PathEntry[] {
   const out: PathEntry[] = []
   for (const [key, type] of Object.entries(available.automation)) {
     out.push({ namespace: 'automation', path: `automation.${key}`, leaf: key, type })
   }
-  walkTriggerPaths(available.trigger, '', out)
+  walkNestedPaths(available.trigger, '', out, 'trigger')
+  if (available.group) {
+    walkNestedPaths(available.group, '', out, 'group')
+  }
   for (const [stepId, schema] of Object.entries(available.steps)) {
     for (const [key, type] of Object.entries(schema)) {
       out.push({
@@ -38,13 +41,20 @@ export function buildPaths(available: AvailableVariables): PathEntry[] {
   return out
 }
 
-function walkTriggerPaths(schema: NestedSchema, prefix: string, out: PathEntry[]): void {
+// Why: trigger and group both nest arbitrarily — same recursive walk for both,
+// parameterized by the top-level namespace key so the dotted path stays correct.
+function walkNestedPaths(
+  schema: NestedSchema,
+  prefix: string,
+  out: PathEntry[],
+  namespace: 'trigger' | 'group'
+): void {
   for (const [key, value] of Object.entries(schema)) {
     const path = prefix ? `${prefix}.${key}` : key
     if (typeof value === 'string') {
-      out.push({ namespace: 'trigger', path: `trigger.${path}`, leaf: key, type: value })
+      out.push({ namespace, path: `${namespace}.${path}`, leaf: key, type: value })
     } else {
-      walkTriggerPaths(value, path, out)
+      walkNestedPaths(value, path, out, namespace)
     }
   }
 }

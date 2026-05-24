@@ -1,8 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationService aggregates runner
-   wiring, the rrule scheduler tick, run-now bookkeeping, and (now) the
-   auto-trigger engine controller. Splitting these concerns is a separate
-   refactor; this file was already over budget before the auto-triggers
-   work. */
 import { randomUUID } from 'crypto'
 import type { IpcMain, WebContents } from 'electron'
 import type { Store } from '../persistence'
@@ -32,6 +27,12 @@ import { RunPromptRunner } from './runners/run-prompt-runner'
 import { WaitForSetupRunner } from './runners/wait-for-setup-runner'
 import { RunCommandRunner } from './runners/run-command-runner'
 import { CreateWorktreeRunner, type CreateWorktreeDeps } from './runners/create-worktree-runner'
+import {
+  CreateWorkspaceGroupRunner,
+  type CreateWorkspaceGroupDeps
+} from './runners/create-workspace-group-runner'
+import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
+import { updateIssue as linearUpdateIssue } from '../linear/issues'
 import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
 
@@ -78,6 +79,11 @@ export type AutomationServiceOpts = {
    *  Omitting it makes the runner throw a clear error if a chain tries to
    *  invoke it (unit tests that never exercise `create-worktree` can skip it). */
   createWorktree?: CreateWorktreeDeps['createWorktree']
+  /** Bridge from the chain executor's `create-workspace-group` step to the
+   *  workspace-groups:create flow. Wired in src/main/index.ts. Omitting it
+   *  makes the runner throw if a chain ever tries to invoke it — same shape
+   *  as `createWorktree` above. */
+  createWorkspaceGroup?: CreateWorkspaceGroupDeps['createWorkspaceGroup']
   /** Lazy accessor for the renderer process. Resolved at call-time on every
    *  runner tick because the BrowserWindow lifecycle is independent of this
    *  service — capturing a WebContents reference eagerly would let the service
@@ -137,6 +143,8 @@ export class AutomationService {
   private readonly waitForSetupRunner: WaitForSetupRunner
   private readonly runCommandRunner: RunCommandRunner
   private readonly createWorktreeRunner: CreateWorktreeRunner
+  private readonly createWorkspaceGroupRunner: CreateWorkspaceGroupRunner
+  private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -192,6 +200,26 @@ export class AutomationService {
         const repo = this.store.getRepo(parsed.repoId)
         return { path: parsed.worktreePath, connectionId: repo?.connectionId ?? null }
       },
+      // Why (grouped-workspaces L3): when a run-prompt step's worktreeRef
+      // resolves to a `group:<uuid>` (the output shape of
+      // create-workspace-group), the runner needs the group's parentPath as
+      // the agent CWD and a representative member worktreeId for the UI
+      // binding. Resolve both straight from main's store so the renderer can't
+      // race the worktrees:changed broadcast.
+      getGroupSummary: (groupId) => {
+        const group = this.store.getWorkspaceGroups().find((g) => g.id === groupId)
+        if (!group || group.memberWorktreeIds.length === 0) {
+          return null
+        }
+        const firstMemberWorktreeId = group.memberWorktreeIds[0]
+        const parsed = splitWorktreeId(firstMemberWorktreeId)
+        const repo = parsed ? this.store.getRepo(parsed.repoId) : null
+        return {
+          parentPath: group.parentPath,
+          firstMemberWorktreeId,
+          connectionId: repo?.connectionId ?? null
+        }
+      },
       // Why: scope outputTail capture to the agent's current turn so the
       // step's `outputTail` surfaces the last assistant reply rather than
       // the full pane history.
@@ -202,6 +230,12 @@ export class AutomationService {
 
     this.waitForSetupRunner = new WaitForSetupRunner({
       getSetupScript: this.getSetupScript,
+      // Why (grouped-workspaces): hand the runner a fresh snapshot per tick so
+      // it can fan out a `group:<uuid>` worktreeRef into the group's member
+      // worktreeIds. Without this, a group-id ref hit the registry empty-handed
+      // and the runner silently resolved as success without ever waiting for
+      // member setup scripts.
+      getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
       now: () => Date.now()
     })
 
@@ -218,6 +252,17 @@ export class AutomationService {
       // would never resolve the step. Reuse the same agent-status registry
       // run-prompt polls.
       getAgentStatus: this.getAgentStatus,
+      // Why: same group-ref resolution run-prompt-runner uses (parity fix).
+      // Without this, a `group:<uuid>` worktreeRef hits openCommandPane with
+      // an id no worktree carries → "Worktree is no longer available". Phase
+      // J1's pty:spawn override then lifts the CWD to the group parent for us.
+      getGroupSummary: (groupId) => {
+        const group = this.store.getWorkspaceGroups().find((g) => g.id === groupId)
+        if (!group || group.memberWorktreeIds.length === 0) {
+          return undefined
+        }
+        return { firstMemberWorktreeId: group.memberWorktreeIds[0] }
+      },
       now: () => Date.now()
     })
 
@@ -235,6 +280,36 @@ export class AutomationService {
     this.createWorktreeRunner = new CreateWorktreeRunner({
       createWorktree: createWorktreeDep,
       now: () => Date.now()
+    })
+
+    // Why: same fail-loud default as createWorktree — a chain that hits
+    // create-workspace-group without the dep wired surfaces a clear error
+    // instead of a confusing TypeError mid-tick. Service tests that never
+    // exercise group steps can skip the wiring.
+    const createWorkspaceGroupDep: CreateWorkspaceGroupDeps['createWorkspaceGroup'] =
+      opts.createWorkspaceGroup ??
+      (() => {
+        throw new Error(
+          'AutomationService: createWorkspaceGroup dep not wired (cannot run create-workspace-group steps).'
+        )
+      })
+    this.createWorkspaceGroupRunner = new CreateWorkspaceGroupRunner({
+      createWorkspaceGroup: createWorkspaceGroupDep,
+      // Why: exposes Repo.description to the group templating context
+      // (`group.members.<repo>.description`) so chain authors can hand repo
+      // context to agents without an extra IPC roundtrip. Closure over
+      // `this.store` rather than the snapshot value so a description edit
+      // between service construction and the chain tick is visible to the
+      // runner.
+      getRepoDescription: (repoId) => this.store.getRepo(repoId)?.description,
+      now: () => Date.now()
+    })
+
+    this.updateLinearIssueRunner = new UpdateLinearIssueRunner({
+      // Why: pass the bound Linear API call directly. The runner's narrow dep
+      // shape lets tests stub without touching the Linear SDK; production
+      // wiring uses the module-level singleton client managed in linear/client.
+      updateIssue: (id, updates) => linearUpdateIssue(id, updates)
     })
 
     this.chainExecutor = new ChainExecutor({
@@ -472,6 +547,12 @@ export class AutomationService {
     if (kind === 'create-worktree') {
       return this.createWorktreeRunner
     }
+    if (kind === 'create-workspace-group') {
+      return this.createWorkspaceGroupRunner
+    }
+    if (kind === 'update-linear-issue') {
+      return this.updateLinearIssueRunner
+    }
     return undefined
   }
 
@@ -679,7 +760,9 @@ export class AutomationService {
       this.runPromptRunner,
       this.waitForSetupRunner,
       this.runCommandRunner,
-      this.createWorktreeRunner
+      this.createWorktreeRunner,
+      this.createWorkspaceGroupRunner,
+      this.updateLinearIssueRunner
     ]
   }
 

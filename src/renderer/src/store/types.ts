@@ -21,6 +21,8 @@ import type { DetectedAgentsSlice } from './slices/detected-agents'
 import type { WorktreeNavHistorySlice } from './slices/worktree-nav-history'
 import type { ScriptsSlice } from './slices/scripts'
 import type { AutomationRunsSlice } from './slices/automation-runs'
+import type { AutomationsSlice } from './slices/automations'
+import type { WorkspaceGroupsSlice } from './slices/workspace-groups'
 
 export type AppState = RepoSlice &
   SparsePresetsSlice &
@@ -44,4 +46,6 @@ export type AppState = RepoSlice &
   DetectedAgentsSlice &
   WorktreeNavHistorySlice &
   ScriptsSlice &
-  AutomationRunsSlice
+  AutomationRunsSlice &
+  AutomationsSlice &
+  WorkspaceGroupsSlice

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: Codex hook trust parsing, hashing, and byte-preserving TOML edits share one fragile file-format contract; splitting would make the compatibility shim harder to audit. */
 import {
   copyFileSync,
   existsSync,

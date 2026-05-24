@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { app, BrowserWindow, dialog, ipcMain, nativeImage } from 'electron'
 import { copyFile, mkdir, open, readFile, rename, rm, stat, lstat } from 'node:fs/promises'
 import { constants as fsConstants, createWriteStream } from 'node:fs'

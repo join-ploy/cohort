@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: persistence keeps schema defaults, migration,
-load/save, and flush logic in one file so the full storage contract is reviewable
-as a unit instead of being scattered across modules. */
 import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from 'fs'
 import { writeFile, rename, mkdir, rm } from 'fs/promises'
@@ -26,6 +23,7 @@ import type {
   Repo,
   SparsePreset,
   WorktreeMeta,
+  WorkspaceGroup,
   GlobalSettings,
   OnboardingChecklistState,
   OnboardingOutcome,
@@ -45,6 +43,7 @@ import {
   ONBOARDING_FINAL_STEP
 } from '../shared/constants'
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
+import { parseWorkspaceGroups } from '../shared/workspace-group-schema'
 import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId, splitWorktreeId } from '../shared/worktree-id'
@@ -435,6 +434,7 @@ export class Store {
           automationAutoDedup: Array.isArray(parsed.automationAutoDedup)
             ? parsed.automationAutoDedup
             : [],
+          workspaceGroups: parseWorkspaceGroups(parsed.workspaceGroups),
           onboarding: (() => {
             // Why: if we successfully parsed an existing orca-data.json that
             // lacks an onboarding block, this is an upgrade-cohort user —
@@ -672,6 +672,32 @@ export class Store {
     return this.state.repos.map((repo) => this.hydrateRepo(repo))
   }
 
+  getWorkspaceGroups(): WorkspaceGroup[] {
+    // Why: hand callers a fresh array so downstream .sort()/.splice() can't
+    // mutate persisted state without going through scheduleSave. Matches
+    // listAutomations() / getSshTargets() / getRepos() conventions.
+    return [...this.state.workspaceGroups]
+  }
+
+  // Why: upsert-by-id mirrors setWorktreeMeta. The group create flow stamps a
+  // brand-new id, but the same accessor is the natural fit for later edits
+  // (rename, pin, archive) so callers don't need a separate update method.
+  setWorkspaceGroup(group: WorkspaceGroup): WorkspaceGroup {
+    const index = this.state.workspaceGroups.findIndex((entry) => entry.id === group.id)
+    if (index === -1) {
+      this.state.workspaceGroups.push(group)
+    } else {
+      this.state.workspaceGroups[index] = group
+    }
+    this.scheduleSave()
+    return group
+  }
+
+  removeWorkspaceGroup(id: string): void {
+    this.state.workspaceGroups = this.state.workspaceGroups.filter((entry) => entry.id !== id)
+    this.scheduleSave()
+  }
+
   /**
    * O(1) read of the persisted repo count. Use this when you only need the
    * count (e.g. cohort-classifier) — `getRepos()` hydrates each repo and
@@ -746,6 +772,7 @@ export class Store {
         Repo,
         | 'displayName'
         | 'badgeColor'
+        | 'description'
         | 'hookSettings'
         | 'worktreeBaseRef'
         | 'kind'
@@ -1148,6 +1175,16 @@ export class Store {
     const existing = this.state.worktreeMeta[worktreeId] || getDefaultWorktreeMeta()
     const updated = { ...existing, ...meta }
     this.state.worktreeMeta[worktreeId] = updated
+    // Why (M1): activity bumps on a member must roll up to the owning group's
+    // lastActivityAt so smart-sort / Cmd+J / "Recent" surfaces see the group
+    // as freshly active. Use max(new, existing) so out-of-order timestamps
+    // can't regress an already-newer group activity.
+    if (typeof meta.lastActivityAt === 'number') {
+      const group = this.state.workspaceGroups.find((g) => g.memberWorktreeIds.includes(worktreeId))
+      if (group && meta.lastActivityAt > group.lastActivityAt) {
+        group.lastActivityAt = meta.lastActivityAt
+      }
+    }
     this.scheduleSave()
     return updated
   }

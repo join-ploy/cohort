@@ -1,9 +1,3 @@
-/* oxlint-disable max-lines -- Why: this is the single source of truth for
- * rg arg construction, rg --json parsing, git-grep submatch parsing, and
- * relative-path normalization, shared by both the local main process and
- * the SSH relay. The prior divergence between those two implementations
- * caused the maxBuffer footgun the design doc calls out; re-splitting the
- * file would re-introduce that failure mode. */
 /**
  * Shared, pure text-search helpers used by both the local main process and the
  * SSH relay. No Electron, no child_process, no fs — the caller owns process

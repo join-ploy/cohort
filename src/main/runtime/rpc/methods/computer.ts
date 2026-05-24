@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: computer RPC schemas and sidecar dispatch stay together so provider behavior is audited in one place. */
 import { z } from 'zod'
 import {
   callComputerSidecarAction,

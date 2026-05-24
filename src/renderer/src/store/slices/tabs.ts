@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: split-tab group state has to update layout,
- * per-group focus, and tab membership atomically. Keeping those transitions in
- * one slice avoids split-brain behavior between the unified tab model and the
- * legacy terminal/editor/browser content slices. */
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type {

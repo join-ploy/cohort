@@ -58,7 +58,8 @@ export default function EditorFileTab({
   onPin,
   onSplitGroup,
   dragData,
-  dropIndicator
+  dropIndicator,
+  memberBadge
 }: {
   file: OpenFile & { tabId?: string }
   isActive: boolean
@@ -72,6 +73,8 @@ export default function EditorFileTab({
   onSplitGroup: (direction: 'left' | 'right' | 'up' | 'down', sourceVisibleTabId: string) => void
   dragData: TabDragItemData
   dropIndicator?: DropIndicator
+  /** See TabBar's `memberBadge` prop. */
+  memberBadge?: { color: string; name: string } | null
 }): React.JSX.Element {
   const worktree = useWorktreeById(file.worktreeId)
   // Why: no transform/transition/isDragging styling — the drag design is
@@ -250,6 +253,15 @@ export default function EditorFileTab({
           ) : (
             <FileCode
               className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+            />
+          )}
+          {memberBadge && (
+            <span
+              aria-label={`Tab from ${memberBadge.name}`}
+              title={`Tab from ${memberBadge.name}`}
+              data-testid="tab-member-badge"
+              className="mr-1 inline-block size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: memberBadge.color }}
             />
           )}
           <span className="mr-1 flex min-w-0 items-baseline gap-1">

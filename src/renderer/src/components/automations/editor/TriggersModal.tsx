@@ -23,6 +23,10 @@ export type TriggersModalProps = {
   /** Registered source ids the user can add. Phase 13 will wire this to the
    *  source-registry IPC. For now ChainEditorModal hardcodes the list. */
   availableSources: { id: TriggerSourceId; label: string }[]
+  /** When true, the chain supplies its own project context (via a
+   *  create-workspace-group step), so per-rule project selects can read as
+   *  "Inferred from group" and stay optional. */
+  chainProvidesProject?: boolean
   onSave: (next: { trigger: TriggerConfig; autoTriggers: AutoTrigger[] }) => void
   onCancel: () => void
 }
@@ -274,6 +278,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                       projects={projects}
                       fieldCatalog={fieldCatalogBySource.get(t.source) ?? []}
                       loadOptions={loadOptionsFor(t.source)}
+                      chainProvidesProject={props.chainProvidesProject}
                     />
                   </li>
                 ))}

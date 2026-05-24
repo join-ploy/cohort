@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: keeps the registry, handleRunStart, and
-handleRunStop suites together so a regression in any one path is caught
-against the full IPC surface instead of being split across files. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -111,7 +108,10 @@ function makeRepo(overrides: Partial<Repo> = {}): Repo {
 function makeStore(repo: Repo | null, workspaceName: string = 'wise_panther') {
   return {
     getRepo: vi.fn(() => repo ?? undefined),
-    getWorktreeMeta: vi.fn(() => ({ workspaceName }))
+    getWorktreeMeta: vi.fn(() => ({ workspaceName })),
+    // Why: handleRunStart looks up the enclosing group to emit
+    // CONDUCTOR_WORKSPACE_REPOS. Default to no groups for these tests.
+    getWorkspaceGroups: vi.fn(() => [])
   }
 }
 
@@ -246,12 +246,14 @@ describe('handleRunStart', () => {
     expect(provider.shutdown).not.toHaveBeenCalled()
     expect(provider.spawn).toHaveBeenCalledTimes(1)
     // Confirm the IPC handler called createRunRunnerScript with the
-    // workspaceName drawn from getWorktreeMeta.
+    // workspaceName drawn from getWorktreeMeta. groupRepos is undefined
+    // because this worktree is not a group member.
     expect(createRunRunnerScriptMock).toHaveBeenCalledWith(
       repo,
       worktreePath,
       'pnpm dev',
-      'wise_panther'
+      'wise_panther',
+      undefined
     )
     const spawnArgs = provider.spawn.mock.calls[0][0] as {
       cwd?: string

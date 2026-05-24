@@ -1,7 +1,3 @@
-/* eslint-disable max-lines -- Why: this is Orca's main-process entry point;
-   it owns app lifecycle, service wiring, window creation, and hook/daemon
-   startup. Splitting by line count would fragment tightly coupled startup
-   logic across files without a cleaner ownership seam. */
 import { grantDirAcl } from './win32-utils'
 import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
@@ -76,6 +72,10 @@ import { SetupScriptRegistry } from './setup-script/registry'
 import { PtyExitRegistry } from './pty/exit-registry'
 import { createCleanupService, type CleanupService } from './archive/cleanup-service'
 import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
+import {
+  createWorkspaceGroup as createWorkspaceGroupFlow,
+  repoFolderName
+} from './ipc/workspace-groups'
 import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 
@@ -723,6 +723,55 @@ app.whenReady().then(async () => {
     // `linkedIssue` is for Linear; createManagedWorktree's `linkedIssue` field
     // is a numeric GitHub issue ID — incompatible. Passing `null` until a
     // Linear-linkage path is added (Phase 4 follow-up).
+    // Why (grouped-workspaces L3): bridge the chain runner onto the shared
+    // create-workspace-group helper so the IPC handler and the automation
+    // runner take the same validate/create/rollback path. The runner hands
+    // over a normalized shape with `branchName` doubling as workspaceName +
+    // branch name (mirroring the IPC contract); we map members' `baseBranch`
+    // onto the IPC's `baseRef` field and pass through the
+    // createdByAutomationRunId for sidebar attribution.
+    createWorkspaceGroup: async (input) => {
+      if (!mainWindow) {
+        throw new Error('createWorkspaceGroup: no mainWindow available.')
+      }
+      // Why: chain-shape automations may leave branchName empty when the user
+      // wants the group name auto-generated (just like the manual composer
+      // and the create-worktree wiring above). Generate an adjective_noun
+      // slug against the same taken-names set the manual composer + IPC
+      // validator use (repo folder basenames + existing group workspaceNames)
+      // so the new slug can never collide with a sibling. The slug doubles
+      // as the workspaceName AND the per-member branch — matches the runner
+      // contract where branchName plays a triple role today.
+      const resolvedBranchName =
+        input.branchName.trim() ||
+        generateUniqueWorkspaceName(
+          new Set([
+            ...storeRef.getRepos().map(repoFolderName),
+            ...storeRef.getWorkspaceGroups().map((g) => g.workspaceName)
+          ])
+        )
+      const result = await createWorkspaceGroupFlow(
+        {
+          workspaceName: resolvedBranchName,
+          displayName: input.displayName,
+          branchName: resolvedBranchName,
+          members: input.members.map((m) => ({
+            repoId: m.repoId,
+            baseRef: m.baseBranch ? m.baseBranch : null,
+            setupDecision: m.setupDecision
+          })),
+          ...(input.createdByAutomationRunId
+            ? { createdByAutomationRunId: input.createdByAutomationRunId }
+            : {})
+        },
+        { store: storeRef, runtime: runtimeRef, mainWindow }
+      )
+      return {
+        groupId: result.group.id,
+        memberWorktreeIds: result.memberWorktrees.map((wt) => wt.id),
+        parentPath: result.group.parentPath
+      }
+    },
     createWorktree: async (input) => {
       // Why: chain-shape automations don't ask the user for a worktree name —
       // mirror the renderer's NewWorkspaceComposer flow by generating an

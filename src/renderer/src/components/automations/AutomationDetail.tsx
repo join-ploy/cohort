@@ -1,7 +1,3 @@
-/* oxlint-disable max-lines -- Why: AutomationDetail owns the run header,
- * trigger badge, lineage links, run history rows, step-state rendering and
- * chain breakdown. Splitting now would scatter the row-shape logic; revisit
- * when the chain rendering grows past another major addition. */
 import React from 'react'
 import { Pencil, Pause, Play, RotateCcw, Square, Trash2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,6 +12,7 @@ import type {
   AutomationRunStatus,
   Condition,
   ConditionOp,
+  CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   LinearIssuePayload,
   Rule,
@@ -26,10 +23,16 @@ import type {
   StepRunStatus,
   TriggerConfig,
   TriggerSourceId,
+  UpdateLinearIssueConfig,
   WaitForSetupConfig
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
+import {
+  isMemberScopedRef,
+  parseMemberScopedRef
+} from '../../../../shared/automation-member-scoped-ref'
+import { splitWorktreeId } from '../../../../shared/worktree-id'
 import {
   formatAutomationDateTime,
   formatAutomationDateTimeWithRelative,
@@ -340,10 +343,16 @@ function formatCondition(c: Condition): React.ReactNode {
 
 function describeRule(rule: Rule, repos: Repo[]): React.ReactNode {
   const repo = repos.find((r) => r.id === rule.projectId)
+  // Why: rule.projectId is intentionally optional when the chain itself
+  // supplies project context (e.g. a create-workspace-group step). Don't
+  // alarm the operator with "project deleted" for a rule they purposely
+  // left blank.
   const projectLabel = repo ? (
     <span className="font-medium text-foreground">{repo.displayName}</span>
-  ) : (
+  ) : rule.projectId ? (
     <span className="text-destructive">project deleted</span>
+  ) : (
+    <span className="text-muted-foreground">inferred from chain</span>
   )
   if (rule.conditions.length === 0) {
     return <>Matches every event → {projectLabel}</>
@@ -417,9 +426,11 @@ function AutoTriggersSummary({
 
 const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'create-worktree': 'Create worktree',
+  'create-workspace-group': 'Create workspace group',
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
-  'run-command': 'Run command'
+  'run-command': 'Run command',
+  'update-linear-issue': 'Update Linear issue'
 }
 
 function firstNonEmptyLine(value: string): string {
@@ -438,6 +449,12 @@ function describeStepConfig(step: Step): string {
       const branch = config.branchName.trim() || '(auto)'
       const base = config.baseBranch.trim() || 'main'
       return `${branch} from ${base}`
+    }
+    case 'create-workspace-group': {
+      const config = step.config as CreateWorkspaceGroupConfig
+      const branch = config.branchName.trim() || '(auto)'
+      const count = config.members.length
+      return `${branch} across ${count} ${count === 1 ? 'repo' : 'repos'}`
     }
     case 'wait-for-setup': {
       const config = step.config as WaitForSetupConfig
@@ -461,10 +478,58 @@ function describeStepConfig(step: Step): string {
       const custom = (config as RunCommandConfig & { customCommand?: string }).customCommand
       return firstNonEmptyLine(custom ?? '') || 'Custom command'
     }
+    case 'update-linear-issue': {
+      const config = step.config as UpdateLinearIssueConfig
+      const parts: string[] = []
+      if (config.assigneeRef && config.assigneeRef.trim().length > 0) {
+        parts.push('assignee')
+      }
+      if (config.stateRef && config.stateRef.trim().length > 0) {
+        parts.push('state')
+      }
+      if (parts.length === 0) {
+        return 'No updates configured'
+      }
+      return `Set ${parts.join(' + ')}`
+    }
   }
 }
 
+/** Pull a short repo-folder label out of a step's `worktreeRef` when it
+ *  resolves to a member-scoped sentinel — used to render the "scoped to <repo>"
+ *  badge on chain step rows (Ask C, UI marker). Returns null for any other
+ *  shape, including templated values that don't statically contain the
+ *  sentinel (e.g. `{{group.members.<x>.scoped}}` — without runtime context
+ *  we can't tell which repo it'll resolve to). */
+function getMemberScopedRepoLabel(step: Step): string | null {
+  // Only run-prompt steps carry the worktreeRef the runner inspects for the
+  // member-scoped branch today; keeping the check tight avoids false
+  // positives on other step kinds whose `worktreeRef` slot may grow later.
+  if (step.kind !== 'run-prompt' && step.kind !== 'run-command' && step.kind !== 'wait-for-setup') {
+    return null
+  }
+  const config = step.config as { worktreeRef?: string }
+  const raw = config.worktreeRef?.trim() ?? ''
+  if (!isMemberScopedRef(raw)) {
+    return null
+  }
+  const parsed = parseMemberScopedRef(raw)
+  if (!parsed) {
+    return null
+  }
+  const split = splitWorktreeId(parsed.worktreeId)
+  if (!split) {
+    return null
+  }
+  // Repo folder name == basename of the member's worktree path. Avoid pulling
+  // in Node's `path` module by slicing on the last `/` or `\`.
+  const path = split.worktreePath
+  const lastSep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return lastSep === -1 ? path : path.slice(lastSep + 1)
+}
+
 function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX.Element {
+  const memberScopedRepo = getMemberScopedRepoLabel(step)
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
       <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
@@ -474,6 +539,26 @@ function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX
         <div className="flex flex-wrap items-baseline gap-2">
           <span className="font-medium text-foreground">{STEP_KIND_LABELS[step.kind]}</span>
           <span className="truncate font-mono text-xs text-muted-foreground">{step.id}</span>
+          {memberScopedRepo ? (
+            // Why (Ask C UI marker): make member-scoped runs visually
+            // distinct from group-scoped ones so the operator can tell at a
+            // glance the agent will land at the member's CWD rather than the
+            // group parent. Minimal chip — full detail lives in the picker.
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="px-1.5 py-0 text-[10px] uppercase tracking-wide"
+                >
+                  scoped to {memberScopedRepo}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                Agent runs at this member&apos;s working directory; the terminal tab still belongs
+                to the group.
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
         <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
           {describeStepConfig(step)}
