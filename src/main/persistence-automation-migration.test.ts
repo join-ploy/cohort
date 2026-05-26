@@ -4,7 +4,8 @@ import type {
   Automation,
   CreateWorktreeConfig,
   CreateWorkspaceGroupConfig,
-  RunPromptConfig
+  RunPromptConfig,
+  Step
 } from '../shared/automations-types'
 
 describe('upgradeLegacyAutomation', () => {
@@ -121,16 +122,18 @@ describe('upgradeLegacyAutomation', () => {
       onFailure: 'halt',
       timeoutSeconds: null
     })
-    expect((upgraded.steps![0].config as CreateWorktreeConfig).baseBranch).toBe('main')
-    expect((upgraded.steps![0].config as CreateWorktreeConfig).linkLinearIssue).toBe(false)
+    expect(((upgraded.steps![0] as Step).config as CreateWorktreeConfig).baseBranch).toBe('main')
+    expect(((upgraded.steps![0] as Step).config as CreateWorktreeConfig).linkLinearIssue).toBe(
+      false
+    )
 
-    const createWtId = upgraded.steps![0].id
+    const createWtId = (upgraded.steps![0] as Step).id
     expect(upgraded.steps?.[1]).toMatchObject({
       kind: 'run-prompt',
       onFailure: 'halt',
       timeoutSeconds: null
     })
-    const promptConfig = upgraded.steps![1].config as RunPromptConfig
+    const promptConfig = (upgraded.steps![1] as Step).config as RunPromptConfig
     expect(promptConfig.worktreeRef).toBe(`{{steps.${createWtId}.worktreeId}}`)
     expect(promptConfig.agentId).toBe('claude')
     expect(promptConfig.prompt).toBe('Do thing')
@@ -169,7 +172,7 @@ describe('upgradeLegacyAutomation', () => {
       onFailure: 'halt',
       timeoutSeconds: null
     })
-    const groupConfig = upgraded.steps![0].config as CreateWorkspaceGroupConfig
+    const groupConfig = (upgraded.steps![0] as Step).config as CreateWorkspaceGroupConfig
     expect(groupConfig.branchName).toBe('Group automation')
     expect(groupConfig.displayName).toBe('Group automation')
     expect(groupConfig.linkLinearIssue).toBe(false)
@@ -178,13 +181,13 @@ describe('upgradeLegacyAutomation', () => {
       { repoId: 'r2', baseBranch: 'develop' }
     ])
 
-    const createGroupId = upgraded.steps![0].id
+    const createGroupId = (upgraded.steps![0] as Step).id
     expect(upgraded.steps?.[1]).toMatchObject({
       kind: 'run-prompt',
       onFailure: 'halt',
       timeoutSeconds: null
     })
-    const promptConfig = upgraded.steps![1].config as RunPromptConfig
+    const promptConfig = (upgraded.steps![1] as Step).config as RunPromptConfig
     // Why: the run-prompt step references the group via the new {{steps.<id>.groupId}}
     // template — the runner's group: branch redirects the agent CWD to parentPath.
     expect(promptConfig.worktreeRef).toBe(`{{steps.${createGroupId}.groupId}}`)
@@ -218,7 +221,7 @@ describe('upgradeLegacyAutomation', () => {
       updatedAt: 0
     }
     const upgraded = upgradeLegacyAutomation(legacy)
-    const groupConfig = upgraded.steps![0].config as CreateWorkspaceGroupConfig
+    const groupConfig = (upgraded.steps![0] as Step).config as CreateWorkspaceGroupConfig
     expect(groupConfig.members.every((m) => m.baseBranch === 'main')).toBe(true)
     expect(groupConfig.members.map((m) => m.repoId)).toEqual(['r1', 'r2', 'r3'])
   })

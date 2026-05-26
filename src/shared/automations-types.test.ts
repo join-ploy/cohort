@@ -7,6 +7,7 @@ import type {
   Condition,
   TriggerConfig,
   Step,
+  StepOrGroup,
   StepConfig,
   StepKind,
   StepRunState,
@@ -23,7 +24,7 @@ import type { TuiAgent } from './types'
 describe('chain types', () => {
   it('Automation carries trigger + steps optionally for migration', () => {
     expectTypeOf<Automation['trigger']>().toEqualTypeOf<TriggerConfig | undefined>()
-    expectTypeOf<Automation['steps']>().toEqualTypeOf<Step[] | undefined>()
+    expectTypeOf<Automation['steps']>().toEqualTypeOf<StepOrGroup[] | undefined>()
   })
 
   it('TriggerConfig has a manual variant with optional accept-flags', () => {
