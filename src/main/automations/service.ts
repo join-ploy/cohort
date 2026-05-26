@@ -12,6 +12,8 @@ import type {
   LinearIssuePayload,
   Rule,
   RunNowPayload,
+  Step,
+  StepOrGroup,
   TriggerSourceId
 } from '../../shared/automations-types'
 import type { CandidateEvent } from './trigger-sources/types'
@@ -35,6 +37,20 @@ import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
 import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
+
+// Why: duplicated from renderer's chain-editor-state because that module is
+// renderer-only. Kept inline to avoid a new shared runtime file for a one-liner.
+function flattenSteps(steps: StepOrGroup[]): Step[] {
+  const result: Step[] = []
+  for (const item of steps) {
+    if (Array.isArray(item)) {
+      result.push(...item)
+    } else {
+      result.push(item)
+    }
+  }
+  return result
+}
 
 const DEFAULT_TICK_MS = 60 * 1000
 const DEFAULT_AUTO_TRIGGER_POLL_SECONDS = 60
@@ -685,7 +701,11 @@ export class AutomationService {
       return undefined
     }
     const automation = this.store.listAutomations().find((entry) => entry.id === run.automationId)
-    if (!automation || !automation.steps || stepIndex < 0 || stepIndex >= automation.steps.length) {
+    // Why: stepIndex is a flat index into stepStates (already flattened), so
+    // the bounds check must compare against the flat step count, not the
+    // StepOrGroup[] length which may be shorter when parallel groups exist.
+    const flatSteps = flattenSteps(automation?.steps ?? [])
+    if (!automation || !automation.steps || stepIndex < 0 || stepIndex >= flatSteps.length) {
       return undefined
     }
     const droppedStepIds = (run.stepStates ?? []).slice(stepIndex).map((state) => state.stepId)
