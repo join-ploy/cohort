@@ -12,6 +12,7 @@ export type CreateWorktreeStepCardProps = {
   step: Step
   stepIndex: number
   available: AvailableVariables
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: CreateWorktreeConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -36,6 +37,7 @@ export function CreateWorktreeStepCard(props: CreateWorktreeStepCardProps): Reac
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}

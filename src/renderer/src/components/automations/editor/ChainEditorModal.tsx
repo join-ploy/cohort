@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Plus, Play, X } from 'lucide-react'
+import { Plus, Play, X, GripVertical, ArrowUpFromLine } from 'lucide-react'
 import {
   DndContext,
   KeyboardSensor,
@@ -11,8 +11,10 @@ import {
 import {
   SortableContext,
   sortableKeyboardCoordinates,
+  useSortable,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
@@ -42,7 +44,8 @@ import {
   generateDefaultStepId,
   groupStepAt,
   renameStepWithRewrites,
-  reorderSteps
+  reorderSteps,
+  ungroupStep
 } from '../../../lib/chain-editor-state'
 import {
   chainHasStep,
@@ -258,6 +261,27 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     setParallelAddOpen(null)
   }, [])
 
+  // Why: extracts a step from a parallel group and inserts it right after
+  // the group's top-level position. If only one sibling remains,
+  // ungroupStep auto-unwraps the group to a solo step.
+  const extractFromGroup = React.useCallback((groupIndex: number, innerIndex: number) => {
+    setDraft((current) => {
+      const group = current.steps[groupIndex]
+      if (!Array.isArray(group)) {
+        return current
+      }
+      const step = group[innerIndex]
+      if (!step) {
+        return current
+      }
+      const afterUngroup = ungroupStep(current.steps, groupIndex, innerIndex)
+      const insertAt = groupIndex + 1
+      const nextSteps = [...afterUngroup.slice(0, insertAt), step, ...afterUngroup.slice(insertAt)]
+      return { ...current, steps: nextSteps }
+    })
+    setDirty(true)
+  }, [])
+
   const handleCancel = React.useCallback(() => {
     if (dirty && !confirm('Discard changes?')) {
       return
@@ -427,17 +451,29 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
             <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
               {draft.steps.map((item, topIndex) => {
                 if (Array.isArray(item)) {
+                  const groupId = `group-${item.map((s) => s.id).join('+')}`
                   return (
-                    <div key={`group-${item.map((s) => s.id).join('+')}`}>
+                    <div key={groupId}>
                       {topIndex > 0 && <StepConnector />}
-                      <div className="flex items-stretch gap-2">
+                      <ParallelGroupContainer groupId={groupId}>
                         {item.map((step, innerIndex) => {
                           const flatIndex = computeFlatIndex(draft.steps, topIndex, innerIndex)
                           return (
-                            <div key={step.id} className="min-w-[280px] flex-1">
+                            <div key={step.id} className="relative min-w-[280px] flex-1">
+                              {item.length > 1 && (
+                                <button
+                                  type="button"
+                                  aria-label="Move out of parallel group"
+                                  onClick={() => extractFromGroup(topIndex, innerIndex)}
+                                  className="absolute -top-2 right-2 z-10 rounded-full border border-border bg-background p-0.5 text-muted-foreground shadow-xs hover:bg-accent hover:text-foreground"
+                                >
+                                  <ArrowUpFromLine className="size-3" />
+                                </button>
+                              )}
                               <ChainEditorStepCardRouter
                                 step={step}
                                 index={flatIndex}
+                                disableDrag
                                 available={getAvailableVariablesAtStep(
                                   draft,
                                   flatIndex,
@@ -465,7 +501,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                           }
                           onPick={(kind) => addParallelStep(topIndex, kind)}
                         />
-                      </div>
+                      </ParallelGroupContainer>
                     </div>
                   )
                 }
@@ -667,6 +703,54 @@ function StepConnector(): React.JSX.Element {
   return (
     <div className="flex justify-center py-1">
       <div className="h-4 w-px bg-border" />
+    </div>
+  )
+}
+
+/**
+ * Sortable wrapper for a parallel group row. Owns the vertical drag handle
+ * (GripVertical) for the whole group so individual member cards don't need
+ * their own. The composite `groupId` matches the entry in the parent's
+ * `SortableContext` items array.
+ */
+function ParallelGroupContainer({
+  groupId,
+  children
+}: {
+  groupId: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: groupId })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : undefined
+  }
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div className="flex items-stretch gap-2">
+        <button
+          ref={setActivatorNodeRef}
+          type="button"
+          aria-label="Reorder group"
+          {...listeners}
+          className={cn(
+            'flex shrink-0 items-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
+            isDragging ? 'cursor-grabbing' : 'cursor-grab'
+          )}
+        >
+          <GripVertical className="size-4" />
+        </button>
+        <div className="flex flex-1 items-stretch gap-2">{children}</div>
+      </div>
     </div>
   )
 }

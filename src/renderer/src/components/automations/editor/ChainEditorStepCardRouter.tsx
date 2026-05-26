@@ -19,6 +19,9 @@ export type ChainEditorStepCardRouterProps = {
   repos: Repo[]
   reviewCommands: SidebarPromptCommand[]
   createPrCommands: SidebarPromptCommand[]
+  /** Forwarded to StepCardChrome — disables the sortable drag handle when the
+   *  card lives inside a parallel group container that owns vertical drag. */
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: StepConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -38,6 +41,7 @@ export function ChainEditorStepCardRouter(
     step: props.step,
     stepIndex: props.index,
     available: props.available,
+    disableDrag: props.disableDrag,
     onIdChange: props.onIdChange,
     onOnFailureChange: props.onOnFailureChange,
     onTimeoutChange: props.onTimeoutChange,

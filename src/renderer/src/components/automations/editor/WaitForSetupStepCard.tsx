@@ -8,6 +8,7 @@ export type WaitForSetupStepCardProps = {
   step: Step
   stepIndex: number
   available: AvailableVariables
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: WaitForSetupConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -32,6 +33,7 @@ export function WaitForSetupStepCard(props: WaitForSetupStepCardProps): React.JS
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}

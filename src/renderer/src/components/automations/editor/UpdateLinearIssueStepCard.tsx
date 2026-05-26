@@ -16,6 +16,7 @@ export type UpdateLinearIssueStepCardProps = {
   step: Step
   stepIndex: number
   available: AvailableVariables
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: UpdateLinearIssueConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -59,6 +60,7 @@ export function UpdateLinearIssueStepCard(
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}

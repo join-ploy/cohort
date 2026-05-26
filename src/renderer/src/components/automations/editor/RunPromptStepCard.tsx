@@ -10,6 +10,7 @@ export type RunPromptStepCardProps = {
   step: Step
   stepIndex: number
   available: AvailableVariables
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: RunPromptConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -45,6 +46,7 @@ export function RunPromptStepCard(props: RunPromptStepCardProps): React.JSX.Elem
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}

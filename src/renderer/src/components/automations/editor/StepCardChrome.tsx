@@ -20,6 +20,10 @@ export type StepCardChromeProps = {
   step: Step
   stepIndex: number
   available: AvailableVariables
+  /** When true, sortable drag refs/listeners are not applied — the card is
+   *  rendered as a static element within a parent that owns drag behaviour
+   *  (e.g. a parallel group container). */
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: StepConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -58,11 +62,16 @@ export function StepCardChrome(props: StepCardChromeProps): React.JSX.Element {
   const meta = KIND_META[step.kind]
   const Icon = meta.icon
 
+  const dragEnabled = !props.disableDrag
+
   // Why: sortable id matches the step.id used in the parent's SortableContext
   // items array. Listeners are attached ONLY to the GripVertical button below
   // so the rest of the card (inputs, segmented controls) keeps native click
   // semantics — dragging on a text field would otherwise prevent text
   // selection and the surrounding pointer-down sequence.
+  // When disableDrag is true (step lives inside a parallel group whose
+  // container owns the drag handle), the hook still runs to keep hook order
+  // stable but its refs/listeners are not applied to the DOM.
   const {
     attributes,
     listeners,
@@ -71,7 +80,7 @@ export function StepCardChrome(props: StepCardChromeProps): React.JSX.Element {
     transform,
     transition,
     isDragging
-  } = useSortable({ id: step.id })
+  } = useSortable({ id: step.id, disabled: !dragEnabled })
 
   const [idDraft, setIdDraft] = React.useState(step.id)
   // Sync draft when the canonical step.id changes from outside (e.g. parent
@@ -99,35 +108,39 @@ export function StepCardChrome(props: StepCardChromeProps): React.JSX.Element {
   // sibling-shift animation reads clearly. dnd-kit re-renders neighbours via
   // the SortableContext strategy, and the original card returning to opacity
   // 1 on drop is what produces the "snap into place" finish.
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : undefined
-  }
+  const style: React.CSSProperties = dragEnabled
+    ? {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : undefined
+      }
+    : {}
 
   return (
     <div
-      ref={setNodeRef}
+      ref={dragEnabled ? setNodeRef : undefined}
       style={style}
       data-step-id={step.id}
       data-step-kind={step.kind}
       data-dragging={isDragging ? 'true' : 'false'}
-      {...attributes}
+      {...(dragEnabled ? attributes : {})}
       className="rounded-lg border border-border bg-card text-card-foreground shadow-xs"
     >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <button
-          ref={setActivatorNodeRef}
-          type="button"
-          aria-label="Reorder step"
-          {...listeners}
-          className={cn(
-            'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
-            isDragging ? 'cursor-grabbing' : 'cursor-grab'
-          )}
-        >
-          <GripVertical aria-hidden className="size-4" />
-        </button>
+        {dragEnabled ? (
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            aria-label="Reorder step"
+            {...listeners}
+            className={cn(
+              'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
+              isDragging ? 'cursor-grabbing' : 'cursor-grab'
+            )}
+          >
+            <GripVertical aria-hidden className="size-4" />
+          </button>
+        ) : null}
         <span
           aria-label="Step kind"
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium"

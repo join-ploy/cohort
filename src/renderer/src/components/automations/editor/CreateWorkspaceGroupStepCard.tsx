@@ -17,6 +17,7 @@ export type CreateWorkspaceGroupStepCardProps = {
   stepIndex: number
   available: AvailableVariables
   repos: Repo[]
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: CreateWorkspaceGroupConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -77,6 +78,7 @@ export function CreateWorkspaceGroupStepCard(
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}

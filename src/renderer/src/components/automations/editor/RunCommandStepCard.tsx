@@ -16,6 +16,7 @@ export type RunCommandStepCardProps = {
   reviewCommands: SidebarPromptCommand[]
   /** User-configured Create PR dropdown commands. */
   createPrCommands: SidebarPromptCommand[]
+  disableDrag?: boolean
   onIdChange: (newId: string) => void
   onConfigChange: (config: RunCommandConfig) => void
   onOnFailureChange: (val: 'halt' | 'continue') => void
@@ -66,6 +67,7 @@ export function RunCommandStepCard(props: RunCommandStepCardProps): React.JSX.El
       step={props.step}
       stepIndex={props.stepIndex}
       available={props.available}
+      disableDrag={props.disableDrag}
       onIdChange={props.onIdChange}
       onConfigChange={props.onConfigChange as (config: StepConfig) => void}
       onOnFailureChange={props.onOnFailureChange}
