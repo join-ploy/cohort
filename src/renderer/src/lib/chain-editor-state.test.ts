@@ -5,9 +5,10 @@ import {
   renameStepWithRewrites,
   reorderSteps,
   detectFutureReferences,
+  flattenSteps,
   type ChainDraft
 } from './chain-editor-state'
-import type { Step } from '../../../shared/automations-types'
+import type { Step, StepOrGroup } from '../../../shared/automations-types'
 
 const baseDraft: ChainDraft = {
   id: 'a1',
@@ -284,5 +285,42 @@ describe('detectFutureReferences', () => {
     const violations = detectFutureReferences(steps)
     expect(violations).toHaveLength(1)
     expect(violations[0]).toMatchObject({ fromStepId: 'a', toStepId: 'b' })
+  })
+})
+
+describe('flattenSteps', () => {
+  const makeStep = (id: string): Step => ({
+    id,
+    kind: 'run-prompt',
+    config: {} as never,
+    onFailure: 'halt',
+    timeoutSeconds: null
+  })
+
+  it('returns the same steps for a flat array (no groups)', () => {
+    const a = makeStep('a')
+    const b = makeStep('b')
+    const input: StepOrGroup[] = [a, b]
+    expect(flattenSteps(input)).toEqual([a, b])
+  })
+
+  it('flattens parallel groups', () => {
+    const a = makeStep('a')
+    const b = makeStep('b')
+    const c = makeStep('c')
+    const d = makeStep('d')
+    const input: StepOrGroup[] = [a, [b, c], d]
+    expect(flattenSteps(input)).toEqual([a, b, c, d])
+  })
+
+  it('handles empty groups', () => {
+    const a = makeStep('a')
+    const b = makeStep('b')
+    const input: StepOrGroup[] = [a, [], b]
+    expect(flattenSteps(input)).toEqual([a, b])
+  })
+
+  it('returns empty for empty input', () => {
+    expect(flattenSteps([])).toEqual([])
   })
 })

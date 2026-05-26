@@ -1,5 +1,6 @@
 import type {
   Step,
+  StepOrGroup,
   StepKind,
   StepConfig,
   TriggerConfig,
@@ -23,7 +24,7 @@ export type ChainDraft = {
   projectId: string
   trigger: TriggerConfig
   enabled: boolean
-  steps: Step[]
+  steps: StepOrGroup[]
   autoTriggers: AutoTrigger[]
 }
 
@@ -302,6 +303,20 @@ function rewriteConfigStrings(
   }
 }
 
+export function flattenSteps(steps: StepOrGroup[]): Step[] {
+  const result: Step[] = []
+  for (const item of steps) {
+    if (Array.isArray(item)) {
+      result.push(...item)
+    } else {
+      result.push(item)
+    }
+  }
+  return result
+}
+
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+export type { Step, StepConfig, StepKind, StepOrGroup }

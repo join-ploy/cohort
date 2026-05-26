@@ -61,7 +61,7 @@ export type Automation = {
   createdAt: number
   updatedAt: number
   trigger?: TriggerConfig
-  steps?: Step[]
+  steps?: StepOrGroup[]
   haltOnFailure?: boolean
   maxConcurrentRuns?: number
   deduplicationKey?: string | null
@@ -119,7 +119,7 @@ export type AutomationCreateInput = {
   // the editor can save them on first create. Both are optional so legacy
   // (rrule-only) create call sites stay unchanged.
   trigger?: TriggerConfig
-  steps?: Step[]
+  steps?: StepOrGroup[]
   autoTriggers?: AutoTrigger[]
 }
 
@@ -362,6 +362,8 @@ export type Step = {
   onFailure: 'halt' | 'continue'
   timeoutSeconds: number | null
 }
+
+export type StepOrGroup = Step | Step[]
 
 export type StepRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'timed-out'
 
