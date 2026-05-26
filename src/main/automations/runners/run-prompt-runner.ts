@@ -95,6 +95,10 @@ type Tracker = {
    *  lingering `done` state would satisfy the debounce and the step would
    *  succeed before the new prompt produced any work. */
   requiresWorkingFirst: boolean
+  /** Wall-clock when the agent entered waiting/blocked state. Used to pause
+   *  the timeout timer — elapsed wait time is added to openedAt when the
+   *  agent resumes so only active execution counts toward timeoutSeconds. */
+  waitStartedAt: number | null
   /** Tears down the PTY data subscription on terminal outcomes. No-op when
    *  no subscription was opened. */
   unsubscribe: () => void
@@ -293,14 +297,16 @@ export class RunPromptRunner implements StepRunner {
     }
 
     if (status.state === 'blocked' || status.state === 'waiting') {
-      // Why: chain steps cannot make progress when the agent is asking for
-      // human input. Halting here surfaces the block to the operator instead
-      // of silently spinning until the step timeout fires.
-      return {
-        outcome: 'failed',
-        status: 'failed',
-        error: `Agent needs human input (${status.state}). Chain halted.`
+      if (tracker.waitStartedAt == null) {
+        tracker.waitStartedAt = now
       }
+      return { outcome: 'needs-more-time', status: 'waiting' }
+    }
+
+    // Agent resumed from waiting — adjust timeout anchor to exclude wait duration.
+    if (tracker.waitStartedAt != null) {
+      tracker.openedAt += now - tracker.waitStartedAt
+      tracker.waitStartedAt = null
     }
 
     if (status.state === 'working') {
@@ -380,6 +386,7 @@ export class RunPromptRunner implements StepRunner {
       outputTail: null,
       workingSeen: false,
       requiresWorkingFirst: opts.requiresWorkingFirst,
+      waitStartedAt: null,
       unsubscribe: () => {}
     }
     this.ensureSubscribed(tracker)

@@ -52,6 +52,9 @@ describe('launchAgentBackgroundSession', () => {
     mockSpawn.mockResolvedValue({ id: 'pty-1' })
     mockSubscribeToPtyData.mockReturnValue(vi.fn())
     mockSubscribeToPtyExit.mockReturnValue(vi.fn())
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => 'tab-1')
+    })
     vi.stubGlobal('window', {
       api: {
         pty: {
@@ -61,7 +64,7 @@ describe('launchAgentBackgroundSession', () => {
     })
   })
 
-  it('spawns a PTY immediately and adopts it in an inactive tab', async () => {
+  it('spawns a PTY before creating an inactive tab with the live PTY id', async () => {
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
     const result = await launchAgentBackgroundSession({
@@ -71,7 +74,6 @@ describe('launchAgentBackgroundSession', () => {
       title: 'Nightly audit'
     })
 
-    expect(mockCreateTab).toHaveBeenCalledWith('wt-1', undefined, undefined, { activate: false })
     expect(mockSpawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/repo/worktree',
@@ -87,8 +89,16 @@ describe('launchAgentBackgroundSession', () => {
         leafId: 'pane:1'
       })
     )
+    expect(mockCreateTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
+      activate: false,
+      id: 'tab-1',
+      initialPtyId: 'pty-1'
+    })
+    expect(mockSpawn.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCreateTab.mock.invocationCallOrder[0]
+    )
     expect(mockSetTabCustomTitle).toHaveBeenCalledWith('tab-1', 'Nightly audit')
-    expect(mockUpdateTabPtyId).toHaveBeenCalledWith('tab-1', 'pty-1')
+    expect(mockUpdateTabPtyId).not.toHaveBeenCalled()
     expect(mockRegisterEagerPtyBuffer).toHaveBeenCalledWith('pty-1', expect.any(Function))
     expect(mockSubscribeToPtyData).toHaveBeenCalledWith('pty-1', expect.any(Function))
     expect(mockSubscribeToPtyExit).toHaveBeenCalledWith('pty-1', expect.any(Function))
@@ -140,7 +150,7 @@ describe('launchAgentBackgroundSession', () => {
     expect(unsubscribe).toHaveBeenCalled()
   })
 
-  it('removes the inactive tab if PTY spawn fails', async () => {
+  it('does not create the inactive tab if PTY spawn fails', async () => {
     mockSpawn.mockRejectedValueOnce(new Error('spawn failed'))
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
@@ -152,7 +162,8 @@ describe('launchAgentBackgroundSession', () => {
       })
     ).rejects.toThrow('spawn failed')
 
-    expect(mockCloseTab).toHaveBeenCalledWith('tab-1')
+    expect(mockCreateTab).not.toHaveBeenCalled()
+    expect(mockCloseTab).not.toHaveBeenCalled()
     expect(mockUpdateTabPtyId).not.toHaveBeenCalled()
   })
 

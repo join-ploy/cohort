@@ -166,6 +166,59 @@ describe('AutomationService', () => {
     expect(after?.stepStates?.[0].error).toMatch(/no runner registered/i)
   })
 
+  it('continues ticking a waiting chain run', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:59:00'))
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Waiting chain',
+      prompt: 'Do the thing',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2030-01-01T00:00:00').getTime()
+    })
+    const unknownKindStep: Step = {
+      id: 's1',
+      kind: 'definitely-not-a-real-kind' as unknown as Step['kind'],
+      config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'go', doneDebounceSeconds: 15 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    stored.trigger = { kind: 'manual' }
+    stored.steps = [unknownKindStep]
+
+    const run = store.createAutomationRun(stored, Date.now(), 'manual')
+    run.status = 'waiting'
+    run.stepStates = [
+      {
+        stepId: 's1',
+        status: 'waiting',
+        startedAt: Date.now(),
+        finishedAt: null,
+        output: null,
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(run)
+
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+    service.setRendererReady()
+    await vi.waitFor(() => {
+      const after = store.listAutomationRuns(stored.id)[0]
+      expect(after?.status).toBe('failed')
+    })
+
+    const after = store.listAutomationRuns(stored.id)[0]
+    expect(after?.error).toMatch(/no runner registered/i)
+    expect(after?.stepStates?.[0].status).toBe('failed')
+  })
+
   it('runNow accepts an automation with empty projectId (group-target chain)', async () => {
     // Why: chains that respond by creating a workspace group derive their
     // repo context from the group's members, not the upfront automation

@@ -174,7 +174,7 @@ function focusExistingWindow(): void {
 
 // Why: the lock must be acquired AFTER configureDevUserDataPath — Electron
 // derives the lock identity from the `userData` path, so this placement lets
-// dev (`orca-dev`) and packaged (`orca`) runs lock in separate namespaces
+// dev (`cohort-dev`) and packaged (`cohort`) runs lock in separate namespaces
 // instead of serialising against each other.
 //
 // Why skip in dev: engineers routinely run `pnpm dev` in parallel from
@@ -207,7 +207,7 @@ if (hasSingleInstanceLock) {
   installDevParentDisconnectQuit(is.dev)
   installDevParentWatchdog(is.dev)
   // Why: must run after configureDevUserDataPath (which redirects userData to
-  // orca-dev in dev mode) but before app.setName('Orca') inside whenReady
+  // cohort-dev in dev mode) but before app.setName('Cohort') inside whenReady
   // (which would change the resolved path on case-sensitive filesystems).
   initDataPath()
   // Why: same timing constraint as initDataPath — capture the userData path
@@ -215,6 +215,11 @@ if (hasSingleInstanceLock) {
   initStatsPath()
   initClaudeUsagePath()
   initCodexUsagePath()
+  // Why: set the display name after all init*Path calls have captured their
+  // userData-derived paths, but before any TCC-triggering code runs. TCC
+  // captures the app name at the first protected access; leaving this until
+  // whenReady causes dialogs to show "Orca" (the package.json name).
+  app.setName('Cohort')
   enableMainProcessGpuFeatures()
 }
 
@@ -538,7 +543,6 @@ function driveSyntheticTitleFromHook(
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.stablyai.orca')
-  app.setName('Orca')
 
   if (process.platform === 'darwin' && is.dev) {
     const dockIcon = nativeImage.createFromPath(devIcon)

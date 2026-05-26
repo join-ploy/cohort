@@ -50,7 +50,7 @@ describe('chain types', () => {
 
   it('StepRunState records status + timing + output + error', () => {
     expectTypeOf<StepRunState['status']>().toEqualTypeOf<
-      'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'timed-out'
+      'pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped' | 'timed-out'
     >()
   })
 })

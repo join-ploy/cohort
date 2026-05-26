@@ -348,7 +348,7 @@ export class CodexAccountService {
     // macOS, userData sits under /var/folders/... which realpath resolves to
     // /private/var/folders/...; comparing a canonical candidate against a
     // non-canonical root would spuriously reject every managed home. In dev
-    // mode (orca-dev/ vs orca/) this check also filters out production-rooted
+    // mode (cohort-dev/ vs cohort/) this check also filters out production-rooted
     // paths before downstream sync runs.
     if (
       canonicalCandidate !== canonicalRoot &&

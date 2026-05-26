@@ -1,5 +1,5 @@
 {
-  "name": "orca",
+  "name": "cohort",
   "version": "1.4.1-rc.4",
   "description": "Next-gen IDE for parallel agentic development",
   "homepage": "https://github.com/stablyai/orca",
@@ -44,7 +44,7 @@
     "test:e2e": "npx playwright test --config tests/playwright.config.ts --project electron-headless",
     "test:e2e:headful": "npx playwright test --config tests/playwright.config.ts --project electron-headful",
     "test:e2e:computer": "vitest run --config tests/e2e/vitest.config.ts",
-    "build:unpack:fork": "pnpm build:unpack && codesign --force --deep --sign - --identifier com.stablyai.orca dist/mac-arm64/Cohort.app"
+    "build:unpack:fork": "pnpm build:unpack && node config/scripts/codesign-dev.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",

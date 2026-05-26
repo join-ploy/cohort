@@ -400,6 +400,27 @@ export function reorderWithinGroup(
   return next
 }
 
+/**
+ * Removes the top-level item at `fromIndex` and merges it into the
+ * step/group at `targetIndex`. If the target is a solo step, wraps both
+ * into a new parallel group. If already a group, appends the moved step(s).
+ */
+export function moveStepIntoGroup(
+  steps: StepOrGroup[],
+  fromIndex: number,
+  targetIndex: number
+): StepOrGroup[] {
+  const next = steps.slice()
+  const [moved] = next.splice(fromIndex, 1)
+  const adjustedTarget = fromIndex < targetIndex ? targetIndex - 1 : targetIndex
+  const movedSteps = Array.isArray(moved) ? moved : [moved]
+  const existing = next[adjustedTarget]
+  next[adjustedTarget] = Array.isArray(existing)
+    ? [...existing, ...movedSteps]
+    : [existing, ...movedSteps]
+  return next
+}
+
 export function flattenSteps(steps: StepOrGroup[]): Step[] {
   const result: Step[] = []
   for (const item of steps) {

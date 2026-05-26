@@ -1394,6 +1394,8 @@ export type PreloadApi = {
       callback: (request: {
         requestId: string
         worktreeId: string
+        worktreePath?: string
+        connectionId?: string | null
         source: 'review' | 'create-pr' | 'custom'
         commandId?: string
         customCommand?: string

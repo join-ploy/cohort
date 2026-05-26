@@ -93,9 +93,9 @@ function decryptOptionalSecret(value: string | null | undefined): string | null 
 // path, causing dev and production instances to share the same file and silently
 // overwrite each other.
 //
-// It also must not be resolved lazily on every call, because app.setName('Orca')
+// It also must not be resolved lazily on every call, because app.setName('Cohort')
 // runs before the Store constructor and would change the resolved path from
-// lowercase 'orca' to uppercase 'Orca'. On case-sensitive filesystems (Linux)
+// lowercase 'cohort' to uppercase 'Cohort'. On case-sensitive filesystems (Linux)
 // this would look in the wrong directory and lose existing user data.
 //
 // Solution: index.ts calls initDataPath() right after configureDevUserDataPath()

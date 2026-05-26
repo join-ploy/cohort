@@ -100,7 +100,7 @@ export function configureDevUserDataPath(isDev: boolean): void {
   const overrideUserDataPath = process.env.ORCA_DEV_USER_DATA_PATH
   if (overrideUserDataPath) {
     // Why: automated Electron repros need an isolated profile so persisted
-    // tabs/worktrees from the developer's normal `orca-dev` session do not
+    // tabs/worktrees from the developer's normal `cohort-dev` session do not
     // change startup behavior and hide or create window-management bugs.
     app.setPath('userData', overrideUserDataPath)
     return
@@ -109,7 +109,7 @@ export function configureDevUserDataPath(isDev: boolean): void {
   // publish runtime bootstrap files under userData. Without a dev-only path,
   // `pnpm dev` can overwrite the packaged app's runtime pointer and make the
   // public `orca` CLI look broken even though the packaged app is still open.
-  app.setPath('userData', join(app.getPath('appData'), 'orca-dev'))
+  app.setPath('userData', join(app.getPath('appData'), 'cohort-dev'))
 }
 
 export function installDevParentDisconnectQuit(isDev: boolean): void {

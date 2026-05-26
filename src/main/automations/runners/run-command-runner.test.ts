@@ -428,9 +428,11 @@ describe('RunCommandRunner', () => {
   // group id. Mirrors the same resolution run-prompt-runner already does.
   it("resolves a group: worktreeRef to the group's first member worktreeId", async () => {
     const openCommandPane = vi.fn().mockResolvedValue({ ptyId: 'pty-g', paneKey: 'tab-g:1' })
-    const getGroupSummary = vi
-      .fn()
-      .mockReturnValue({ firstMemberWorktreeId: 'repo-a::/workspaces/g/repo-a' })
+    const getGroupSummary = vi.fn().mockReturnValue({
+      firstMemberWorktreeId: 'repo-a::/workspaces/g/repo-a',
+      parentPath: '/workspaces/g',
+      connectionId: null
+    })
     const runner = new RunCommandRunner({
       openCommandPane,
       getPtyExit: () => undefined,
@@ -451,6 +453,8 @@ describe('RunCommandRunner', () => {
     expect(getGroupSummary).toHaveBeenCalledWith('group:abc-1234')
     expect(openCommandPane).toHaveBeenCalledWith({
       worktreeId: 'repo-a::/workspaces/g/repo-a',
+      worktreePath: '/workspaces/g',
+      connectionId: null,
       source: 'review',
       commandId: 'cmd-review-1',
       customCommand: undefined

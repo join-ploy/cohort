@@ -122,10 +122,10 @@ module.exports = {
       NSDownloadsFolderUsageDescription:
         "Application requests access to the user's Downloads folder."
     },
-    // Why: local macOS validation builds should launch without Apple release
-    // credentials. Hardened runtime + notarization stay enabled only on the
-    // explicit release path so production artifacts remain strict while dev
-    // artifacts do not fail with broken ad-hoc launch behavior.
+    // Why: hardened runtime restricts child processes (agent shells, bash)
+    // causing excessive TCC prompts. Keep it release-only where notarization
+    // requires it. The stable dev certificate is sufficient for TCC grant
+    // persistence across rebuilds.
     hardenedRuntime: isMacRelease,
     notarize: isMacRelease,
     extraResources: [

@@ -13,6 +13,7 @@ export type AutomationRunStatus =
   // triggers, distinct from `dispatch_failed` which is the pre-tick dispatch
   // error from the legacy path.
   | 'running'
+  | 'waiting'
   | 'failed'
   | 'completed'
   // Operator-initiated stop. Distinct from `failed` so the UI can label the
@@ -365,7 +366,14 @@ export type Step = {
 
 export type StepOrGroup = Step | Step[]
 
-export type StepRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'timed-out'
+export type StepRunStatus =
+  | 'pending'
+  | 'running'
+  | 'waiting'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+  | 'timed-out'
 
 export type StepRunState = {
   stepId: string

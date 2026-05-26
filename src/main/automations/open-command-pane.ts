@@ -2,6 +2,10 @@ import type { IpcMain, IpcMainEvent, WebContents } from 'electron'
 
 export type OpenCommandPaneRequest = {
   worktreeId: string
+  /** Optional CWD override for freshly-created worktrees/groups whose
+   *  renderer cache may not know the target path yet. Mirrors openPromptPane. */
+  worktreePath?: string
+  connectionId?: string | null
   source: 'review' | 'create-pr' | 'custom'
   /** Stable id of the configured SidebarPromptCommand under
    *  `settings.reviewCommands` or `settings.createPrCommands`. Required when

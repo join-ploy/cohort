@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copy the packaged Orca's userData ("Orca") over the dev profile ("orca-dev")
+// Copy the packaged app's userData ("cohort") over the dev profile ("cohort-dev")
 // so `pnpm dev` starts from the same persisted state (worktrees, accounts,
 // usage, terminal history, etc.) as your production install. The existing
 // dev profile is moved aside to a timestamped backup before the copy.
@@ -24,7 +24,9 @@ function resolveAppDataDir() {
       return join(homedir(), 'Library', 'Application Support')
     case 'win32': {
       const appData = process.env.APPDATA
-      if (!appData) throw new Error('APPDATA environment variable is not set')
+      if (!appData) {
+        throw new Error('APPDATA environment variable is not set')
+      }
       return appData
     }
     default:
@@ -36,7 +38,9 @@ function looksLikeOrcaRunning(dir) {
   // Best-effort: Chromium drops a SingletonLock (mac/linux) or LOCK file while
   // the app is open. We can't be authoritative, but this catches the common
   // case where the user forgot to quit packaged Orca before running this.
-  if (!existsSync(dir)) return false
+  if (!existsSync(dir)) {
+    return false
+  }
   try {
     return readdirSync(dir).some((name) => name === 'SingletonLock' || name === 'LOCK')
   } catch {
@@ -45,35 +49,45 @@ function looksLikeOrcaRunning(dir) {
 }
 
 const appData = resolveAppDataDir()
-const prod = join(appData, 'Orca')
-const dev = join(appData, 'orca-dev')
+const prod = join(appData, 'cohort')
+const dev = join(appData, 'cohort-dev')
 
 console.log(`[sync:dev-from-prod] source: ${prod}`)
 console.log(`[sync:dev-from-prod] dest:   ${dev}`)
 
 if (!existsSync(prod)) {
-  console.error(`[sync:dev-from-prod] source not found — is the packaged Orca installed and run at least once?`)
+  console.error(
+    `[sync:dev-from-prod] source not found — is the packaged Cohort installed and run at least once?`
+  )
   process.exit(1)
 }
 
 if (looksLikeOrcaRunning(prod)) {
-  console.error(`[sync:dev-from-prod] packaged Orca appears to be running (lock file present). Quit it first, then re-run.`)
+  console.error(
+    `[sync:dev-from-prod] packaged Cohort appears to be running (lock file present). Quit it first, then re-run.`
+  )
   process.exit(1)
 }
 if (looksLikeOrcaRunning(dev)) {
-  console.error(`[sync:dev-from-prod] dev Orca appears to be running (lock file present). Quit it first, then re-run.`)
+  console.error(
+    `[sync:dev-from-prod] dev Cohort appears to be running (lock file present). Quit it first, then re-run.`
+  )
   process.exit(1)
 }
 
 if (existsSync(dev)) {
   if (skipBackup) {
     console.log(`[sync:dev-from-prod] removing existing dev profile (--no-backup)`)
-    if (!dryRun) rmSync(dev, { recursive: true, force: true })
+    if (!dryRun) {
+      rmSync(dev, { recursive: true, force: true })
+    }
   } else {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const backup = `${dev}.backup-${stamp}`
     console.log(`[sync:dev-from-prod] backing up existing dev → ${backup}`)
-    if (!dryRun) renameSync(dev, backup)
+    if (!dryRun) {
+      renameSync(dev, backup)
+    }
   }
 } else {
   console.log(`[sync:dev-from-prod] no existing dev profile — nothing to back up`)

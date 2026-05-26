@@ -95,7 +95,7 @@ function createOutOfProcessLauncher(runtimeDir: string): DaemonLauncher {
     const entryPath = getDaemonEntryPath()
     const healthy = await healthCheckDaemon(socketPath, tokenPath)
     if (healthy) {
-      // Why: dev worktrees share the same orca-dev userData, so a daemon from
+      // Why: dev worktrees share the same cohort-dev userData, so a daemon from
       // a deleted sibling checkout can pass protocol health checks while still
       // pointing at missing native modules. Packaged app paths are stable and
       // should preserve existing warm daemon reuse semantics.

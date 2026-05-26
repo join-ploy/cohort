@@ -19,9 +19,9 @@ if [ ! -f "$CLI_ENTRY" ]; then
 fi
 
 case "$(uname -s)" in
-  Darwin)       default_data="$HOME/Library/Application Support/orca-dev" ;;
-  MINGW*|MSYS*) default_data="${APPDATA:-$HOME/AppData/Roaming}/orca-dev" ;;
-  *)            default_data="${XDG_CONFIG_HOME:-$HOME/.config}/orca-dev" ;;
+  Darwin)       default_data="$HOME/Library/Application Support/cohort-dev" ;;
+  MINGW*|MSYS*) default_data="${APPDATA:-$HOME/AppData/Roaming}/cohort-dev" ;;
+  *)            default_data="${XDG_CONFIG_HOME:-$HOME/.config}/cohort-dev" ;;
 esac
 
 export ORCA_USER_DATA_PATH="${ORCA_DEV_USER_DATA_PATH:-$default_data}"

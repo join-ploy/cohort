@@ -23,6 +23,8 @@ const OUTPUT_TAIL_MAX_BYTES = 32 * 1024
 export type RunCommandDeps = {
   openCommandPane: (params: {
     worktreeId: string
+    worktreePath?: string
+    connectionId?: string | null
     source: 'review' | 'create-pr' | 'custom'
     commandId?: string
     customCommand?: string
@@ -54,12 +56,14 @@ export type RunCommandDeps = {
    *  Optional so existing test harnesses that don't wire it keep working. */
   getAgentStatus?: (paneKey: string) => AgentStatusEntry | undefined
   /** Resolves a `group:<uuid>` ref (the output of CreateWorkspaceGroupRunner)
-   *  to the group's first member worktreeId so the command pane has something
-   *  real to bind to. Phase J1's pty:spawn override then redirects CWD to the
-   *  group's parentPath automatically because the member has groupId set.
-   *  Optional so the unit-test harness that never addresses groups can skip
-   *  the wiring. */
-  getGroupSummary?: (groupId: string) => { firstMemberWorktreeId: string } | undefined
+   *  to the group's first member worktreeId for UI binding plus parentPath as
+   *  the command CWD. This mirrors run-prompt; group-scoped command steps run
+   *  once at the group root, while member-scoped refs run once at that member. */
+  getGroupSummary?: (
+    groupId: string
+  ) =>
+    | { firstMemberWorktreeId: string; parentPath?: string; connectionId?: string | null }
+    | undefined
   now: () => number
 }
 
@@ -98,6 +102,10 @@ type Tracker = {
    *  on first `working` we drop accumulated startup/render output so the
    *  tail surfaced on completion is the agent's response to the prompt. */
   workingSeen: boolean
+  /** Wall-clock when the agent entered waiting/blocked state. Used to pause
+   *  the timeout timer — elapsed wait time is added to openedAt when the
+   *  agent resumes so only active execution counts toward timeoutSeconds. */
+  waitStartedAt: number | null
 }
 
 export class RunCommandRunner implements StepRunner {
@@ -120,6 +128,8 @@ export class RunCommandRunner implements StepRunner {
       let customCommand: string | undefined
       let resolvedPaneRef = ''
       let memberScoped = false
+      let worktreePath: string | undefined
+      let connectionId: string | null | undefined
       try {
         worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
         // Why (grouped-workspaces parity with run-prompt-runner): a resolved
@@ -147,6 +157,8 @@ export class RunCommandRunner implements StepRunner {
             }
           }
           worktreeId = groupSummary.firstMemberWorktreeId
+          worktreePath = groupSummary.parentPath
+          connectionId = groupSummary.connectionId
         }
         // Why: only the custom-source path carries a free-form command line;
         // for review / create-pr the commandId is a stable UUID into
@@ -194,11 +206,7 @@ export class RunCommandRunner implements StepRunner {
           return { outcome: 'needs-more-time', status: 'running' }
         }
         if (preStatus?.state === 'blocked' || preStatus?.state === 'waiting') {
-          return {
-            outcome: 'failed',
-            status: 'failed',
-            error: `Agent needs human input (${preStatus.state}). Chain halted.`
-          }
+          return { outcome: 'needs-more-time', status: 'waiting' }
         }
         try {
           await this.deps.sendCommandToPane({
@@ -233,7 +241,8 @@ export class RunCommandRunner implements StepRunner {
           unsubscribe: () => {},
           agentFirstDoneAt: null,
           workingSeen: false,
-          requiresWorkingFirst: true
+          requiresWorkingFirst: true,
+          waitStartedAt: null
         }
         if (!runTrackers) {
           runTrackers = new Map()
@@ -248,6 +257,8 @@ export class RunCommandRunner implements StepRunner {
       try {
         const result = await this.deps.openCommandPane({
           worktreeId,
+          ...(worktreePath !== undefined ? { worktreePath } : {}),
+          ...(connectionId !== undefined ? { connectionId } : {}),
           source: config.source,
           commandId: config.commandId,
           customCommand,
@@ -287,7 +298,8 @@ export class RunCommandRunner implements StepRunner {
         // Why: fresh-pane case — the agent boots into `working` on first
         // input, so the standard done-debounce already covers it. No need
         // for the requiresWorkingFirst gate that the paneRef branch uses.
-        requiresWorkingFirst: false
+        requiresWorkingFirst: false,
+        waitStartedAt: null
       }
       if (!runTrackers) {
         runTrackers = new Map()
@@ -350,15 +362,18 @@ export class RunCommandRunner implements StepRunner {
     // no-op for them and PTY exit above remains the only completion path.
     const agentStatus = this.deps.getAgentStatus?.(tracker.paneKey)
     if (agentStatus?.state === 'blocked' || agentStatus?.state === 'waiting') {
-      // Same halt semantics as run-prompt's polling branch: can't make
-      // progress when the agent is asking for human input.
-      this.cleanup(tracker)
-      return {
-        outcome: 'failed',
-        status: 'failed',
-        error: `Agent needs human input (${agentStatus.state}). Chain halted.`
+      if (tracker.waitStartedAt == null) {
+        tracker.waitStartedAt = now
       }
+      return { outcome: 'needs-more-time', status: 'waiting' }
     }
+
+    // Agent resumed from waiting — adjust timeout anchor to exclude wait duration.
+    if (tracker.waitStartedAt != null) {
+      tracker.openedAt += now - tracker.waitStartedAt
+      tracker.waitStartedAt = null
+    }
+
     if (agentStatus?.state === 'working') {
       // Any work flip after a done ping invalidates the debounce window.
       tracker.agentFirstDoneAt = null

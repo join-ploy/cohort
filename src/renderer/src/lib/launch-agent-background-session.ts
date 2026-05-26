@@ -142,48 +142,47 @@ export async function launchAgentBackgroundSession(
     return null
   }
 
-  // Why: automation runs should start without revealing the workspace.
-  // Spawn the PTY immediately, then attach an inactive tab to the live session.
-  const tab = store.createTab(worktreeId, undefined, undefined, { activate: false })
-  if (title) {
-    store.setTabCustomTitle(tab.id, title)
-  }
-  const paneKey = `${tab.id}:${FIRST_PANE_ID}`
+  // Why: spawn-first avoids the same TerminalPane auto-spawn race as
+  // run-command automation. If a hidden prompt tab is revealed while spawn is
+  // in flight, the visible pane must observe initialPtyId, not a null ptyId.
+  const tabId = globalThis.crypto.randomUUID()
+  const paneKey = `${tabId}:${FIRST_PANE_ID}`
   // Why: agent hook callbacks are keyed by pane, and background automation
   // tabs never mount a TerminalPane to inject this env for us.
   const paneEnv = {
     ...startupPlan.env,
     ORCA_PANE_KEY: paneKey,
-    ORCA_TAB_ID: tab.id,
+    ORCA_TAB_ID: tabId,
     ORCA_WORKTREE_ID: worktreeId
   }
-  let result: Awaited<ReturnType<typeof window.api.pty.spawn>>
-  try {
-    result = await window.api.pty.spawn({
-      cols: 120,
-      rows: 40,
-      cwd: worktreePath,
-      command: startupPlan.launchCommand,
-      env: paneEnv,
-      connectionId,
-      worktreeId,
-      tabId: tab.id,
-      leafId: 'pane:1',
-      telemetry: {
-        agent_kind: tuiAgentToAgentKind(agent),
-        launch_source: launchSource ?? 'unknown',
-        request_kind: 'new'
-      },
-      // Why (Ask C): when a chain runner flags this launch as member-scoped,
-      // suppress Phase J1's grouped-worktree cwd override so the agent stays
-      // rooted at the member worktree's path.
-      ...(keepCwd ? { keepCwd: true } : {})
-    })
-  } catch (error) {
-    store.closeTab(tab.id)
-    throw error
+  const result = await window.api.pty.spawn({
+    cols: 120,
+    rows: 40,
+    cwd: worktreePath,
+    command: startupPlan.launchCommand,
+    env: paneEnv,
+    connectionId,
+    worktreeId,
+    tabId,
+    leafId: 'pane:1',
+    telemetry: {
+      agent_kind: tuiAgentToAgentKind(agent),
+      launch_source: launchSource ?? 'unknown',
+      request_kind: 'new'
+    },
+    // Why (Ask C): when a chain runner flags this launch as member-scoped,
+    // suppress Phase J1's grouped-worktree cwd override so the agent stays
+    // rooted at the member worktree's path.
+    ...(keepCwd ? { keepCwd: true } : {})
+  })
+  const tab = store.createTab(worktreeId, undefined, undefined, {
+    activate: false,
+    id: tabId,
+    initialPtyId: result.id
+  })
+  if (title) {
+    store.setTabCustomTitle(tab.id, title)
   }
-  store.updateTabPtyId(tab.id, result.id)
   let exitHandled = false
   let unsubscribeExit = (): void => {}
   let unsubscribeData = (): void => {}

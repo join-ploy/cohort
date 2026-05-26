@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/store'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
+import { registerEagerPtyBuffer } from '@/components/terminal-pane/pty-dispatcher'
 import { FIRST_PANE_ID } from '../../../shared/pane-key'
 import type { OrcaHooks, SidebarPromptCommand } from '../../../shared/types'
 
@@ -29,7 +30,16 @@ import type { OrcaHooks, SidebarPromptCommand } from '../../../shared/types'
 export function useAutomationOpenCommandPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onOpenCommandPane(
-      async ({ requestId, worktreeId, source, commandId, customCommand, memberScoped }) => {
+      async ({
+        requestId,
+        worktreeId,
+        worktreePath,
+        connectionId,
+        source,
+        commandId,
+        customCommand,
+        memberScoped
+      }) => {
         try {
           const store = useAppStore.getState()
           const worktree = findWorktreeById(store.worktreesByRepo, worktreeId)
@@ -90,7 +100,14 @@ export function useAutomationOpenCommandPaneEvents(): void {
             }
 
             const body = preferences ? `${cmd.prompt}\n\n${preferences}` : cmd.prompt
-            const promptPath = await window.api.prompts.write({ label: cmd.label, body })
+            // Why: automation run-command steps can launch in parallel. The
+            // shell reads this file later via $(cat ...), so using the shared
+            // command label would let sibling launches overwrite each other
+            // before their shells expand the prompt path.
+            const promptPath = await window.api.prompts.write({
+              label: `${cmd.label}-${requestId}`,
+              body
+            })
             // Why: shell-escape the prompt path with double quotes so spaces
             // are tolerated. `$(cat "...")` is the canonical bash/zsh form;
             // the outer double quotes around `$(...)` preserve the full
@@ -117,10 +134,10 @@ export function useAutomationOpenCommandPaneEvents(): void {
           const result = await window.api.pty.spawn({
             cols: 120,
             rows: 40,
-            cwd: worktree.path,
+            cwd: worktreePath ?? worktree.path,
             command: launchCommand,
             env: paneEnv,
-            connectionId: repo?.connectionId ?? null,
+            connectionId: connectionId ?? repo?.connectionId ?? null,
             worktreeId,
             tabId,
             leafId: 'pane:1',
@@ -130,6 +147,12 @@ export function useAutomationOpenCommandPaneEvents(): void {
             // standard grouped-member CWD lift. Parity with run-prompt's
             // launchAgentBackgroundSession.
             ...(memberScoped ? { keepCwd: true } : {})
+          })
+          // Why: hidden run-command PTYs can emit output before TerminalPane
+          // mounts. Register the eager handle before publishing the tab so a
+          // fast reveal attaches to this PTY instead of spawning by sessionId.
+          registerEagerPtyBuffer(result.id, (ptyId) => {
+            useAppStore.getState().clearTabPtyId(tabId, ptyId)
           })
           store.createTab(worktreeId, undefined, undefined, {
             activate: false,

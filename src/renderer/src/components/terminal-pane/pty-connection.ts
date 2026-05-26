@@ -4,7 +4,7 @@ import { isGeminiTerminalTitle, isClaudeAgent } from '@/lib/agent-status'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
 import type { PtyConnectResult } from './pty-transport'
-import { createIpcPtyTransport } from './pty-transport'
+import { createIpcPtyTransport, getEagerPtyBufferHandle } from './pty-transport'
 import { shouldSeedCacheTimerOnInitialTitle } from './cache-timer-seeding'
 import type { PtyConnectionDeps } from './pty-connection-types'
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
@@ -1021,20 +1021,26 @@ export function connectPanePty(
     const existingPtyId = storeSnapshot.tabsByWorktree[deps.worktreeId]?.find(
       (t) => t.id === deps.tabId
     )?.ptyId
+    const hasEagerPtyBuffer = existingPtyId ? getEagerPtyBufferHandle(existingPtyId) != null : false
 
     const restoredSessionId = restoredPtyId ?? null
+    // Why: hidden automation panes in this renderer session have an eager
+    // buffer attached to their live PTY. Attach directly so LocalPtyProvider
+    // does not interpret sessionId reattach as a request for a fresh shell.
     const detachedLivePtyId =
       existingPtyId && !hasExistingPaneTransport
         ? restoredSessionId
           ? restoredSessionId === existingPtyId
             ? restoredSessionId
             : null
-          : existingPtyId
+          : hasEagerPtyBuffer
+            ? existingPtyId
+            : null
         : null
     const candidateReattachSessionId =
-      restoredSessionId && restoredSessionId !== detachedLivePtyId
-        ? restoredSessionId
-        : detachedLivePtyId
+      !hasEagerPtyBuffer && (restoredSessionId || existingPtyId)
+        ? (restoredSessionId ?? existingPtyId)
+        : null
     // Why: daemon session IDs encode `${worktreeId}@@${uuid}`. After a daemon
     // crash + cold restore, corrupted or stale session-to-tab mappings can
     // cause a tab in workspace A to hold a ptyId from workspace B. Restoring
@@ -1045,7 +1051,7 @@ export function connectPanePty(
       isSessionOwnedByWorktree(candidateReattachSessionId, deps.worktreeId)
         ? candidateReattachSessionId
         : null
-    const _diagMsg = `pane=${pane.id} tab=${deps.tabId} restored=${restoredPtyId} existing=${existingPtyId} detached=${detachedLivePtyId} reattach=${deferredReattachSessionId} hasTransport=${hasExistingPaneTransport} pendingKey=${pendingSpawnKey}`
+    const _diagMsg = `pane=${pane.id} tab=${deps.tabId} restored=${restoredPtyId} existing=${existingPtyId} eager=${hasEagerPtyBuffer} detached=${detachedLivePtyId} reattach=${deferredReattachSessionId} hasTransport=${hasExistingPaneTransport} pendingKey=${pendingSpawnKey}`
     console.log(`[pty-connect] ${_diagMsg}`)
     ;((globalThis as Record<string, unknown>).__ptyConnectDiag ??= [] as string[]) as string[]
     ;((globalThis as Record<string, unknown>).__ptyConnectDiag as string[]).push(_diagMsg)

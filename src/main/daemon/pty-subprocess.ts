@@ -104,7 +104,7 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
     ...opts.env,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERM_PROGRAM: 'Orca',
+    TERM_PROGRAM: 'Cohort',
     // Why: TUIs feature-gate on TERM_PROGRAM_VERSION. The daemon is forked
     // by main (daemon-init.ts:93) with the parent's env, so ORCA_APP_VERSION
     // — set in src/main/index.ts from app.getVersion() — is inherited here.

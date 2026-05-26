@@ -55,6 +55,10 @@ function flattenSteps(steps: StepOrGroup[]): Step[] {
 const DEFAULT_TICK_MS = 60 * 1000
 const DEFAULT_AUTO_TRIGGER_POLL_SECONDS = 60
 
+function isActiveChainRunStatus(status: AutomationRunStatus): boolean {
+  return status === 'running' || status === 'waiting'
+}
+
 // Why: structural type lets service.test.ts pass a tiny stub without depending
 // on the concrete AutoTriggerEngine class, keeping the engine an optional dep.
 type AutoTriggerEngineLike = {
@@ -277,7 +281,14 @@ export class AutomationService {
         if (!group || group.memberWorktreeIds.length === 0) {
           return undefined
         }
-        return { firstMemberWorktreeId: group.memberWorktreeIds[0] }
+        const firstMemberWorktreeId = group.memberWorktreeIds[0]
+        const parsed = splitWorktreeId(firstMemberWorktreeId)
+        const repo = parsed ? this.store.getRepo(parsed.repoId) : null
+        return {
+          firstMemberWorktreeId,
+          parentPath: group.parentPath,
+          connectionId: repo?.connectionId ?? null
+        }
       },
       now: () => Date.now()
     })
@@ -596,7 +607,7 @@ export class AutomationService {
   }
 
   /** Schedule a sub-cadence re-tick when at least one chain run is still
-   *  `running`. The default scheduler cadence is 60s; that's fine for idle
+   *  active. The default scheduler cadence is 60s; that's fine for idle
    *  automations but too coarse for active runs that are waiting on a
    *  short-debounce signal (e.g. run-prompt's 5s done-debounce). The fast
    *  timer is a single setTimeout (not setInterval) so it naturally stops
@@ -605,10 +616,10 @@ export class AutomationService {
     if (this.fastTickTimer) {
       return
     }
-    const hasRunning = this.store
+    const hasActiveRun = this.store
       .listAutomationRuns()
-      .some((run) => run.status === 'running' && !this.inFlightRunIds.has(run.id))
-    if (!hasRunning) {
+      .some((run) => isActiveChainRunStatus(run.status) && !this.inFlightRunIds.has(run.id))
+    if (!hasActiveRun) {
       return
     }
     this.fastTickTimer = setTimeout(() => {
@@ -624,7 +635,10 @@ export class AutomationService {
   private async tickRunningChains(): Promise<void> {
     const automations = new Map(this.store.listAutomations().map((a) => [a.id, a]))
     for (const run of this.store.listAutomationRuns()) {
-      if (run.status !== 'running') {
+      // Why: `waiting` is still live chain work. A waiting sibling in a
+      // parallel group must keep getting ticks so other running siblings can
+      // observe agent-status/PTY completion and the waiting step can resume.
+      if (!isActiveChainRunStatus(run.status)) {
         continue
       }
       // Why: a fire-and-forget runNow tick may still be advancing this run.
@@ -662,13 +676,21 @@ export class AutomationService {
     if (!run) {
       return undefined
     }
-    if (run.status !== 'running' && run.status !== 'pending' && run.status !== 'dispatching') {
+    if (
+      !isActiveChainRunStatus(run.status) &&
+      run.status !== 'pending' &&
+      run.status !== 'dispatching'
+    ) {
       return run
     }
     const now = Date.now()
     if (run.stepStates) {
       for (const state of run.stepStates) {
-        if (state.status === 'running' || state.status === 'pending') {
+        if (
+          state.status === 'running' ||
+          state.status === 'pending' ||
+          state.status === 'waiting'
+        ) {
           state.status = 'failed'
           state.finishedAt = now
           state.error = state.error ?? 'Cancelled by operator.'
@@ -796,7 +818,11 @@ export class AutomationService {
     const now = Date.now()
     if (run.stepStates) {
       for (const state of run.stepStates) {
-        if (state.status === 'running' || state.status === 'pending') {
+        if (
+          state.status === 'running' ||
+          state.status === 'pending' ||
+          state.status === 'waiting'
+        ) {
           state.status = 'failed'
           state.finishedAt = now
           state.error = state.error ?? errorMessage

@@ -70,6 +70,9 @@ export function getAutomationRunStatusVariant(
   if (status === 'cancelled') {
     return 'outline'
   }
+  if (status === 'waiting') {
+    return 'dot'
+  }
   return 'dot'
 }
 
@@ -95,6 +98,8 @@ export function getAutomationRunStatusLabel(status: AutomationRun['status']): st
       return 'Failed'
     case 'dispatch_failed':
       return 'Failed'
+    case 'waiting':
+      return 'Waiting'
     case 'cancelled':
       return 'Cancelled'
   }

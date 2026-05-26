@@ -174,6 +174,7 @@ function formatSchedule(rrule: string): string {
 const STEP_STATUS_BADGE_CLASS: Record<StepRunStatus, string> = {
   pending: 'bg-muted text-muted-foreground',
   running: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+  waiting: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
   succeeded: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
   failed: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
   skipped: 'bg-muted text-muted-foreground italic',
@@ -628,7 +629,11 @@ function StepRunRow({
   // `pending` step is the active edge of the chain; retrying it would race
   // the in-flight tick. `succeeded`/`skipped` are valid retry targets too —
   // operators sometimes want to re-run a successful step against fresh state.
-  const canRetry = onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
+  const canRetry =
+    onRetry !== undefined &&
+    step.status !== 'running' &&
+    step.status !== 'pending' &&
+    step.status !== 'waiting'
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -910,7 +915,10 @@ export function AutomationDetail({
             // on. Terminal rows show an empty action slot so the grid stays
             // aligned without an enabled-but-pointless button.
             const isInFlight =
-              run.status === 'running' || run.status === 'pending' || run.status === 'dispatching'
+              run.status === 'running' ||
+              run.status === 'waiting' ||
+              run.status === 'pending' ||
+              run.status === 'dispatching'
             const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
             const restartChildren = findRestartChildren(run.id, runs)
             const showRestart = isRestartable(run.status) && onRestartRun !== undefined

@@ -4,6 +4,7 @@ import {
   DndContext,
   KeyboardSensor,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent
@@ -43,6 +44,7 @@ import {
   flattenSteps,
   generateDefaultStepId,
   groupStepAt,
+  moveStepIntoGroup,
   renameStepWithRewrites,
   reorderSteps,
   ungroupStep
@@ -358,8 +360,24 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
       if (!over || active.id === over.id) {
         return
       }
+      const overId = String(over.id)
+
+      if (overId.startsWith('parallel-drop-')) {
+        const targetTopIndex = Number(overId.slice('parallel-drop-'.length))
+        const fromIndex = topLevelIds.indexOf(String(active.id))
+        if (fromIndex === -1 || fromIndex === targetTopIndex) {
+          return
+        }
+        setDraft((current) => ({
+          ...current,
+          steps: moveStepIntoGroup(current.steps, fromIndex, targetTopIndex)
+        }))
+        setDirty(true)
+        return
+      }
+
       const fromIndex = topLevelIds.indexOf(String(active.id))
-      const toIndex = topLevelIds.indexOf(String(over.id))
+      const toIndex = topLevelIds.indexOf(overId)
       if (fromIndex === -1 || toIndex === -1) {
         return
       }
@@ -496,6 +514,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                         <AddParallelButton
                           open={parallelAddOpen === topIndex}
                           kinds={availableStepKinds}
+                          droppableId={`parallel-drop-${topIndex}`}
                           onToggle={() =>
                             setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
                           }
@@ -528,6 +547,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                       <AddParallelButton
                         open={parallelAddOpen === topIndex}
                         kinds={availableStepKinds}
+                        droppableId={`parallel-drop-${topIndex}`}
                         onToggle={() =>
                           setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
                         }
@@ -758,13 +778,18 @@ function ParallelGroupContainer({
 type AddParallelButtonProps = {
   open: boolean
   kinds: StepKind[]
+  droppableId: string
   onToggle: () => void
   onPick: (kind: StepKind) => void
 }
 
 function AddParallelButton(props: AddParallelButtonProps): React.JSX.Element {
+  const { setNodeRef, isOver } = useDroppable({ id: props.droppableId })
   return (
-    <div className="relative flex shrink-0 items-center">
+    <div
+      ref={setNodeRef}
+      className={cn('relative flex shrink-0 items-center', isOver && 'rounded-md ring-2 ring-ring')}
+    >
       <Button
         variant="ghost"
         size="icon-sm"

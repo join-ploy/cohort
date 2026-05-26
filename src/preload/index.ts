@@ -2595,6 +2595,8 @@ const api = {
       callback: (request: {
         requestId: string
         worktreeId: string
+        worktreePath?: string
+        connectionId?: string | null
         source: 'review' | 'create-pr' | 'custom'
         commandId?: string
         customCommand?: string
@@ -2606,6 +2608,8 @@ const api = {
         request: {
           requestId: string
           worktreeId: string
+          worktreePath?: string
+          connectionId?: string | null
           source: 'review' | 'create-pr' | 'custom'
           commandId?: string
           customCommand?: string

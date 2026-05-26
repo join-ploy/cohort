@@ -60,6 +60,7 @@ let mockStoreState: StoreState
 let transportFactoryQueue: MockTransport[] = []
 let createdTransportOptions: Record<string, unknown>[] = []
 let storeSubscribers: ((state: StoreState) => void)[] = []
+let eagerPtyBufferIds = new Set<string>()
 
 vi.mock('@/runtime/sync-runtime-graph', () => ({
   scheduleRuntimeGraphSync
@@ -131,7 +132,15 @@ vi.mock('./pty-transport', () => ({
       throw new Error('No mock transport queued')
     }
     return nextTransport
-  })
+  }),
+  getEagerPtyBufferHandle: vi.fn((ptyId: string) =>
+    eagerPtyBufferIds.has(ptyId)
+      ? {
+          flush: vi.fn(() => ''),
+          dispose: vi.fn()
+        }
+      : undefined
+  )
 }))
 
 function createMockTransport(initialPtyId: string | null = null): MockTransport {
@@ -230,6 +239,7 @@ describe('connectPanePty', () => {
     transportFactoryQueue = []
     createdTransportOptions = []
     storeSubscribers = []
+    eagerPtyBufferIds = new Set()
     mockStoreState = {
       tabsByWorktree: {
         'wt-1': [{ id: 'tab-1', ptyId: 'tab-pty' }]
@@ -582,6 +592,40 @@ describe('connectPanePty', () => {
     expect(transport.attach).not.toHaveBeenCalled()
     await Promise.resolve()
     expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'leaf-pty-2')
+  })
+
+  it('attaches to a hidden background PTY with an eager buffer instead of spawning by session id', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport()
+    transportFactoryQueue.push(transport)
+    eagerPtyBufferIds.add('background-pty')
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'background-pty' }]
+      },
+      ptyIdsByTabId: {
+        'tab-1': ['background-pty']
+      }
+    } as StoreState
+
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks()
+
+    // Why: automation prompt panes are spawned before the tab is visible and
+    // buffered eagerly in this renderer session. For those, pty:spawn with
+    // sessionId can create a fresh LocalPtyProvider session; direct attach
+    // preserves the original PTY and replays the eager buffer.
+    expect(transport.attach).toHaveBeenCalledWith(
+      expect.objectContaining({ existingPtyId: 'background-pty' })
+    )
+    expect(transport.connect).not.toHaveBeenCalled()
+    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(1, 'background-pty')
+    expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'background-pty')
   })
 
   it('spawns a fresh PTY when a restored daemon split session cannot reattach', async () => {

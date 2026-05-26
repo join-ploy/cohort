@@ -217,6 +217,14 @@ export class ChainExecutor {
       this.deps.persistRun(run)
       return false
     }
+    // Propagate step-level 'waiting' to the run so the UI can reflect it.
+    const anyWaiting = run.stepStates!.some((s) => s.status === 'waiting')
+    if (anyWaiting) {
+      run.status = 'waiting'
+    } else if (run.status === 'waiting') {
+      run.status = 'running'
+    }
+
     this.deps.persistRun(run)
     return result.outcome === 'done' || result.outcome === 'failed'
   }
@@ -281,6 +289,14 @@ export class ChainExecutor {
 
     // If any sibling is still running, wait for the next cadence.
     if (!groupStates.every(isTerminal)) {
+      // Propagate step-level 'waiting' to the run so the UI can reflect it.
+      const anyWaiting = run.stepStates!.some((s) => s.status === 'waiting')
+      if (anyWaiting) {
+        run.status = 'waiting'
+      } else if (run.status === 'waiting') {
+        run.status = 'running'
+      }
+
       this.deps.persistRun(run)
       return false
     }
