@@ -1,4 +1,10 @@
-import type { Automation, AutomationRun, Step, StepRunState } from '../../shared/automations-types'
+import type {
+  Automation,
+  AutomationRun,
+  Step,
+  StepOrGroup,
+  StepRunState
+} from '../../shared/automations-types'
 import type { StepRunner } from './step-runner'
 
 export type ChainExecutorDeps = {
@@ -31,6 +37,32 @@ function makeStepState(step: Step, now: number): StepRunState {
     output: null,
     error: null
   }
+}
+
+/** Total individual steps across all positions (solo steps count 1, groups
+ *  count their length). Used for the safety-bound in `tick()`. */
+function countFlatSteps(steps: StepOrGroup[]): number {
+  let count = 0
+  for (const item of steps) {
+    count += Array.isArray(item) ? item.length : 1
+  }
+  return count
+}
+
+/** Map every Step.id to its Step definition so finalizeRun can look up
+ *  `onFailure` without relying on positional indexing. */
+function buildStepById(steps: StepOrGroup[]): Map<string, Step> {
+  const map = new Map<string, Step>()
+  for (const item of steps) {
+    if (Array.isArray(item)) {
+      for (const s of item) {
+        map.set(s.id, s)
+      }
+    } else {
+      map.set(item.id, item)
+    }
+  }
+  return map
 }
 
 /**
@@ -67,7 +99,7 @@ export class ChainExecutor {
     // hit the safety bound (every step gets at most 2 tries per outer tick:
     // one to start, one to land terminal — protects against a buggy runner
     // that always returns `done` without making progress).
-    const maxIterations = automation.steps.length * 2 + 1
+    const maxIterations = countFlatSteps(automation.steps) * 2 + 1
     for (let i = 0; i < maxIterations; i++) {
       const keepGoing = await this.tickOnce(automation, run)
       if (!keepGoing) {
@@ -76,15 +108,12 @@ export class ChainExecutor {
     }
   }
 
-  /** Drives one runner.tick() invocation and persists the result. Returns
-   *  `true` when the caller should immediately try again (a step just landed
-   *  terminal and there's more work to do) and `false` when we should wait
-   *  for the next scheduler cadence (needs-more-time, halt failure, or run
-   *  finalized). */
+  /** Drives one runner.tick() invocation (or one parallel-group tick) and
+   *  persists the result. Returns `true` when the caller should immediately
+   *  try again (a position just landed terminal and there's more work to do)
+   *  and `false` when we should wait for the next scheduler cadence
+   *  (needs-more-time, halt failure, or run finalized). */
   private async tickOnce(automation: Automation, run: AutomationRun): Promise<boolean> {
-    // The outer tick() already guarantees automation.steps is non-empty before
-    // calling tickOnce, but TypeScript can't carry that narrowing across the
-    // call boundary — pull it into a local with a defensive guard.
     const steps = automation.steps
     if (!steps || steps.length === 0) {
       return false
@@ -94,34 +123,59 @@ export class ChainExecutor {
       run.stepStates = []
     }
 
-    // Activate (or re-find) the current step. If the most recent state is
-    // non-terminal, that's the one we're driving; otherwise we either move
-    // on to the next step or finalize.
-    let activeIdx: number
-    let state: StepRunState
-    const lastIdx = run.stepStates.length - 1
-    if (lastIdx >= 0 && !isTerminal(run.stepStates[lastIdx])) {
-      activeIdx = lastIdx
-      state = run.stepStates[activeIdx]
-    } else {
-      // Next step is the one at index === stepStates.length. If we've already
-      // run them all, finalize.
-      activeIdx = run.stepStates.length
-      if (activeIdx >= steps.length) {
-        // Defensive: all step slots are filled but the run wasn't finalized on
-        // the prior tick. Route through the same finalizer the normal path
-        // uses so `onFailure: 'continue'` policy is honored consistently.
-        if (run.stepStates.length > 0 && run.stepStates.every(isTerminal)) {
-          this.finalizeRun(automation, run)
-        }
-        this.deps.persistRun(run)
-        return false
+    // Walk the StepOrGroup[] array to find the current position. Each
+    // position consumes 1 (solo step) or N (parallel group) stepState slots.
+    let consumed = 0
+    let posIdx = 0
+    for (; posIdx < steps.length; posIdx++) {
+      const item = steps[posIdx]
+      const slotCount = Array.isArray(item) ? item.length : 1
+      const slotStates = run.stepStates.slice(consumed, consumed + slotCount)
+
+      if (slotStates.length < slotCount || slotStates.some((s) => !isTerminal(s))) {
+        // This position is either not yet started or still in progress.
+        break
       }
-      state = makeStepState(steps[activeIdx], this.deps.now())
-      run.stepStates.push(state)
+      consumed += slotCount
     }
 
-    const step = steps[activeIdx]
+    if (posIdx >= steps.length) {
+      // All positions consumed — finalize if not already done.
+      if (run.stepStates.length > 0 && run.stepStates.every(isTerminal)) {
+        this.finalizeRun(automation, run)
+      }
+      this.deps.persistRun(run)
+      return false
+    }
+
+    const item = steps[posIdx]
+
+    // ── Solo step (existing behaviour) ──────────────────────────────
+    if (!Array.isArray(item)) {
+      return this.tickSoloStep(item, run, automation, steps, consumed)
+    }
+
+    // ── Parallel group ──────────────────────────────────────────────
+    return this.tickParallelGroup(item, run, automation, steps, consumed)
+  }
+
+  /** Tick a single (non-grouped) step. Preserves the original chain
+   *  semantics exactly. */
+  private async tickSoloStep(
+    step: Step,
+    run: AutomationRun,
+    automation: Automation,
+    steps: StepOrGroup[],
+    consumed: number
+  ): Promise<boolean> {
+    let state: StepRunState
+    if (run.stepStates!.length <= consumed) {
+      state = makeStepState(step, this.deps.now())
+      run.stepStates!.push(state)
+    } else {
+      state = run.stepStates![consumed]
+    }
+
     const runner = this.deps.getRunner(step.kind)
     if (!runner) {
       throw new Error(
@@ -136,11 +190,138 @@ export class ChainExecutor {
       context: run.context ?? {}
     })
 
-    // Sanity-check the runner's outcome/status pair so a buggy runner that
-    // returns inconsistent values fails loudly here instead of silently
-    // corrupting downstream chain state. Pure defensive: a well-behaved
-    // runner will never trip these.
-    if (result.outcome === 'done' && !isTerminal({ ...state, status: result.status })) {
+    this.validateResult(result, step, run)
+
+    state.status = result.status
+    if (result.outcome === 'done' || result.outcome === 'failed') {
+      state.finishedAt = this.deps.now()
+      if (result.output !== undefined) {
+        state.output = result.output
+      }
+      if (result.error != null) {
+        state.error = result.error
+      }
+      this.applyContextPatch(run, result.contextPatch)
+    }
+
+    if (result.outcome === 'failed' && step.onFailure === 'halt') {
+      run.status = 'failed'
+      run.finishedAt = this.deps.now()
+      this.deps.persistRun(run)
+      return false
+    }
+
+    const totalFlat = countFlatSteps(steps)
+    if (run.stepStates!.length >= totalFlat && run.stepStates!.every(isTerminal)) {
+      this.finalizeRun(automation, run)
+      this.deps.persistRun(run)
+      return false
+    }
+    this.deps.persistRun(run)
+    return result.outcome === 'done' || result.outcome === 'failed'
+  }
+
+  /** Tick every non-terminal sibling in a parallel group. Waits for all to
+   *  finish before allowing the chain to advance. */
+  private async tickParallelGroup(
+    group: Step[],
+    run: AutomationRun,
+    automation: Automation,
+    steps: StepOrGroup[],
+    consumed: number
+  ): Promise<boolean> {
+    // Materialise step states for the group if they don't exist yet.
+    for (let i = 0; i < group.length; i++) {
+      if (run.stepStates!.length <= consumed + i) {
+        run.stepStates!.push(makeStepState(group[i], this.deps.now()))
+      }
+    }
+
+    const groupStates = run.stepStates!.slice(consumed, consumed + group.length)
+
+    // Tick every non-terminal sibling concurrently.
+    let anyAdvanced = false
+    await Promise.all(
+      group.map(async (step, i) => {
+        const state = groupStates[i]
+        if (isTerminal(state)) {
+          return
+        }
+
+        const runner = this.deps.getRunner(step.kind)
+        if (!runner) {
+          throw new Error(
+            `No runner registered for step kind: ${step.kind} (runId=${run.id} stepId=${step.id})`
+          )
+        }
+
+        const result = await runner.tick({
+          runId: run.id,
+          step,
+          state,
+          context: run.context ?? {}
+        })
+
+        this.validateResult(result, step, run)
+
+        state.status = result.status
+        if (result.outcome === 'done' || result.outcome === 'failed') {
+          state.finishedAt = this.deps.now()
+          if (result.output !== undefined) {
+            state.output = result.output
+          }
+          if (result.error != null) {
+            state.error = result.error
+          }
+          this.applyContextPatch(run, result.contextPatch)
+          anyAdvanced = true
+        }
+      })
+    )
+
+    // If any sibling is still running, wait for the next cadence.
+    if (!groupStates.every(isTerminal)) {
+      this.deps.persistRun(run)
+      return false
+    }
+
+    // All siblings finished — check halt policy. If any halt-policy step
+    // failed, the run halts after all siblings complete.
+    const stepById = buildStepById(steps)
+    const haltFailure = groupStates.some((s) => {
+      if (s.status === 'succeeded' || s.status === 'skipped') {
+        return false
+      }
+      const step = stepById.get(s.stepId)
+      return !step || step.onFailure !== 'continue'
+    })
+
+    if (haltFailure) {
+      run.status = 'failed'
+      run.finishedAt = this.deps.now()
+      this.deps.persistRun(run)
+      return false
+    }
+
+    // Group done, no halt — check if the entire chain is now complete.
+    const totalFlat = countFlatSteps(steps)
+    if (run.stepStates!.length >= totalFlat && run.stepStates!.every(isTerminal)) {
+      this.finalizeRun(automation, run)
+      this.deps.persistRun(run)
+      return false
+    }
+
+    this.deps.persistRun(run)
+    return anyAdvanced
+  }
+
+  /** Validate a runner result's outcome/status consistency. */
+  private validateResult(
+    result: { outcome: string; status: string },
+    step: Step,
+    run: AutomationRun
+  ): void {
+    if (result.outcome === 'done' && !isTerminal({ status: result.status } as StepRunState)) {
       throw new Error(
         `Runner for step kind '${step.kind}' returned outcome='done' with non-terminal status='${result.status}' (runId=${run.id} stepId=${step.id})`
       )
@@ -154,58 +335,27 @@ export class ChainExecutor {
         `Runner for step kind '${step.kind}' returned outcome='failed' with status='${result.status}' (expected 'failed' or 'timed-out'; runId=${run.id} stepId=${step.id})`
       )
     }
+  }
 
-    state.status = result.status
-    if (result.outcome === 'done' || result.outcome === 'failed') {
-      state.finishedAt = this.deps.now()
-      if (result.output !== undefined) {
-        state.output = result.output
-      }
-      if (result.error != null) {
-        state.error = result.error
-      }
-      // Why: only merge contextPatch on a deterministic outcome. A
-      // `needs-more-time` tick is mid-step; applying a patch then would
-      // expose half-built context to subsequent ticks.
-      // Why: deep-merge the `steps` sub-object so step N's `steps.<idN>`
-      // patch does not clobber step N-1's `steps.<idN-1>`. Other top-level
-      // keys still use shallow replace, matching the per-key semantics each
-      // runner expects.
-      if (result.contextPatch) {
-        const prevSteps = (run.context?.steps as Record<string, unknown> | undefined) ?? {}
-        const patchSteps = (result.contextPatch.steps as Record<string, unknown> | undefined) ?? {}
-        const merged: Record<string, unknown> = {
-          ...run.context,
-          ...result.contextPatch
-        }
-        if (result.contextPatch.steps !== undefined) {
-          merged.steps = { ...prevSteps, ...patchSteps }
-        }
-        run.context = merged
-      }
+  /** Deep-merge a contextPatch into run.context, preserving per-step keys
+   *  under the `steps` sub-object. */
+  private applyContextPatch(
+    run: AutomationRun,
+    contextPatch: Record<string, unknown> | undefined
+  ): void {
+    if (!contextPatch) {
+      return
     }
-
-    if (result.outcome === 'failed' && step.onFailure === 'halt') {
-      run.status = 'failed'
-      run.finishedAt = this.deps.now()
-      this.deps.persistRun(run)
-      return false
+    const prevSteps = (run.context?.steps as Record<string, unknown> | undefined) ?? {}
+    const patchSteps = (contextPatch.steps as Record<string, unknown> | undefined) ?? {}
+    const merged: Record<string, unknown> = {
+      ...run.context,
+      ...contextPatch
     }
-
-    // For `failed` with onFailure='continue', or `done`, fall through and
-    // see whether the chain is now complete. If not, the next tick will
-    // append the next step's state.
-    if (run.stepStates.length >= steps.length && run.stepStates.every(isTerminal)) {
-      this.finalizeRun(automation, run)
-      this.deps.persistRun(run)
-      return false
+    if (contextPatch.steps !== undefined) {
+      merged.steps = { ...prevSteps, ...patchSteps }
     }
-    this.deps.persistRun(run)
-    // Why: when the just-finished step landed terminal AND there's still
-    // work in the chain, signal the caller to advance immediately. A
-    // `needs-more-time` result returns false so we wait for the next 60s
-    // scheduler cadence before polling the runner again.
-    return result.outcome === 'done' || result.outcome === 'failed'
+    run.context = merged
   }
 
   /** Final pass once every step in the automation has a terminal state. A
@@ -215,11 +365,12 @@ export class ChainExecutor {
    *  the run is `completed`. Only failures from halt-config steps or
    *  unhandled timeouts make the run `failed`. */
   private finalizeRun(automation: Automation, run: AutomationRun): void {
-    const failingHaltSteps = (run.stepStates ?? []).filter((state, i) => {
+    const stepById = buildStepById(automation.steps ?? [])
+    const failingHaltSteps = (run.stepStates ?? []).filter((state) => {
       if (state.status === 'succeeded' || state.status === 'skipped') {
         return false
       }
-      const step = automation.steps?.[i]
+      const step = stepById.get(state.stepId)
       // No matching step (defensive) or step is halt-on-failure: treat as a
       // contributing failure. `continue` failures are intentionally ignored.
       return !step || step.onFailure !== 'continue'

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ChainExecutor } from './chain-executor'
-import type { Automation, AutomationRun, Step } from '../../shared/automations-types'
+import type { Automation, AutomationRun, Step, StepOrGroup } from '../../shared/automations-types'
 import type { StepRunner } from './step-runner'
 
-function automation(steps: Step[]): Automation {
+function automation(steps: StepOrGroup[]): Automation {
   return {
     id: 'a1',
     name: 'test',
@@ -217,5 +217,136 @@ describe('ChainExecutor', () => {
         context: { trigger: { kind: 'manual' } }
       })
     )
+  })
+
+  describe('parallel groups', () => {
+    it('ticks all siblings in a parallel group', async () => {
+      const tick = vi.fn().mockResolvedValue({ outcome: 'needs-more-time', status: 'running' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2]]), r)
+      expect(r.stepStates).toHaveLength(2)
+      expect(r.stepStates![0]).toMatchObject({ stepId: 's1', status: 'running' })
+      expect(r.stepStates![1]).toMatchObject({ stepId: 's2', status: 'running' })
+      expect(tick).toHaveBeenCalledTimes(2)
+    })
+
+    it('waits for all siblings before advancing past the group', async () => {
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+        .mockResolvedValueOnce({ outcome: 'needs-more-time', status: 'running' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.stepStates).toHaveLength(2)
+      expect(r.stepStates![0].status).toBe('succeeded')
+      expect(r.stepStates![1].status).toBe('running')
+    })
+
+    it('advances past the group when all siblings are terminal', async () => {
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+        .mockResolvedValueOnce({ outcome: 'needs-more-time', status: 'running' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.stepStates).toHaveLength(3)
+      expect(r.stepStates![2]).toMatchObject({ stepId: 's3', status: 'running' })
+    })
+
+    it('halts the run when a halt-policy sibling fails (after all finish)', async () => {
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'failed', status: 'failed', error: 'boom' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1', onFailure: 'halt' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.status).toBe('failed')
+      expect(r.stepStates).toHaveLength(2)
+    })
+
+    it('continues past group when all failures are continue-policy', async () => {
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'failed', status: 'failed', error: 'oops' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1', onFailure: 'continue' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.stepStates).toHaveLength(3)
+      expect(r.status).toBe('completed')
+    })
+
+    it('merges context patches from parallel siblings without clobbering', async () => {
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({
+          outcome: 'done',
+          status: 'succeeded',
+          contextPatch: { steps: { s1: { out: 'a' } } }
+        })
+        .mockResolvedValueOnce({
+          outcome: 'done',
+          status: 'succeeded',
+          contextPatch: { steps: { s2: { out: 'b' } } }
+        })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 0
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2]]), r)
+      expect(r.context).toMatchObject({
+        steps: { s1: { out: 'a' }, s2: { out: 'b' } }
+      })
+    })
   })
 })
