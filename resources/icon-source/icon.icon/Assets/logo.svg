@@ -1,27 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <linearGradient id="iconGrad" gradientUnits="userSpaceOnUse" x1="110" y1="100" x2="410" y2="420">
+    <linearGradient id="iconGrad" gradientUnits="userSpaceOnUse" x1="60" y1="40" x2="452" y2="472">
       <stop offset="0" stop-color="#F2F3F6"/>
       <stop offset="1" stop-color="#C2C7D0"/>
     </linearGradient>
   </defs>
-  <g fill="url(#iconGrad)" stroke="url(#iconGrad)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+  <g fill="url(#iconGrad)" stroke="url(#iconGrad)" stroke-width="10" stroke-linejoin="round" stroke-linecap="round">
     <!-- spokes -->
-    <line x1="256" y1="210" x2="256" y2="144" fill="none"/>
-    <line x1="256" y1="302" x2="256" y2="368" fill="none"/>
-    <line x1="210" y1="256" x2="140" y2="256" fill="none"/>
-    <line x1="302" y1="256" x2="372" y2="256" fill="none"/>
+    <line x1="256" y1="196" x2="256" y2="104" fill="none"/>
+    <line x1="256" y1="316" x2="256" y2="408" fill="none"/>
+    <line x1="196" y1="256" x2="98.64" y2="256" fill="none"/>
+    <line x1="316" y1="256" x2="413.36" y2="256" fill="none"/>
     <!-- central core -->
-    <circle cx="256" cy="256" r="40" fill="none"/>
-    <circle cx="256" cy="256" r="18" stroke="none"/>
+    <circle cx="256" cy="256" r="52" fill="none"/>
+    <circle cx="256" cy="256" r="24" stroke="none"/>
     <!-- top / bottom / left / right hex nodes -->
-    <polygon points="256,74 283.71,90 283.71,122 256,138 228.29,122 228.29,90" fill="none"/>
-    <polygon points="256,89 270.72,97.5 270.72,114.5 256,123 241.28,114.5 241.28,97.5" stroke="none"/>
-    <polygon points="256,374 283.71,390 283.71,422 256,438 228.29,422 228.29,390" fill="none"/>
-    <polygon points="256,389 270.72,397.5 270.72,414.5 256,423 241.28,414.5 241.28,397.5" stroke="none"/>
-    <polygon points="106,224 133.71,240 133.71,272 106,288 78.29,272 78.29,240" fill="none"/>
-    <polygon points="106,239 120.72,247.5 120.72,264.5 106,273 91.28,264.5 91.28,247.5" stroke="none"/>
-    <polygon points="406,224 433.71,240 433.71,272 406,288 378.29,272 378.29,240" fill="none"/>
-    <polygon points="406,239 420.72,247.5 420.72,264.5 406,273 391.28,264.5 391.28,247.5" stroke="none"/>
+    <polygon points="256,16 290.64,36 290.64,76 256,96 221.36,76 221.36,36" fill="none"/>
+    <polygon points="256,35 274.19,45.5 274.19,66.5 256,77 237.81,66.5 237.81,45.5" stroke="none"/>
+    <polygon points="256,416 290.64,436 290.64,476 256,496 221.36,476 221.36,436" fill="none"/>
+    <polygon points="256,435 274.19,445.5 274.19,466.5 256,477 237.81,466.5 237.81,445.5" stroke="none"/>
+    <polygon points="56,216 90.64,236 90.64,276 56,296 21.36,276 21.36,236" fill="none"/>
+    <polygon points="56,235 74.19,245.5 74.19,266.5 56,277 37.81,266.5 37.81,245.5" stroke="none"/>
+    <polygon points="456,216 490.64,236 490.64,276 456,296 421.36,276 421.36,236" fill="none"/>
+    <polygon points="456,235 474.19,245.5 474.19,266.5 456,277 437.81,266.5 437.81,245.5" stroke="none"/>
   </g>
 </svg>
