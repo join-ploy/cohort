@@ -92,7 +92,7 @@ export function StarNagCard(): React.JSX.Element | null {
             <div className="flex items-center gap-2">
               <Star className="size-4 fill-amber-400/60 text-amber-400/80" />
               <h3 id="star-nag-heading" className="text-sm font-semibold">
-                Enjoying Orca?
+                Enjoying Cohort?
               </h3>
             </div>
             <Button
@@ -107,7 +107,7 @@ export function StarNagCard(): React.JSX.Element | null {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            If Orca has saved you time, a GitHub star goes a long way. It helps other developers
+            If Cohort has saved you time, a GitHub star goes a long way. It helps other developers
             discover the project and keeps the team motivated to ship improvements.
           </p>
 

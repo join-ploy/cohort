@@ -35,37 +35,42 @@ export function TemplateInput(props: TemplateInputProps): React.JSX.Element {
   const firstErrorMessage = hasError ? errors[0].message : undefined
 
   const [pickerOpen, setPickerOpen] = React.useState(false)
-  // Caret position immediately after the user typed '{{'. Insertion happens
-  // here so we end up with '{{<path>}}' without disturbing the rest of value.
-  const [caretAt, setCaretAt] = React.useState(0)
+  // Position of the `{{` opener in the value string. Everything between
+  // openBraceAt+2 and the current caret is the live search query.
+  const [openBraceAt, setOpenBraceAt] = React.useState(0)
+  const [query, setQuery] = React.useState('')
 
   const { onChange } = props
   const handleChange = React.useCallback(
     (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => {
       const next = e.target.value
       const caret = e.target.selectionStart ?? next.length
-      // The two chars immediately to the left of the caret form '{{' when
-      // the user has just typed the opening token — that's the picker cue.
-      if (caret >= 2 && next.slice(caret - 2, caret) === '{{') {
-        setCaretAt(caret)
+      if (!pickerOpen && caret >= 2 && next.slice(caret - 2, caret) === '{{') {
+        setOpenBraceAt(caret - 2)
+        setQuery('')
         setPickerOpen(true)
+      } else if (pickerOpen) {
+        const afterBraces = caret - (openBraceAt + 2)
+        if (afterBraces < 0 || next.slice(openBraceAt, openBraceAt + 2) !== '{{') {
+          setPickerOpen(false)
+        } else {
+          setQuery(next.slice(openBraceAt + 2, caret))
+        }
       }
       onChange(next)
     },
-    [onChange]
+    [onChange, pickerOpen, openBraceAt]
   )
 
   const handleSelect = React.useCallback(
     (path: string) => {
-      // Value currently has '{{' at [caretAt-2, caretAt). We insert
-      // `${path}}}` at caretAt so the result is '{{<path>}}' — leaves the
-      // opening braces the user typed in place and closes the token.
+      // Replace everything from `{{` through the current query with `{{path}}`.
       const current = props.value
-      const insertion = `${path}}}`
-      const next = current.slice(0, caretAt) + insertion + current.slice(caretAt)
+      const queryEnd = openBraceAt + 2 + query.length
+      const next = `${current.slice(0, openBraceAt)}{{${path}}}${current.slice(queryEnd)}`
       onChange(next)
     },
-    [props.value, caretAt, onChange]
+    [props.value, openBraceAt, query, onChange]
   )
 
   const baseClasses =
@@ -110,6 +115,7 @@ export function TemplateInput(props: TemplateInputProps): React.JSX.Element {
         open={pickerOpen}
         anchor={inputRef.current as HTMLElement | null}
         available={props.available}
+        query={query}
         onSelect={handleSelect}
         onClose={() => setPickerOpen(false)}
       />

@@ -682,7 +682,7 @@ function SimpleCardContent({
         </Button>
       </div>
 
-      <p className="text-sm text-muted-foreground">Orca v{version} is ready.</p>
+      <p className="text-sm text-muted-foreground">Cohort v{version} is ready.</p>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
         Sessions won&apos;t be interrupted.
@@ -768,7 +768,7 @@ function DownloadingContent({
       )}
 
       <p className="text-sm text-muted-foreground">
-        {release ? release.description : `Orca v${version} is downloading.`}
+        {release ? release.description : `Cohort v${version} is downloading.`}
       </p>
 
       <button
@@ -875,7 +875,7 @@ function ReadyToInstallContent({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Orca v{version} is downloaded. Restart when you&apos;re ready.
+        Cohort v{version} is downloaded. Restart when you&apos;re ready.
       </p>
 
       <Button variant="default" size="sm" onClick={onRestart} className="w-full">

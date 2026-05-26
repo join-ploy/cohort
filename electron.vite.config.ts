@@ -72,6 +72,9 @@ export default defineConfig({
     }
   },
   renderer: {
+    server: {
+      port: 8183
+    },
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),

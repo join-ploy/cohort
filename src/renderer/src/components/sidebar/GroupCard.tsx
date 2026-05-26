@@ -32,6 +32,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { runGroupArchive } from './archive-group-flow'
+import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 
 // Why: keep the periodic sidebar PR refresh aligned with the user-requested
 // 60s cadence. WorktreeCard's mount-effect calls fetchPRForBranch once; the
@@ -46,7 +47,6 @@ export type GroupCardProps = {
 }
 
 const GroupCard = React.memo(function GroupCard({ group, isActive = false }: GroupCardProps) {
-  const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
   const openModal = useAppStore((s) => s.openModal)
   const updateWorkspaceGroup = useAppStore((s) => s.updateWorkspaceGroup)
 
@@ -100,13 +100,11 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
   )
 
   const handleClick = useCallback(() => {
-    // TODO: real group-activation lands when Phase F/G wires the main pane.
-    // For now, activate the first member so clicking the card has feedback.
     const firstMemberId = group.memberWorktreeIds[0]
     if (firstMemberId) {
-      setActiveWorktree(firstMemberId)
+      activateAndRevealWorktree(firstMemberId)
     }
-  }, [group.memberWorktreeIds, setActiveWorktree])
+  }, [group.memberWorktreeIds])
 
   // Why: GroupCard owns its own right-click context menu rather than reusing
   // WorktreeContextMenu — the worktree menu carries linked-issue/PR rows and

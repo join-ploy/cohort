@@ -949,8 +949,8 @@ function App(): React.JSX.Element {
             {settings?.showTitlebarAppName !== false && (
               <ContextMenu>
                 <ContextMenuTrigger asChild>
-                  <div className="titlebar-app-name" aria-label="Forka">
-                    Forka
+                  <div className="titlebar-app-name" aria-label="Cohort">
+                    Cohort
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>

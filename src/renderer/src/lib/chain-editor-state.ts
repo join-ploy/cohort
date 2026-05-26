@@ -242,6 +242,9 @@ export function walkStepConfigStrings(
       if (typeof c.prompt === 'string') {
         visit('prompt', c.prompt)
       }
+      if (typeof c.paneRef === 'string') {
+        visit('paneRef', c.paneRef)
+      }
       break
     }
     case 'run-command': {
@@ -316,7 +319,8 @@ function rewriteConfigStrings(
       return {
         ...c,
         worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef,
-        prompt: typeof c.prompt === 'string' ? transform(c.prompt) : c.prompt
+        prompt: typeof c.prompt === 'string' ? transform(c.prompt) : c.prompt,
+        paneRef: typeof c.paneRef === 'string' ? transform(c.paneRef) : c.paneRef
       }
     }
     case 'run-command': {

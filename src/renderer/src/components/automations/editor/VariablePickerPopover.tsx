@@ -6,28 +6,43 @@ export type VariablePickerPopoverProps = {
   open: boolean
   anchor: HTMLElement | null
   available: AvailableVariables
+  query: string
   // Receives the full dotted path without braces, e.g. 'steps.cw1.worktreeId'.
   onSelect: (fullPath: string) => void
   onClose: () => void
 }
 
-// Popover that lists every variable available in scope as a flat dotted path.
-// Mounted by TemplateInput when the user types '{{'; selecting a row inserts
-// the path and a closing '}}' at the caret. Positioning uses fixed coordinates
-// from anchor.getBoundingClientRect() so it works without a portal/Radix
-// container — keeps the dry-run-only test surface trivial.
-export function VariablePickerPopover(props: VariablePickerPopoverProps): React.JSX.Element | null {
-  const { open, anchor, available, onSelect, onClose } = props
+function fuzzyMatch(query: string, target: string): boolean {
+  if (query.length === 0) {
+    return true
+  }
+  const lower = target.toLowerCase()
+  let qi = 0
+  for (let ti = 0; ti < lower.length && qi < query.length; ti++) {
+    if (lower[ti] === query[qi]) {
+      qi++
+    }
+  }
+  return qi === query.length
+}
 
-  const paths = React.useMemo(() => buildPaths(available), [available])
+export function VariablePickerPopover(props: VariablePickerPopoverProps): React.JSX.Element | null {
+  const { open, anchor, available, query, onSelect, onClose } = props
+
+  const allPaths = React.useMemo(() => buildPaths(available), [available])
+  const filtered = React.useMemo(() => {
+    const q = query.toLowerCase()
+    if (q.length === 0) {
+      return allPaths
+    }
+    return allPaths.filter((p) => fuzzyMatch(q, p.path))
+  }, [allPaths, query])
+
   const [highlightedIdx, setHighlightedIdx] = React.useState(0)
 
   React.useEffect(() => {
-    if (!open) {
-      return
-    }
     setHighlightedIdx(0)
-  }, [open])
+  }, [open, query])
 
   React.useEffect(() => {
     if (!open) {
@@ -41,7 +56,7 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setHighlightedIdx((i) => Math.min(i + 1, Math.max(paths.length - 1, 0)))
+        setHighlightedIdx((i) => Math.min(i + 1, Math.max(filtered.length - 1, 0)))
         return
       }
       if (e.key === 'ArrowUp') {
@@ -51,7 +66,7 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
       }
       if (e.key === 'Enter') {
         e.preventDefault()
-        const entry = paths[highlightedIdx]
+        const entry = filtered[highlightedIdx]
         if (entry) {
           onSelect(entry.path)
           onClose()
@@ -60,9 +75,9 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open, paths, highlightedIdx, onSelect, onClose])
+  }, [open, filtered, highlightedIdx, onSelect, onClose])
 
-  if (!open) {
+  if (!open || filtered.length === 0) {
     return null
   }
 
@@ -71,10 +86,10 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
     ? { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 50 }
     : {}
 
-  const automation = paths.filter((p) => p.namespace === 'automation')
-  const trigger = paths.filter((p) => p.namespace === 'trigger')
-  const group = paths.filter((p) => p.namespace === 'group')
-  const steps = paths.filter((p) => p.namespace === 'steps')
+  const automation = filtered.filter((p) => p.namespace === 'automation')
+  const trigger = filtered.filter((p) => p.namespace === 'trigger')
+  const group = filtered.filter((p) => p.namespace === 'group')
+  const steps = filtered.filter((p) => p.namespace === 'steps')
 
   return (
     <div
@@ -82,10 +97,10 @@ export function VariablePickerPopover(props: VariablePickerPopoverProps): React.
       style={style}
       className="bg-popover text-popover-foreground border border-border rounded-md shadow-md min-w-[280px] max-h-[320px] overflow-y-auto py-1"
     >
-      {renderSection('Automation', automation, paths, highlightedIdx, onSelect, onClose, false)}
-      {renderSection('Trigger', trigger, paths, highlightedIdx, onSelect, onClose, false)}
-      {renderSection('Group', group, paths, highlightedIdx, onSelect, onClose, false)}
-      {renderSection('Steps', steps, paths, highlightedIdx, onSelect, onClose, true)}
+      {renderSection('Automation', automation, filtered, highlightedIdx, onSelect, onClose, false)}
+      {renderSection('Trigger', trigger, filtered, highlightedIdx, onSelect, onClose, false)}
+      {renderSection('Group', group, filtered, highlightedIdx, onSelect, onClose, false)}
+      {renderSection('Steps', steps, filtered, highlightedIdx, onSelect, onClose, true)}
     </div>
   )
 }

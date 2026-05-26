@@ -29,6 +29,7 @@ describe('VariablePickerPopover', () => {
         open={false}
         anchor={FAKE_ANCHOR}
         available={SCHEMA}
+        query=""
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
@@ -42,6 +43,7 @@ describe('VariablePickerPopover', () => {
         open={true}
         anchor={FAKE_ANCHOR}
         available={SCHEMA}
+        query=""
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
@@ -61,6 +63,7 @@ describe('VariablePickerPopover', () => {
         open={true}
         anchor={FAKE_ANCHOR}
         available={SCHEMA}
+        query=""
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
@@ -75,6 +78,7 @@ describe('VariablePickerPopover', () => {
         open={true}
         anchor={FAKE_ANCHOR}
         available={SCHEMA}
+        query=""
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
@@ -97,11 +101,55 @@ describe('VariablePickerPopover', () => {
         open={true}
         anchor={FAKE_ANCHOR}
         available={schema}
+        query=""
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
     )
     expect(markup).toMatch(/cw1/)
     expect(markup).toMatch(/cw2/)
+  })
+
+  it('fuzzy-filters variables by query', () => {
+    const markup = renderToStaticMarkup(
+      <VariablePickerPopover
+        open={true}
+        anchor={FAKE_ANCHOR}
+        available={SCHEMA}
+        query="gro"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(markup).not.toContain('automation.projectId')
+    expect(markup).not.toContain('trigger.firedAt')
+  })
+
+  it('matches fuzzy substrings across dots', () => {
+    const markup = renderToStaticMarkup(
+      <VariablePickerPopover
+        open={true}
+        anchor={FAKE_ANCHOR}
+        available={SCHEMA}
+        query="cwwt"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(markup).toContain('steps.cw1.worktreeId')
+  })
+
+  it('returns nothing when query matches no variables', () => {
+    const markup = renderToStaticMarkup(
+      <VariablePickerPopover
+        open={true}
+        anchor={FAKE_ANCHOR}
+        available={SCHEMA}
+        query="zzzzz"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(markup).toBe('')
   })
 })

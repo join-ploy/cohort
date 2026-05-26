@@ -235,6 +235,34 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
       }
     })
   }
+  // Parallel pane conflict: within a group, multiple steps targeting the same
+  // paneRef would thrash a single pane with concurrent writes.
+  for (const item of draft.steps) {
+    if (!Array.isArray(item)) {
+      continue
+    }
+    const paneRefs = new Map<string, string>()
+    for (const step of item) {
+      const config = step.config as { paneRef?: string }
+      const ref = config.paneRef?.trim()
+      if (!ref) {
+        continue
+      }
+      const existing = paneRefs.get(ref)
+      if (existing) {
+        all.push({
+          path: ref,
+          code: 'unknown-path',
+          message: `Parallel steps '${existing}' and '${step.id}' share the same paneRef — they would thrash one pane.`,
+          stepId: step.id,
+          field: 'paneRef'
+        })
+      } else {
+        paneRefs.set(ref, step.id)
+      }
+    }
+  }
+
   // Future-reference violations: same error list, different code so callers
   // can distinguish if they later want to render them separately.
   for (const v of detectFutureReferences(draft.steps)) {
