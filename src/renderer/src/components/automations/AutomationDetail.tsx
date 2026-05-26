@@ -19,6 +19,7 @@ import type {
   RunCommandConfig,
   RunPromptConfig,
   Step,
+  StepOrGroup,
   StepRunState,
   StepRunStatus,
   TriggerConfig,
@@ -251,6 +252,54 @@ function LinearIssuePill({
 
 function isChainAutomation(automation: Automation): boolean {
   return Boolean(automation.trigger && automation.steps && automation.steps.length > 0)
+}
+
+/** Count the total flat steps, expanding parallel groups. */
+function countSteps(steps: StepOrGroup[]): number {
+  let count = 0
+  for (const item of steps) {
+    count += Array.isArray(item) ? item.length : 1
+  }
+  return count
+}
+
+/** Group consecutive step-run states that belong to the same parallel group so
+ *  we can render them side-by-side in the run history view. */
+function groupRunStates(
+  stepStates: StepRunState[],
+  automationSteps: StepOrGroup[]
+): (StepRunState | StepRunState[])[] {
+  // Map each step id to its top-level index when that index is a parallel group
+  const groupMembership = new Map<string, number>()
+  automationSteps.forEach((item, topIdx) => {
+    if (Array.isArray(item)) {
+      for (const s of item) {
+        groupMembership.set(s.id, topIdx)
+      }
+    }
+  })
+
+  const result: (StepRunState | StepRunState[])[] = []
+  let i = 0
+  while (i < stepStates.length) {
+    const state = stepStates[i]
+    const groupIdx = groupMembership.get(state.stepId)
+    if (groupIdx !== undefined) {
+      // Collect all consecutive states belonging to this parallel group
+      const group: StepRunState[] = [state]
+      let j = i + 1
+      while (j < stepStates.length && groupMembership.get(stepStates[j].stepId) === groupIdx) {
+        group.push(stepStates[j])
+        j++
+      }
+      result.push(group)
+      i = j
+    } else {
+      result.push(state)
+      i++
+    }
+  }
+  return result
 }
 
 function describeTrigger(trigger: TriggerConfig): string {
@@ -747,13 +796,43 @@ export function AutomationDetail({
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
               <div className="text-sm font-medium">Steps</div>
               <div className="text-xs text-muted-foreground">
-                {automation.steps!.length} {automation.steps!.length === 1 ? 'step' : 'steps'}
+                {countSteps(automation.steps!)}{' '}
+                {countSteps(automation.steps!) === 1 ? 'step' : 'steps'}
               </div>
             </div>
             <div className="divide-y divide-border/50">
-              {automation.steps!.map((step, index) => (
-                <ChainStepRow key={step.id} step={step} index={index} />
-              ))}
+              {automation.steps!.map((item, topIndex) => {
+                if (Array.isArray(item)) {
+                  return (
+                    <div key={item.map((s) => s.id).join('+')} className="px-3 py-2">
+                      <div className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
+                        Parallel
+                      </div>
+                      <div className="flex gap-2">
+                        {item.map((step) => (
+                          <div
+                            key={step.id}
+                            className="min-w-0 flex-1 rounded-md border border-border/40 bg-background px-2 py-1.5"
+                          >
+                            <div className="flex flex-wrap items-baseline gap-2">
+                              <span className="text-sm font-medium text-foreground">
+                                {STEP_KIND_LABELS[step.kind]}
+                              </span>
+                              <span className="truncate font-mono text-xs text-muted-foreground">
+                                {step.id}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                              {describeStepConfig(step)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+                return <ChainStepRow key={item.id} step={item} index={topIndex} />
+              })}
             </div>
           </div>
         </>
@@ -915,16 +994,45 @@ export function AutomationDetail({
             const hasStepStates = Boolean(run.stepStates && run.stepStates.length > 0)
             // Why: chain runs (`stepStates` present) get a per-step breakdown
             // appended below the existing summary row; legacy runs keep their
-            // single-row rendering untouched.
+            // single-row rendering untouched. Parallel groups are rendered
+            // side-by-side so the operator can see concurrent progress at a glance.
+            const groupedStates = hasStepStates
+              ? groupRunStates(run.stepStates!, automation.steps ?? [])
+              : []
             const stepList = hasStepStates ? (
               <div className="flex flex-col gap-0 border-t border-border/50 bg-background/60 py-1">
-                {run.stepStates!.map((step, index) => (
-                  <StepRunRow
-                    key={step.stepId}
-                    step={step}
-                    onRetry={() => onRetryRunFromStep(run, index)}
-                  />
-                ))}
+                {groupedStates.map((item) => {
+                  if (Array.isArray(item)) {
+                    return (
+                      <div key={item.map((s) => s.stepId).join('+')} className="px-3 py-2">
+                        <div className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
+                          Parallel
+                        </div>
+                        <div className="flex gap-2">
+                          {item.map((state) => {
+                            const flatIdx = run.stepStates!.indexOf(state)
+                            return (
+                              <div key={state.stepId} className="min-w-0 flex-1">
+                                <StepRunRow
+                                  step={state}
+                                  onRetry={() => onRetryRunFromStep(run, flatIdx)}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  }
+                  const flatIdx = run.stepStates!.indexOf(item)
+                  return (
+                    <StepRunRow
+                      key={item.stepId}
+                      step={item}
+                      onRetry={() => onRetryRunFromStep(run, flatIdx)}
+                    />
+                  )
+                })}
               </div>
             ) : null
             return (
