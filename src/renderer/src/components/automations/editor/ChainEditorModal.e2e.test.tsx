@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { ChainEditorModal } from './ChainEditorModal'
 import { useAppStore } from '@/store'
 import type { GlobalSettings, Repo, SidebarPromptCommand } from '../../../../../shared/types'
-import type { Automation } from '../../../../../shared/automations-types'
+import type { Automation, Step } from '../../../../../shared/automations-types'
 
 const REPOS: Repo[] = [
   {
@@ -90,10 +90,10 @@ describe('ChainEditorModal — end-to-end composition', () => {
     expect(savedAutomation.projectId).toBe('repo-1')
     expect(savedAutomation.trigger).toEqual({ kind: 'manual' })
     expect(savedAutomation.steps).toHaveLength(2)
-    expect(savedAutomation.steps?.[0].kind).toBe('create-worktree')
-    expect(savedAutomation.steps?.[1].kind).toBe('wait-for-setup')
-    expect(savedAutomation.steps?.[0].id).toMatch(/^create-worktree-/)
-    expect(savedAutomation.steps?.[1].id).toMatch(/^wait-for-setup-/)
+    expect((savedAutomation.steps?.[0] as Step).kind).toBe('create-worktree')
+    expect((savedAutomation.steps?.[1] as Step).kind).toBe('wait-for-setup')
+    expect((savedAutomation.steps?.[0] as Step).id).toMatch(/^create-worktree-/)
+    expect((savedAutomation.steps?.[1] as Step).id).toMatch(/^wait-for-setup-/)
   })
 })
 
