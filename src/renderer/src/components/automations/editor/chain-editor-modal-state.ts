@@ -7,6 +7,7 @@ import type {
   Step,
   StepConfig,
   StepKind,
+  StepOrGroup,
   TriggerConfig,
   UpdateLinearIssueConfig,
   WaitForSetupConfig
@@ -15,6 +16,7 @@ import type { Repo } from '../../../../../shared/types'
 import {
   type ChainDraft,
   detectFutureReferences,
+  flattenSteps,
   walkStepConfigStrings
 } from '../../../lib/chain-editor-state'
 import {
@@ -94,9 +96,35 @@ export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
 }
 
 /**
- * Builds the AvailableVariables snapshot for the step at `stepIndex`. Only
- * steps strictly before `stepIndex` are visible — a step cannot reference
- * itself or any later step.
+ * Locates a flat step index within the `StepOrGroup[]` structure. Returns the
+ * top-level position and, when the step lives inside a parallel group, the
+ * set of sibling ids so callers can exclude concurrent outputs.
+ */
+function findStepPosition(
+  steps: StepOrGroup[],
+  flatIndex: number
+): { topIndex: number; isInGroup: boolean; groupSiblingIds: Set<string> | null } {
+  let count = 0
+  for (let i = 0; i < steps.length; i++) {
+    const item = steps[i]
+    const size = Array.isArray(item) ? item.length : 1
+    if (flatIndex < count + size) {
+      if (Array.isArray(item)) {
+        return { topIndex: i, isInGroup: true, groupSiblingIds: new Set(item.map((s) => s.id)) }
+      }
+      return { topIndex: i, isInGroup: false, groupSiblingIds: null }
+    }
+    count += size
+  }
+  return { topIndex: steps.length, isInGroup: false, groupSiblingIds: null }
+}
+
+/**
+ * Builds the AvailableVariables snapshot for the step at `stepIndex` (a flat
+ * index into the flattened step list). Only steps at strictly earlier
+ * top-level positions are visible — a step cannot reference itself, any later
+ * step, or a sibling within the same parallel group (concurrent outputs are
+ * unavailable).
  *
  * Why `repos`: a `create-workspace-group` step in scope publishes the
  * `group.members.<repoFolderName>.*` namespace at runtime, keyed by the
@@ -110,22 +138,29 @@ export function getAvailableVariablesAtStep(
   stepIndex: number,
   repos: Repo[] = []
 ): AvailableVariables {
-  const steps: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  const stepsSchema: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
   let groupSchema: NestedSchema | undefined = undefined
-  for (let i = 0; i < stepIndex && i < draft.steps.length; i++) {
-    const s = draft.steps[i]
-    steps[s.id] = getOutputSchemaForKind(s.kind)
-    // Why: any earlier create-workspace-group step injects the top-level
-    // `group.*` namespace. If multiple exist (rare), the latest wins —
-    // mirrors runtime, where each step's contextPatch overwrites `group`.
-    if (s.kind === 'create-workspace-group') {
-      groupSchema = buildGroupSchema(s.config as CreateWorkspaceGroupConfig, repos)
+
+  const { topIndex } = findStepPosition(draft.steps, stepIndex)
+
+  for (let i = 0; i < topIndex && i < draft.steps.length; i++) {
+    const item = draft.steps[i]
+    const members = Array.isArray(item) ? item : [item]
+    for (const s of members) {
+      stepsSchema[s.id] = getOutputSchemaForKind(s.kind)
+      // Why: any earlier create-workspace-group step injects the top-level
+      // `group.*` namespace. If multiple exist (rare), the latest wins —
+      // mirrors runtime, where each step's contextPatch overwrites `group`.
+      if (s.kind === 'create-workspace-group') {
+        groupSchema = buildGroupSchema(s.config as CreateWorkspaceGroupConfig, repos)
+      }
     }
   }
+
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
     trigger: buildTriggerSchema(draft.trigger),
-    steps,
+    steps: stepsSchema,
     group: groupSchema
   }
 }
@@ -189,8 +224,9 @@ function repoFolderName(repoPath: string): string {
 
 export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEditorError[] {
   const all: ChainEditorError[] = []
-  for (let i = 0; i < draft.steps.length; i++) {
-    const step = draft.steps[i]
+  const flat = flattenSteps(draft.steps)
+  for (let i = 0; i < flat.length; i++) {
+    const step = flat[i]
     const available = getAvailableVariablesAtStep(draft, i, repos)
     walkStepConfigStrings(step.config, step.kind, (field, value) => {
       const errs = dryRunTemplate(value, available)
@@ -232,7 +268,7 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
  * so the project-requirement rule can be unit-tested without ChainEditorModal.
  */
 export function chainHasStep(draft: ChainDraft, kind: StepKind): boolean {
-  return draft.steps.some((s) => s.kind === kind)
+  return flattenSteps(draft.steps).some((s) => s.kind === kind)
 }
 
 /**
@@ -243,7 +279,7 @@ export function chainHasStep(draft: ChainDraft, kind: StepKind): boolean {
 export function chainReferencesAutomationProjectId(draft: ChainDraft): boolean {
   const pattern = /\{\{\s*automation\.projectId\s*\}\}/
   let found = false
-  for (const step of draft.steps) {
+  for (const step of flattenSteps(draft.steps)) {
     walkStepConfigStrings(step.config, step.kind, (_field, value) => {
       if (pattern.test(value)) {
         found = true
@@ -324,9 +360,10 @@ export function seedDraft(automation: Automation | null): ChainDraft {
  * it"; making the user retype the same `{{steps.<id>.<output>}}` template on
  * every new run-prompt is friction with zero upside.
  */
-export function pickDefaultWorktreeRef(steps: Step[]): string | null {
-  for (let i = steps.length - 1; i >= 0; i--) {
-    const s = steps[i]
+export function pickDefaultWorktreeRef(steps: StepOrGroup[]): string | null {
+  const flat = flattenSteps(steps)
+  for (let i = flat.length - 1; i >= 0; i--) {
+    const s = flat[i]
     if (s.kind === 'create-worktree') {
       return `{{steps.${s.id}.worktreeId}}`
     }
@@ -427,4 +464,4 @@ export function createBlankAutomation(id: string, now: number): Automation {
 }
 
 // Re-export so the modal needs only one import for step types.
-export type { Step, StepConfig, StepKind }
+export type { Step, StepConfig, StepKind, StepOrGroup }

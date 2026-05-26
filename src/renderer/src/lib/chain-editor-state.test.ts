@@ -109,8 +109,8 @@ describe('renameStepWithRewrites', () => {
       }
     ]
     const next = renameStepWithRewrites(steps, 'cw1', 'create-wt')
-    expect(next[0].id).toBe('create-wt')
-    expect((next[1].config as { worktreeRef: string }).worktreeRef).toBe(
+    expect((next[0] as Step).id).toBe('create-wt')
+    expect(((next[1] as Step).config as { worktreeRef: string }).worktreeRef).toBe(
       '{{steps.create-wt.worktreeId}}'
     )
   })
@@ -163,8 +163,8 @@ describe('reorderSteps', () => {
         timeoutSeconds: null
       }
     ]
-    expect(reorderSteps(steps, 0, 2).map((s) => s.id)).toEqual(['b', 'c', 'a'])
-    expect(reorderSteps(steps, 2, 0).map((s) => s.id)).toEqual(['c', 'a', 'b'])
+    expect(reorderSteps(steps, 0, 2).map((s) => (s as Step).id)).toEqual(['b', 'c', 'a'])
+    expect(reorderSteps(steps, 2, 0).map((s) => (s as Step).id)).toEqual(['c', 'a', 'b'])
   })
 
   it('returns a new array (does not mutate the input)', () => {
@@ -288,6 +288,65 @@ describe('detectFutureReferences', () => {
     const violations = detectFutureReferences(steps)
     expect(violations).toHaveLength(1)
     expect(violations[0]).toMatchObject({ fromStepId: 'a', toStepId: 'b' })
+  })
+})
+
+describe('detectFutureReferences with parallel groups', () => {
+  it('flags a sibling reference within a parallel group', () => {
+    const a: Step = {
+      id: 'a',
+      kind: 'run-prompt',
+      config: {
+        worktreeRef: '{{steps.b.paneKey}}',
+        agentId: 'claude',
+        prompt: '',
+        doneDebounceSeconds: 5
+      } as never,
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const b: Step = {
+      id: 'b',
+      kind: 'run-prompt',
+      config: {} as never,
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const steps: StepOrGroup[] = [[a, b]]
+    const violations = detectFutureReferences(steps)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toMatchObject({ fromStepId: 'a', toStepId: 'b' })
+  })
+
+  it('allows referencing a group member from a step after the group', () => {
+    const a: Step = {
+      id: 'a',
+      kind: 'run-prompt',
+      config: {} as never,
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const b: Step = {
+      id: 'b',
+      kind: 'run-prompt',
+      config: {} as never,
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const c: Step = {
+      id: 'c',
+      kind: 'run-prompt',
+      config: {
+        worktreeRef: '{{steps.a.paneKey}}',
+        agentId: 'claude',
+        prompt: '',
+        doneDebounceSeconds: 5
+      } as never,
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const steps: StepOrGroup[] = [[a, b], c]
+    expect(detectFutureReferences(steps)).toEqual([])
   })
 })
 
