@@ -22,9 +22,15 @@ describe('resolveTemplate', () => {
     expect(resolveTemplate('{{n}} {{b}}', { n: 42, b: true })).toBe('42 true')
   })
 
-  it('throws with the failing path for unresolved references', () => {
-    expect(() => resolveTemplate('{{a.b.c}}', { a: { b: {} } })).toThrow(TemplateResolutionError)
-    expect(() => resolveTemplate('{{a.b.c}}', { a: { b: {} } })).toThrow(/a\.b\.c/)
+  it('resolves to empty string when leaf is missing but parent exists', () => {
+    expect(resolveTemplate('{{a.b.c}}', { a: { b: {} } })).toBe('')
+  })
+
+  it('throws when path breaks mid-way through non-existent objects', () => {
+    expect(() => resolveTemplate('{{a.b.c}}', {})).toThrow(TemplateResolutionError)
+    expect(() => resolveTemplate('{{a.b.c}}', { a: 'not-an-object' })).toThrow(
+      TemplateResolutionError
+    )
   })
 
   it('preserves whitespace and surrounding text', () => {
@@ -35,9 +41,9 @@ describe('resolveTemplate', () => {
     expect(resolveTemplate('use \\{{literal}} for braces', {})).toBe('use {{literal}} for braces')
   })
 
-  it('rejects null/undefined values as unresolved', () => {
-    expect(() => resolveTemplate('{{x}}', { x: null })).toThrow(TemplateResolutionError)
-    expect(() => resolveTemplate('{{x}}', { x: undefined })).toThrow(TemplateResolutionError)
+  it('resolves null/undefined leaf values to empty string', () => {
+    expect(resolveTemplate('{{x}}', { x: null })).toBe('')
+    expect(resolveTemplate('{{x}}', { x: undefined })).toBe('')
   })
 
   it('rejects plain objects as non-primitive', () => {
@@ -66,13 +72,25 @@ describe('resolveTemplate', () => {
     expect(() => resolveTemplate('{{   }}', {})).toThrow(/empty token/)
   })
 
-  it('TemplateResolutionError carries the failing path', () => {
+  it('TemplateResolutionError carries the failing path for broken paths', () => {
     try {
-      resolveTemplate('{{a.b.c}}', { a: { b: {} } })
+      resolveTemplate('{{a.b.c}}', {})
       throw new Error('expected throw')
     } catch (err) {
       expect(err).toBeInstanceOf(TemplateResolutionError)
       expect((err as TemplateResolutionError).path).toBe('a.b.c')
     }
+  })
+
+  it('resolves skipped step output fields to empty string', () => {
+    const context = { steps: { 'find-real-bugs': {} } }
+    expect(resolveTemplate('{{steps.find-real-bugs.outputTail}}', context)).toBe('')
+  })
+
+  it('throws for references to non-existent step IDs', () => {
+    const context = { steps: {} }
+    expect(() => resolveTemplate('{{steps.nonexistent.outputTail}}', context)).toThrow(
+      TemplateResolutionError
+    )
   })
 })

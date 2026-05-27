@@ -18,7 +18,6 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { useAppStore } from '@/store'
 
 // Why: the editor renders as a fullscreen overlay covering the native macOS
 // traffic lights. Reserve the same 80px pad used by .titlebar-left so the
@@ -107,17 +106,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
   const [triggersModalOpen, setTriggersModalOpen] = React.useState(false)
 
-  // Why: hide the `create-workspace-group` step from the picker when the
-  // experimental flag is off so the rest of the chain editor matches the
-  // pre-feature surface exactly.
-  const groupedEnabled = useAppStore((s) => s.settings?.experimentalGroupedWorkspaces === true)
-  const availableStepKinds = React.useMemo<StepKind[]>(
-    () =>
-      groupedEnabled
-        ? STEP_KIND_ORDER
-        : STEP_KIND_ORDER.filter((k) => k !== 'create-workspace-group'),
-    [groupedEnabled]
-  )
+  const availableStepKinds = STEP_KIND_ORDER
 
   // Why: project-required gating now lives inside computeAllErrors so it can
   // factor in chain shape (e.g. a create-workspace-group chain genuinely

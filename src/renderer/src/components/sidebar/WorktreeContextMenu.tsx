@@ -23,8 +23,9 @@ import {
 import { useAppStore } from '@/store'
 import { useRepoById, useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
-import type { Worktree } from '../../../../shared/types'
+import type { Worktree, PRInfo } from '../../../../shared/types'
 import { isFolderRepo } from '../../../../shared/repo-kind'
+import { branchDisplayName } from './WorktreeCardHelpers'
 import { runWorktreeArchive, runWorktreeBatchArchive } from './archive-worktree-flow'
 import { runSleepWorktrees } from './sleep-worktree-flow'
 
@@ -106,6 +107,17 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   const handleCopyPath = useCallback(() => {
     window.api.ui.writeClipboardText(worktree.path)
   }, [worktree.path])
+
+  const branch = branchDisplayName(worktree.branch)
+  const prCacheKey = repo && branch ? `${repo.path}::${branch}` : ''
+  const pr: PRInfo | null | undefined = useAppStore((s) =>
+    prCacheKey ? s.prCache[prCacheKey]?.data : undefined
+  )
+  const handleCopyPrLink = useCallback(() => {
+    if (pr?.url) {
+      window.api.ui.writeClipboardText(pr.url)
+    }
+  }, [pr?.url])
 
   const handleToggleRead = useCallback(() => {
     updateWorktreeMeta(worktree.id, { isUnread: !worktree.isUnread })
@@ -244,6 +256,12 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
                 <Copy className="size-3.5" />
                 Copy Path
               </DropdownMenuItem>
+              {pr?.url && (
+                <DropdownMenuItem onSelect={handleCopyPrLink} disabled={isDeleting}>
+                  <Copy className="size-3.5" />
+                  Copy PR Link
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={handleTogglePin} disabled={isDeleting}>
                 {worktree.isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}

@@ -25,14 +25,6 @@ function Sidebar(): React.JSX.Element {
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth)
   const repos = useAppStore((s) => s.repos)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
-  // Why: gate the experimental Groups sidebar section. GroupsSection itself
-  // returns null when there are no visible groups, so the flag is the only
-  // condition needed at the call site. Optional chain mirrors other sidebar
-  // settings reads — settings can be null during the initial bootstrap.
-  const groupedWorkspacesEnabled = useAppStore(
-    (s) => s.settings?.experimentalGroupedWorkspaces === true
-  )
-
   // Fetch worktrees when repos are added/removed
   const repoCount = repos.length
   useEffect(() => {
@@ -78,7 +70,7 @@ function Sidebar(): React.JSX.Element {
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [groupedWorkspacesEnabled])
+  }, [])
 
   // Why: WorktreeList's keyboard cycling navigator used to live on its own
   // scroll container. With the container hoisted, the handler is registered
@@ -140,11 +132,9 @@ function Sidebar(): React.JSX.Element {
           onKeyDown={handleContainerKeyDown}
           className="worktree-sidebar-scrollbar flex-1 overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset pt-px"
         >
-          {groupedWorkspacesEnabled ? (
-            <div ref={groupsWrapperRef}>
-              <GroupsSection />
-            </div>
-          ) : null}
+          <div ref={groupsWrapperRef}>
+            <GroupsSection />
+          </div>
 
           <WorktreeList
             scrollContainerRef={scrollContainerRef}

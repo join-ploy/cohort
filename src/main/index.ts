@@ -721,8 +721,8 @@ app.whenReady().then(async () => {
     // setupDecision='run' internally, so 'inherit' here is a no-op fallback for
     // when runHooks ever toggles off in a future config). NOTE: the runner's
     // `linkedIssue` is for Linear; createManagedWorktree's `linkedIssue` field
-    // is a numeric GitHub issue ID — incompatible. Passing `null` until a
-    // Linear-linkage path is added (Phase 4 follow-up).
+    // is a numeric GitHub issue ID — incompatible. Linear linkage is stamped
+    // via setWorktreeMeta after creation.
     // Why (grouped-workspaces L3): bridge the chain runner onto the shared
     // create-workspace-group helper so the IPC handler and the automation
     // runner take the same validate/create/rollback path. The runner hands
@@ -762,7 +762,8 @@ app.whenReady().then(async () => {
           })),
           ...(input.createdByAutomationRunId
             ? { createdByAutomationRunId: input.createdByAutomationRunId }
-            : {})
+            : {}),
+          linkedLinearIssue: input.linkedIssue?.id ?? null
         },
         { store: storeRef, runtime: runtimeRef, mainWindow }
       )
@@ -802,6 +803,11 @@ app.whenReady().then(async () => {
         activate: false,
         setupDecision: 'run'
       })
+      if (input.linkedIssue?.id) {
+        storeRef.setWorktreeMeta(result.worktree.id, {
+          linkedLinearIssue: input.linkedIssue.id
+        })
+      }
       return {
         worktreeId: result.worktree.id,
         path: result.worktree.path,

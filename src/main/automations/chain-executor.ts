@@ -202,6 +202,9 @@ export class ChainExecutor {
         state.error = result.error
       }
       this.applyContextPatch(run, result.contextPatch)
+      if (result.status === 'skipped' && !result.contextPatch) {
+        this.applyContextPatch(run, { steps: { [step.id]: {} } })
+      }
     }
 
     if (result.outcome === 'failed' && step.onFailure === 'halt') {
@@ -282,6 +285,9 @@ export class ChainExecutor {
             state.error = result.error
           }
           this.applyContextPatch(run, result.contextPatch)
+          if (result.status === 'skipped' && !result.contextPatch) {
+            this.applyContextPatch(run, { steps: { [step.id]: {} } })
+          }
           anyAdvanced = true
         }
       })

@@ -45,20 +45,6 @@ export const EXPERIMENTAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
       'env',
       'node_modules'
     ]
-  },
-  {
-    title: 'Grouped workspaces',
-    description: 'Render a Groups section above repo headers in the sidebar.',
-    keywords: [
-      'experimental',
-      'group',
-      'groups',
-      'grouped',
-      'workspace',
-      'workspaces',
-      'sidebar',
-      'section'
-    ]
   }
 ]
 
@@ -76,6 +62,5 @@ function findEntry(title: string): SettingsSearchEntry {
 export const EXPERIMENTAL_SEARCH_ENTRY = {
   pet: findEntry('Pet'),
   activity: findEntry('Activity Page'),
-  symlinks: findEntry('Symlinks on worktrees'),
-  groupedWorkspaces: findEntry('Grouped workspaces')
+  symlinks: findEntry('Symlinks on worktrees')
 } as const

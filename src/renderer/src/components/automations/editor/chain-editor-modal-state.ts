@@ -1,5 +1,6 @@
 import type {
   Automation,
+  CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
   RunCommandConfig,
@@ -42,20 +43,20 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
-  'update-linear-issue': 'Update Linear issue'
+  'update-linear-issue': 'Update Linear issue',
+  'collect-ci-results': 'Collect CI results'
 }
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
 // groups "creation" kinds together visually. `update-linear-issue` slots next
 // to `run-prompt` — it's an effect step, not a creation step. `run-command`
 // remains renderable for legacy chains but is no longer addable from the editor.
-// ChainEditorModal filters this list down by removing `create-workspace-group`
-// when settings.experimentalGroupedWorkspaces is false.
 export const STEP_KIND_ORDER: StepKind[] = [
   'create-worktree',
   'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
+  'collect-ci-results',
   'update-linear-issue'
 ]
 
@@ -467,6 +468,14 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         issueRef: '',
         assigneeRef: '',
         stateRef: ''
+      }
+      return cfg
+    }
+    case 'collect-ci-results': {
+      const cfg: CollectCiResultsConfig = {
+        worktreeRef: '',
+        pollIntervalSeconds: 30,
+        includeComments: true
       }
       return cfg
     }

@@ -324,10 +324,6 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     experimentalPet: false,
     experimentalActivity: true,
     experimentalWorktreeSymlinks: false,
-    // Why: opt-in while the grouped-workspaces sidebar UX is in flight.
-    // GroupsSection already self-hides when empty; the flag exists so the
-    // section doesn't render at all for users who haven't opted in.
-    experimentalGroupedWorkspaces: false,
     // Why: ship one seeded entry for each dropdown so the buttons render with
     // something usable out of the box. Users can rename / replace / delete
     // from the General settings pane.

@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
+import { runSleepWorktrees } from './sleep-worktree-flow'
 
 /**
  * Group archive entrypoint shared by the GroupCard context menu. Mirrors
@@ -19,7 +20,20 @@ export function runGroupArchive(groupId: string, displayName: string): void {
   // worktree archive, which is a metadata flip with deferred cleanup. A
   // promise toast gives the user immediate feedback that the action is in
   // flight and auto-transitions to success/error on completion.
-  toast.promise(useAppStore.getState().archiveGroup(groupId), {
+  async function archiveWithTerminalShutdown() {
+    // Why: mirror the single-worktree archive path — sleep member worktrees
+    // before the IPC so terminals and browsers are cleanly torn down from the
+    // renderer side. Without this the PTYs keep running until the main-process
+    // runWorktreeRemoval defensively kills them, leaving visible zombie
+    // terminals in the UI during the archive window.
+    const group = useAppStore.getState().workspaceGroups.find((g) => g.id === groupId)
+    if (group) {
+      await runSleepWorktrees(group.memberWorktreeIds)
+    }
+    return useAppStore.getState().archiveGroup(groupId)
+  }
+
+  toast.promise(archiveWithTerminalShutdown(), {
     loading: `Archiving group "${displayName}"…`,
     success: `Archived group "${displayName}"`,
     error: (err: unknown) =>

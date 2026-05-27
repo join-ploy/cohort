@@ -8,6 +8,7 @@ import { WaitForSetupStepCard } from './WaitForSetupStepCard'
 import { RunPromptStepCard } from './RunPromptStepCard'
 import { RunCommandStepCard } from './RunCommandStepCard'
 import { UpdateLinearIssueStepCard } from './UpdateLinearIssueStepCard'
+import { CollectCiResultsStepCard } from './CollectCiResultsStepCard'
 
 export type ChainEditorStepCardRouterProps = {
   step: Step
@@ -80,5 +81,7 @@ export function ChainEditorStepCardRouter(
       )
     case 'update-linear-issue':
       return <UpdateLinearIssueStepCard {...common} onConfigChange={props.onConfigChange} />
+    case 'collect-ci-results':
+      return <CollectCiResultsStepCard {...common} onConfigChange={props.onConfigChange} />
   }
 }

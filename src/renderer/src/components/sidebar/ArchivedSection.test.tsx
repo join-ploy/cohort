@@ -10,7 +10,6 @@ import type * as SelectorsModule from '@/store/selectors'
 type StoreState = {
   worktreesByRepo: Record<string, Worktree[]>
   workspaceGroups: WorkspaceGroup[]
-  settings: { experimentalGroupedWorkspaces?: boolean } | null
   restoreWorktree: ReturnType<typeof vi.fn>
   openModal: ReturnType<typeof vi.fn>
 }
@@ -20,7 +19,6 @@ const mocks = vi.hoisted(() => {
     state: {
       worktreesByRepo: {},
       workspaceGroups: [],
-      settings: null,
       restoreWorktree: vi.fn().mockResolvedValue(undefined),
       openModal: vi.fn()
     } as StoreState
@@ -117,7 +115,6 @@ describe('<ArchivedSection />', () => {
     cleanup()
     setArchived([])
     mocks.state.workspaceGroups = []
-    mocks.state.settings = null
     mocks.state.restoreWorktree.mockClear().mockResolvedValue(undefined)
     mocks.state.openModal.mockClear()
   })
@@ -195,10 +192,7 @@ describe('<ArchivedSection />', () => {
     expect(names).toEqual(['Newer WT', 'Older WT'])
   })
 
-  it('renders archived groups when experimentalGroupedWorkspaces is enabled', async () => {
-    // Why: with no archived worktrees, the only way the section appears is if
-    // archived groups are surfaced — proves the gate flips on.
-    mocks.state.settings = { experimentalGroupedWorkspaces: true }
+  it('renders archived groups', async () => {
     mocks.state.workspaceGroups = [
       makeGroup({ id: 'group:1', displayName: 'My Group', archivedAt: Date.now() })
     ]
@@ -209,19 +203,5 @@ describe('<ArchivedSection />', () => {
 
     expect(screen.getByTestId('archived-group-row')).toBeTruthy()
     expect(screen.getByText('My Group')).toBeTruthy()
-  })
-
-  it('does not render archived groups when the flag is off', () => {
-    mocks.state.settings = { experimentalGroupedWorkspaces: false }
-    mocks.state.workspaceGroups = [
-      makeGroup({ id: 'group:1', displayName: 'My Group', archivedAt: Date.now() })
-    ]
-
-    const { container } = renderSection()
-
-    // Section is gone entirely because there are no archived worktrees and
-    // the only archived group is gated out.
-    expect(container.childElementCount).toBe(0)
-    expect(screen.queryByTestId('archived-group-row')).toBeNull()
   })
 })

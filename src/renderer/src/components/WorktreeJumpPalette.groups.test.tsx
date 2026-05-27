@@ -68,7 +68,6 @@ type StoreState = {
   hideDefaultBranchWorkspace: boolean
   lastVisitedAtByWorktreeId: Record<string, number>
   workspaceGroups: WorkspaceGroup[]
-  settings: { experimentalGroupedWorkspaces?: boolean } | null
 }
 
 const mocks = vi.hoisted(() => ({
@@ -91,8 +90,7 @@ const mocks = vi.hoisted(() => ({
     sshConnectionStates: new Map<string, unknown>(),
     hideDefaultBranchWorkspace: false,
     lastVisitedAtByWorktreeId: {},
-    workspaceGroups: [] as WorkspaceGroup[],
-    settings: { experimentalGroupedWorkspaces: true } as StoreState['settings']
+    workspaceGroups: [] as WorkspaceGroup[]
   } as StoreState
 }))
 
@@ -160,7 +158,6 @@ describe('<WorktreeJumpPalette /> groups (M3)', () => {
   beforeEach(() => {
     cleanup()
     mocks.state.workspaceGroups = []
-    mocks.state.settings = { experimentalGroupedWorkspaces: true }
     mocks.state.activeModal = 'worktree-palette'
   })
 
@@ -178,15 +175,6 @@ describe('<WorktreeJumpPalette /> groups (M3)', () => {
     // from a worktree row. Each test group has 1 member so we expect one
     // pill per group.
     expect(screen.getAllByText('1 repo')).toHaveLength(2)
-  })
-
-  it('hides groups when the experimental flag is off', () => {
-    mocks.state.settings = { experimentalGroupedWorkspaces: false }
-    mocks.state.workspaceGroups = [makeGroup({ id: 'group:alpha', displayName: 'alpha_workspace' })]
-
-    render(<WorktreeJumpPalette />)
-
-    expect(screen.queryByText('alpha_workspace')).toBeNull()
   })
 
   it('hides archived groups', () => {

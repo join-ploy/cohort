@@ -174,12 +174,6 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const lastVisitedAtByWorktreeId = useAppStore((s) => s.lastVisitedAtByWorktreeId)
   const workspaceGroups = useWorkspaceGroups()
-  // Why: groups are an experimental surface — guard the palette entries by
-  // the same flag that gates the sidebar GroupsSection so toggling the flag
-  // gives one consistent UI.
-  const groupedWorkspacesEnabled = useAppStore(
-    (s) => s.settings?.experimentalGroupedWorkspaces === true
-  )
 
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -368,14 +362,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     [browserMatches]
   )
 
-  // Why (M3): groups are surfaced behind the experimental flag so the palette
-  // mirrors the sidebar's gating. Empty-query ordering follows the same rule
-  // GroupsSection uses (sortOrder asc, then lastActivityAt desc), and queries
-  // route through `searchGroups` for displayName/branchName matching.
   const groupsForPalette = useMemo<readonly WorkspaceGroup[]>(() => {
-    if (!groupedWorkspacesEnabled) {
-      return []
-    }
     if (hasQuery) {
       return workspaceGroups
     }
@@ -388,7 +375,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         }
         return b.lastActivityAt - a.lastActivityAt
       })
-  }, [groupedWorkspacesEnabled, hasQuery, workspaceGroups])
+  }, [hasQuery, workspaceGroups])
 
   const groupMatches = useMemo(
     () => searchGroups(groupsForPalette, deferredQuery.trim()),

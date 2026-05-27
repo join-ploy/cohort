@@ -61,7 +61,7 @@ describe('chain types', () => {
 })
 
 describe('Phase 2 step configs', () => {
-  it('StepKind covers all 6 kinds', () => {
+  it('StepKind covers all 7 kinds', () => {
     expectTypeOf<StepKind>().toEqualTypeOf<
       | 'run-prompt'
       | 'create-worktree'
@@ -69,6 +69,7 @@ describe('Phase 2 step configs', () => {
       | 'wait-for-setup'
       | 'run-command'
       | 'update-linear-issue'
+      | 'collect-ci-results'
     >()
   })
 

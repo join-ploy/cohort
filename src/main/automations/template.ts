@@ -28,35 +28,41 @@ export function resolveTemplate(input: string, context: Record<string, unknown>)
         ''
       )
     }
-    const value = lookup(context, trimmed)
-    if (value === undefined || value === null) {
+    const result = lookup(context, trimmed)
+    if (result.value === undefined || result.value === null) {
+      // The path walked through every intermediate object but the final
+      // leaf is absent — e.g. a skipped step whose output fields were
+      // never populated.  Resolve to "" so downstream steps degrade
+      // gracefully instead of crashing the run.
+      if (result.reachedEnd) {
+        return ''
+      }
       throw new TemplateResolutionError(
         `Template references unresolved path '${trimmed}'.`,
         trimmed
       )
     }
-    // Only primitive leaves are substitutable. Objects/arrays/dates/functions
-    // would either corrupt the prompt (`[object Object]`) or produce
-    // non-reproducible output (locale-dependent Date strings); flag them as
-    // authoring mistakes for step runners to surface.
-    if (typeof value === 'object' || typeof value === 'function') {
+    if (typeof result.value === 'object' || typeof result.value === 'function') {
       throw new TemplateResolutionError(
-        `Template path '${trimmed}' resolved to ${Array.isArray(value) ? 'an array' : typeof value}; only string, number, and boolean values are allowed.`,
+        `Template path '${trimmed}' resolved to ${Array.isArray(result.value) ? 'an array' : typeof result.value}; only string, number, and boolean values are allowed.`,
         trimmed
       )
     }
-    return String(value)
+    return String(result.value)
   })
 }
 
-function lookup(ctx: Record<string, unknown>, path: string): unknown {
+function lookup(
+  ctx: Record<string, unknown>,
+  path: string
+): { value: unknown; reachedEnd: boolean } {
   const parts = path.split('.')
   let cursor: unknown = ctx
   for (const part of parts) {
     if (cursor === null || cursor === undefined || typeof cursor !== 'object') {
-      return undefined
+      return { value: undefined, reachedEnd: false }
     }
     cursor = (cursor as Record<string, unknown>)[part]
   }
-  return cursor
+  return { value: cursor, reachedEnd: true }
 }

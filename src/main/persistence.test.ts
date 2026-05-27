@@ -158,10 +158,6 @@ describe('Store', () => {
     expect(settings.rightSidebarOpenByDefault).toBe(true)
     expect(settings.showTasksButton).toBe(true)
     expect(settings.experimentalActivity).toBe(true)
-    // Why: grouped-workspaces sidebar section is opt-in while the UX is in
-    // flight. A regression flipping this to true would surface the section to
-    // users who never enabled it.
-    expect(settings.experimentalGroupedWorkspaces).toBe(false)
     expect(settings.floatingTerminalEnabled).toBe(true)
     expect(settings.floatingTerminalDefaultedForAllUsers).toBe(true)
     expect(settings.notifications.customSoundPath).toBeNull()

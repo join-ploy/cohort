@@ -52,6 +52,15 @@ export const RUN_COMMAND_OUTPUT_SCHEMA: OutputSchema = {
 // exhaustive so a new StepKind without a matching schema is a compile error.
 export const UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA: OutputSchema = {}
 
+export const COLLECT_CI_RESULTS_OUTPUT_SCHEMA: OutputSchema = {
+  summary: 'string',
+  checksJson: 'string',
+  commentsJson: 'string',
+  failedChecks: 'string',
+  hasFailures: 'boolean',
+  prCount: 'number'
+}
+
 export const MANUAL_TRIGGER_SCHEMA: OutputSchema = {
   firedAt: 'number',
   actorEmail: 'string'
@@ -83,7 +92,8 @@ const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
   'wait-for-setup': WAIT_FOR_SETUP_OUTPUT_SCHEMA,
   'run-prompt': RUN_PROMPT_OUTPUT_SCHEMA,
   'run-command': RUN_COMMAND_OUTPUT_SCHEMA,
-  'update-linear-issue': UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA
+  'update-linear-issue': UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
+  'collect-ci-results': COLLECT_CI_RESULTS_OUTPUT_SCHEMA
 }
 
 export function getOutputSchemaForKind(kind: StepKind): OutputSchema {

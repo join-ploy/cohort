@@ -3,8 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChainEditorModal } from './ChainEditorModal'
-import { useAppStore } from '@/store'
-import type { GlobalSettings, Repo, SidebarPromptCommand } from '../../../../../shared/types'
+import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import type { Automation, Step } from '../../../../../shared/automations-types'
 
 const REPOS: Repo[] = [
@@ -90,57 +89,24 @@ describe('ChainEditorModal — end-to-end composition', () => {
     expect(savedAutomation.projectId).toBe('repo-1')
     expect(savedAutomation.trigger).toEqual({ kind: 'manual' })
     expect(savedAutomation.steps).toHaveLength(2)
-    expect((savedAutomation.steps?.[0] as Step).kind).toBe('create-worktree')
-    expect((savedAutomation.steps?.[1] as Step).kind).toBe('wait-for-setup')
-    expect((savedAutomation.steps?.[0] as Step).id).toMatch(/^create-worktree-/)
-    expect((savedAutomation.steps?.[1] as Step).id).toMatch(/^wait-for-setup-/)
+    expect((savedAutomation.steps![0] as Step).kind).toBe('create-worktree')
+    expect((savedAutomation.steps![1] as Step).kind).toBe('wait-for-setup')
+    expect((savedAutomation.steps![0] as Step).id).toMatch(/^create-worktree-/)
+    expect((savedAutomation.steps![1] as Step).id).toMatch(/^wait-for-setup-/)
   })
 })
 
-describe('ChainEditorModal — step picker gating', () => {
-  // Why: ChainEditorModal reads settings.experimentalGroupedWorkspaces from the
-  // store to decide whether to surface the `create-workspace-group` kind. Each
-  // test mutates the live store and restores it afterward.
-  let originalSettings: GlobalSettings | null
-
+describe('ChainEditorModal — step picker', () => {
   beforeEach(() => {
-    // Why: prior describe block may leave the modal mounted in the shared
-    // jsdom document; cleanup() before each render keeps queries unambiguous.
     cleanup()
-    originalSettings = useAppStore.getState().settings
   })
 
   afterEach(() => {
     cleanup()
-    useAppStore.setState({ settings: originalSettings })
   })
 
-  it('hides the Create workspace group option when the flag is off', async () => {
+  it('shows the Create workspace group option in the step picker', async () => {
     const user = userEvent.setup()
-    useAppStore.setState({
-      settings: { experimentalGroupedWorkspaces: false } as GlobalSettings
-    })
-    render(
-      <ChainEditorModal
-        open={true}
-        automation={null}
-        repos={REPOS}
-        reviewCommands={REVIEW_COMMANDS}
-        createPrCommands={CREATE_PR_COMMANDS}
-        onClose={vi.fn()}
-        onSave={vi.fn()}
-      />
-    )
-    await user.click(screen.getByRole('button', { name: 'Add step' }))
-    expect(screen.queryByRole('menuitem', { name: 'Create workspace group' })).toBeNull()
-    expect(screen.getByRole('menuitem', { name: 'Create worktree' })).toBeTruthy()
-  })
-
-  it('shows the Create workspace group option when the flag is on', async () => {
-    const user = userEvent.setup()
-    useAppStore.setState({
-      settings: { experimentalGroupedWorkspaces: true } as GlobalSettings
-    })
     render(
       <ChainEditorModal
         open={true}

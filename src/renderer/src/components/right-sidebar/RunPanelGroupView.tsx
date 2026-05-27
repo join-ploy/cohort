@@ -182,19 +182,17 @@ export function RunPanelGroupView({
       </div>
       {activeMember ? (
         <>
-          {/* Why: the per-member status row used to render even when the
-              member was idle, which produced a duplicate "never run" line
-              right below the group-atomic header. Only show this row when
-              the active member's state carries info beyond what the
-              group-atomic line already conveys (i.e. an exit code that the
-              aggregated summary smooths over). */}
-          {activeMember.runState && activeMember.runState.status !== 'idle' && (
-            <div className="flex h-7 items-center border-b border-border px-3">
-              <span className="truncate text-[11px] text-muted-foreground">
-                {memberStatusLabel(activeMember.runState)}
-              </span>
-            </div>
-          )}
+          {/* Only show the per-member row when it carries info the
+              group-atomic header doesn't — i.e. a specific exit code. */}
+          {activeMember.runState &&
+            activeMember.runState.status !== 'idle' &&
+            activeMember.runState.status !== 'running' && (
+              <div className="flex h-7 items-center border-b border-border px-3">
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {memberStatusLabel(activeMember.runState)}
+                </span>
+              </div>
+            )}
           <RunGroupTerminalArea
             ptyId={activeMember.runState?.ptyId ?? null}
             runScript={activeMember.runScript}

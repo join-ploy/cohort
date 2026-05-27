@@ -10,6 +10,7 @@ import type {
   Automation,
   AutomationRun,
   AutomationRunStatus,
+  CollectCiResultsConfig,
   Condition,
   ConditionOp,
   CreateWorkspaceGroupConfig,
@@ -480,7 +481,8 @@ const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'wait-for-setup': 'Wait for setup',
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
-  'update-linear-issue': 'Update Linear issue'
+  'update-linear-issue': 'Update Linear issue',
+  'collect-ci-results': 'Collect CI results'
 }
 
 function firstNonEmptyLine(value: string): string {
@@ -547,6 +549,14 @@ function describeStepConfig(step: Step): string {
         return 'No updates configured'
       }
       return `Set ${parts.join(' + ')}`
+    }
+    case 'collect-ci-results': {
+      const config = step.config as CollectCiResultsConfig
+      const parts: string[] = ['CI checks']
+      if (config.includeComments) {
+        parts.push('comments')
+      }
+      return `Collect ${parts.join(' + ')}`
     }
   }
 }
@@ -631,15 +641,12 @@ function StepRunRow({
   step: StepRunState
   onRetry?: () => void
 }): React.JSX.Element {
-  // Why: retry is only meaningful for terminal states. A `running` or
-  // `pending` step is the active edge of the chain; retrying it would race
-  // the in-flight tick. `succeeded`/`skipped` are valid retry targets too —
-  // operators sometimes want to re-run a successful step against fresh state.
-  const canRetry =
-    onRetry !== undefined &&
-    step.status !== 'running' &&
-    step.status !== 'pending' &&
-    step.status !== 'waiting'
+  // Why: retry is only meaningful for terminal or stuck-waiting states. A
+  // `running` or `pending` step is the active edge of the chain; retrying it
+  // would race the in-flight tick. `waiting` is allowed because a step can
+  // get stuck waiting on external state that has since resolved (e.g. a
+  // collect-ci-results step whose PR linkage wasn't visible to the runner).
+  const canRetry = onRetry !== undefined && step.status !== 'running' && step.status !== 'pending'
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-1">

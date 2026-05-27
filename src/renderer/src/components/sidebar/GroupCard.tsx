@@ -23,6 +23,7 @@ import {
   Bot,
   CircleCheck,
   CircleX,
+  Copy,
   FolderOpen,
   LoaderCircle,
   MessageSquare,
@@ -143,6 +144,34 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
     setMenuOpen(false)
     void updateWorkspaceGroup(group.id, { isPinned: !group.isPinned })
   }, [group.id, group.isPinned, updateWorkspaceGroup])
+
+  const memberPrUrls = useAppStore(
+    useShallow((s) => {
+      const urls: string[] = []
+      for (const member of members) {
+        const repo = repoMap.get(member.repoId)
+        if (!repo) {
+          continue
+        }
+        const branch = branchDisplayName(member.branch)
+        if (!branch) {
+          continue
+        }
+        const entry = s.prCache[`${repo.path}::${branch}`]
+        if (entry?.data?.url) {
+          urls.push(entry.data.url)
+        }
+      }
+      return urls
+    })
+  )
+
+  const handleCopyPrLinks = useCallback(() => {
+    setMenuOpen(false)
+    if (memberPrUrls.length > 0) {
+      window.api.ui.writeClipboardText(memberPrUrls.join('\n'))
+    }
+  }, [memberPrUrls])
 
   const handleOpenInFinder = useCallback(() => {
     setMenuOpen(false)
@@ -307,6 +336,12 @@ const GroupCard = React.memo(function GroupCard({ group, isActive = false }: Gro
             <FolderOpen className="size-3.5" />
             Open in Finder
           </DropdownMenuItem>
+          {memberPrUrls.length > 0 && (
+            <DropdownMenuItem onSelect={handleCopyPrLinks} data-testid="group-card-copy-pr-links">
+              <Copy className="size-3.5" />
+              Copy PR {memberPrUrls.length === 1 ? 'Link' : 'Links'}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={handleTogglePin} data-testid="group-card-pin-action">
             {group.isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}

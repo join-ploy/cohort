@@ -69,10 +69,6 @@ function ComposerModalBody({
   onClose: () => void
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
-  // Why: grouped-workspace composer is gated behind the experimental flag.
-  // When off, the toggle is hidden entirely so the modal behaves exactly as
-  // the pre-flag single-repo flow.
-  const groupedEnabled = useAppStore((s) => s.settings?.experimentalGroupedWorkspaces === true)
   const [mode, setMode] = useState<ComposerMode>('single')
 
   return (
@@ -96,20 +92,18 @@ function ComposerModalBody({
           <DialogTitle className="text-base font-semibold">Create Workspace</DialogTitle>
         </DialogHeader>
 
-        {groupedEnabled ? (
-          <Tabs
-            value={mode}
-            onValueChange={(value) => setMode(value as ComposerMode)}
-            className="gap-0"
-          >
-            <TabsList className="w-full">
-              <TabsTrigger value="single">Single repo</TabsTrigger>
-              <TabsTrigger value="group">Group of repos</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        ) : null}
+        <Tabs
+          value={mode}
+          onValueChange={(value) => setMode(value as ComposerMode)}
+          className="gap-0"
+        >
+          <TabsList className="w-full">
+            <TabsTrigger value="single">Single repo</TabsTrigger>
+            <TabsTrigger value="group">Group of repos</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-        {mode === 'group' && groupedEnabled ? (
+        {mode === 'group' ? (
           <GroupedComposerForm onCancel={onClose} onCreated={onClose} />
         ) : (
           <QuickTabBody modalData={modalData} onClose={onClose} active />

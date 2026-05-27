@@ -32,12 +32,6 @@ export function ArchivedSection(): React.JSX.Element | null {
   const archived = useAppStore(useShallow(getArchivedWorktrees))
   const restoreWorktree = useAppStore((s) => s.restoreWorktree)
   const openModal = useAppStore((s) => s.openModal)
-  // Why: gate archived-group rows behind the experimental flag. Optional
-  // chain mirrors the sidebar entry-point read in components/sidebar/index.tsx —
-  // settings can be null during the initial bootstrap.
-  const groupedWorkspacesEnabled = useAppStore(
-    (s) => s.settings?.experimentalGroupedWorkspaces === true
-  )
   const workspaceGroups = useWorkspaceGroups()
   const [open, setOpen] = useState(false)
 
@@ -50,15 +44,13 @@ export function ArchivedSection(): React.JSX.Element | null {
       archivedAt: wt.archivedAt ?? 0,
       worktree: wt
     }))
-    if (groupedWorkspacesEnabled) {
-      for (const g of workspaceGroups) {
-        if (g.isArchived) {
-          rows.push({ kind: 'group', archivedAt: g.archivedAt ?? 0, group: g })
-        }
+    for (const g of workspaceGroups) {
+      if (g.isArchived) {
+        rows.push({ kind: 'group', archivedAt: g.archivedAt ?? 0, group: g })
       }
     }
     return rows.sort((a, b) => b.archivedAt - a.archivedAt)
-  }, [archived, workspaceGroups, groupedWorkspacesEnabled])
+  }, [archived, workspaceGroups])
 
   if (sorted.length === 0) {
     return null

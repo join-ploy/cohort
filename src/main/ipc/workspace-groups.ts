@@ -240,7 +240,7 @@ export async function createWorkspaceGroup(
       ? { createdByAutomationRunId: args.createdByAutomationRunId }
       : {}),
     linkedIssue: null,
-    linkedLinearIssue: null
+    linkedLinearIssue: args.linkedLinearIssue ?? null
   }
   store.setWorkspaceGroup(group)
 
@@ -248,7 +248,10 @@ export async function createWorkspaceGroup(
   // state (pin, archive, activity) resolves through the group going
   // forward — see WorktreeMeta.groupId.
   for (const worktree of memberWorktrees) {
-    store.setWorktreeMeta(worktree.id, { groupId })
+    store.setWorktreeMeta(worktree.id, {
+      groupId,
+      ...(group.linkedLinearIssue ? { linkedLinearIssue: group.linkedLinearIssue } : {})
+    })
   }
 
   if (firstConnectionId === null) {

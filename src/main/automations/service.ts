@@ -35,7 +35,10 @@ import {
   type CreateWorkspaceGroupDeps
 } from './runners/create-workspace-group-runner'
 import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
+import { CollectCiResultsRunner } from './runners/collect-ci-results-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
+import { getPRChecks, getPRComments, getPRForBranch } from '../github/client'
+import { gitExecFileAsync } from '../github/gh-utils'
 import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
 import { hasPromptTargetChangesFromMain } from './prompt-target-main-changes'
@@ -169,6 +172,7 @@ export class AutomationService {
   private readonly createWorktreeRunner: CreateWorktreeRunner
   private readonly createWorkspaceGroupRunner: CreateWorkspaceGroupRunner
   private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
+  private readonly collectCiResultsRunner: CollectCiResultsRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -375,6 +379,52 @@ export class AutomationService {
       // shape lets tests stub without touching the Linear SDK; production
       // wiring uses the module-level singleton client managed in linear/client.
       updateIssue: (id, updates) => linearUpdateIssue(id, updates)
+    })
+
+    this.collectCiResultsRunner = new CollectCiResultsRunner({
+      getWorktreeMeta: (worktreeId) => {
+        const meta = this.store.getWorktreeMeta(worktreeId)
+        if (!meta) {
+          return undefined
+        }
+        const parsed = splitWorktreeId(worktreeId)
+        const repo = parsed ? this.store.getRepo(parsed.repoId) : null
+        return {
+          linkedPR: meta.linkedPR,
+          path: parsed?.worktreePath ?? worktreeId,
+          repoPath: repo?.path ?? ''
+        }
+      },
+      getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
+      hasChangesFromMain: async (worktreeId, path, connectionId) => {
+        const result = await hasPromptTargetChangesFromMain([{ worktreeId, path, connectionId }])
+        return result.hasChanges
+      },
+      getPRChecks: (repoPath, prNumber) => getPRChecks(repoPath, prNumber),
+      getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
+      getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
+      getConnectionId: (repoId) => this.store.getRepo(repoId)?.connectionId ?? null,
+      resolveLinkedPR: async (worktreePath, repoPath) => {
+        try {
+          const { stdout } = await gitExecFileAsync(['branch', '--show-current'], {
+            cwd: worktreePath
+          })
+          const branch = stdout.trim()
+          if (!branch) {
+            return null
+          }
+          const ghCache = this.store.getGitHubCache()
+          const cached = ghCache.pr[`${repoPath}::${branch}`]
+          if (cached?.data?.number != null) {
+            return cached.data.number
+          }
+          const pr = await getPRForBranch(repoPath, branch)
+          return pr?.number ?? null
+        } catch {
+          return null
+        }
+      },
+      now: () => Date.now()
     })
 
     this.chainExecutor = new ChainExecutor({
@@ -618,6 +668,9 @@ export class AutomationService {
     if (kind === 'update-linear-issue') {
       return this.updateLinearIssueRunner
     }
+    if (kind === 'collect-ci-results') {
+      return this.collectCiResultsRunner
+    }
     return undefined
   }
 
@@ -842,7 +895,8 @@ export class AutomationService {
       this.runCommandRunner,
       this.createWorktreeRunner,
       this.createWorkspaceGroupRunner,
-      this.updateLinearIssueRunner
+      this.updateLinearIssueRunner,
+      this.collectCiResultsRunner
     ]
   }
 

@@ -30,7 +30,7 @@ import {
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../../../shared/agent-status-types'
 import { getRepoKindLabel, isFolderRepo } from '../../../../shared/repo-kind'
-import type { Worktree, Repo, PRInfo, IssueInfo } from '../../../../shared/types'
+import type { Worktree, Repo, PRInfo, IssueInfo, LinearIssue } from '../../../../shared/types'
 import {
   branchDisplayName,
   checksLabel,
@@ -46,7 +46,7 @@ import {
 // surfaces (palette, jump-search) where 5min staleness is fine — only the
 // sidebar needed the more reactive cadence.
 const SIDEBAR_PR_REFRESH_INTERVAL_MS = 60_000
-import { IssueSection, PrSection, CommentSection } from './WorktreeCardMeta'
+import { IssueSection, LinearIssueSection, PrSection, CommentSection } from './WorktreeCardMeta'
 import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 import {
   selectLivePtyIdsForWorktree,
@@ -83,6 +83,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
   const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
   const fetchIssue = useAppStore((s) => s.fetchIssue)
+  const fetchLinearIssue = useAppStore((s) => s.fetchLinearIssue)
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
   const handleEditIssue = useCallback(
     (e: React.MouseEvent) => {
@@ -212,6 +213,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
   // Subscribe to ONLY the specific cache entry, not entire prCache/issueCache
   const prEntry = useAppStore((s) => (prCacheKey ? s.prCache[prCacheKey] : undefined))
   const issueEntry = useAppStore((s) => (issueCacheKey ? s.issueCache[issueCacheKey] : undefined))
+
+  const linearIdentifier = worktree.linkedLinearIssue
+  const linearEntry = useAppStore((s) =>
+    linearIdentifier ? s.linearIssueCache[linearIdentifier] : undefined
+  )
+  const linearIssue: LinearIssue | null | undefined = linearEntry?.data
 
   const pr: PRInfo | null | undefined = prEntry !== undefined ? prEntry.data : undefined
   const issue: IssueInfo | null | undefined = worktree.linkedIssue
@@ -402,6 +409,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
     return () => clearInterval(interval)
   }, [repo, isFolder, worktree.linkedIssue, fetchIssue, issueCacheKey, showIssue])
+
+  useEffect(() => {
+    if (!linearIdentifier) {
+      return
+    }
+    void fetchLinearIssue(linearIdentifier)
+  }, [linearIdentifier, fetchLinearIssue])
 
   // Stable click handler – ignore clicks that are really text selections.
   const handleClick = useCallback(
@@ -767,11 +781,21 @@ const WorktreeCard = React.memo(function WorktreeCard({
              Layout coupling: spacing here is used to derive size estimates in
              WorktreeList's estimateSize. Update that function if changing spacing. */}
           {((cardProps.includes('issue') && issueDisplay) ||
+            linearIdentifier ||
             (cardProps.includes('pr') && prDisplay) ||
             (cardProps.includes('comment') && worktree.comment)) && (
             <div className="flex flex-col gap-[3px] mt-0.5">
               {cardProps.includes('issue') && issueDisplay && (
                 <IssueSection issue={issueDisplay} onClick={handleEditIssue} />
+              )}
+              {linearIdentifier && (
+                <LinearIssueSection
+                  identifier={linearIssue?.identifier ?? linearIdentifier}
+                  title={linearIssue?.title}
+                  url={linearIssue?.url ?? null}
+                  stateColor={linearIssue?.state?.color ?? null}
+                  stateName={linearIssue?.state?.name ?? null}
+                />
               )}
               {cardProps.includes('pr') && prDisplay && (
                 <PrSection

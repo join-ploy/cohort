@@ -10,6 +10,7 @@ import type {
   WaitForSetupConfig,
   RunPromptConfig,
   RunCommandConfig,
+  CollectCiResultsConfig,
   UpdateLinearIssueConfig
 } from '../../../shared/automations-types'
 
@@ -276,6 +277,13 @@ export function walkStepConfigStrings(
       }
       break
     }
+    case 'collect-ci-results': {
+      const c = config as CollectCiResultsConfig
+      if (typeof c.worktreeRef === 'string') {
+        visit('worktreeRef', c.worktreeRef)
+      }
+      break
+    }
   }
 }
 
@@ -347,6 +355,13 @@ function rewriteConfigStrings(
         issueRef: typeof c.issueRef === 'string' ? transform(c.issueRef) : c.issueRef,
         assigneeRef: typeof c.assigneeRef === 'string' ? transform(c.assigneeRef) : c.assigneeRef,
         stateRef: typeof c.stateRef === 'string' ? transform(c.stateRef) : c.stateRef
+      }
+    }
+    case 'collect-ci-results': {
+      const c = config as CollectCiResultsConfig
+      return {
+        ...c,
+        worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef
       }
     }
   }

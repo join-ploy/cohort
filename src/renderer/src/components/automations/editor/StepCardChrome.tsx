@@ -1,5 +1,6 @@
 import * as React from 'react'
 import {
+  CircleCheckBig,
   FolderGit2,
   FolderTree,
   Hourglass,
@@ -41,7 +42,8 @@ const KIND_META: Record<
   'wait-for-setup': { label: 'Wait for setup', icon: Hourglass },
   'run-prompt': { label: 'Run prompt', icon: Sparkles },
   'run-command': { label: 'Run command', icon: TerminalSquare },
-  'update-linear-issue': { label: 'Update Linear issue', icon: Ticket }
+  'update-linear-issue': { label: 'Update Linear issue', icon: Ticket },
+  'collect-ci-results': { label: 'Collect CI results', icon: CircleCheckBig }
 }
 
 /**
