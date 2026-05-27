@@ -1042,17 +1042,6 @@ function App(): React.JSX.Element {
     </Tooltip>
   ) : null
 
-  useEffect(() => {
-    if (
-      (activeView === 'tasks' || activeView === 'activity' || activeView === 'automations') &&
-      rightSidebarOpen
-    ) {
-      // Why: hide the right sidebar immediately when entering full-page
-      // navigation views so previous side-panel state cannot occlude them.
-      actions.setRightSidebarOpen(false)
-    }
-  }, [activeView, rightSidebarOpen, actions])
-
   return (
     <div
       className="flex flex-col h-screen w-screen overflow-hidden"
