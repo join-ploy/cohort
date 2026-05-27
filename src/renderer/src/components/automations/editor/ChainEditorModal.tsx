@@ -221,7 +221,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
       // create-worktree / create-workspace-group step in the chain, prefill
       // the ref with that step's output. Saves the user from retyping the
       // same {{steps.<id>.worktreeId}} / {{steps.<id>.groupId}} template
-      // every time they add a run-prompt / wait-for-setup / run-command.
+      // every time they add a run-prompt / wait-for-setup step.
       if ('worktreeRef' in config && (config as { worktreeRef: string }).worktreeRef === '') {
         const ref = pickDefaultWorktreeRef(current.steps)
         if (ref) {

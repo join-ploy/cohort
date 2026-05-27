@@ -47,7 +47,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
 // groups "creation" kinds together visually. `update-linear-issue` slots next
-// to `run-prompt` / `run-command` — it's an effect step, not a creation step.
+// to `run-prompt` — it's an effect step, not a creation step. `run-command`
+// remains renderable for legacy chains but is no longer addable from the editor.
 // ChainEditorModal filters this list down by removing `create-workspace-group`
 // when settings.experimentalGroupedWorkspaces is false.
 export const STEP_KIND_ORDER: StepKind[] = [
@@ -55,7 +56,6 @@ export const STEP_KIND_ORDER: StepKind[] = [
   'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
-  'run-command',
   'update-linear-issue'
 ]
 

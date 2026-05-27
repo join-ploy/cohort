@@ -7,6 +7,7 @@ import type {
 import type { Repo } from '../../../../../shared/types'
 import type { ChainDraft } from '../../../lib/chain-editor-state'
 import {
+  STEP_KIND_ORDER,
   chainHasStep,
   chainReferencesAutomationProjectId,
   computeAllErrors,
@@ -50,6 +51,14 @@ function makeGroupStep(id: string, repoIds: string[]): Step {
     timeoutSeconds: null
   }
 }
+
+describe('STEP_KIND_ORDER', () => {
+  it('keeps run-command out of the add-step palette', () => {
+    // Why: run-command is still renderable for legacy chains, but new chains
+    // should use run-prompt with stored prompt/agent presets instead.
+    expect(STEP_KIND_ORDER).not.toContain('run-command')
+  })
+})
 
 describe('getAvailableVariablesAtStep — group namespace', () => {
   it('omits group when no create-workspace-group step exists earlier', () => {
