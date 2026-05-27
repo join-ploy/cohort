@@ -75,6 +75,8 @@ const AVAILABLE_TRIGGER_SOURCES: { id: TriggerSourceId; label: string }[] = [
   { id: 'linear-issue', label: 'Linear issue' }
 ]
 
+const STEP_CARD_WIDTH_CLASS = 'w-[min(calc(100vw-5rem),40rem)]'
+
 export type ChainEditorModalProps = {
   open: boolean
   automation: Automation | null
@@ -453,8 +455,16 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         onCancel={() => setTriggersModalOpen(false)}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4"
+        style={{
+          backgroundColor: 'var(--background)',
+          backgroundImage:
+            'linear-gradient(color-mix(in srgb, var(--border) 18%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--border) 18%, transparent) 1px, transparent 1px)',
+          backgroundSize: '24px 24px'
+        }}
+      >
+        <div className="mx-auto flex w-full max-w-7xl flex-col">
           {draft.steps.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
               No steps yet. Click &ldquo;Add step&rdquo; to start your chain.
@@ -476,14 +486,10 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                       <ParallelGroupContainer groupId={groupId}>
                         {item.map((step, innerIndex) => {
                           const flatIndex = computeFlatIndex(draft.steps, topIndex, innerIndex)
-                          const singleCard = item.length === 1
                           return (
                             <div
                               key={step.id}
-                              className={cn(
-                                'relative w-full shrink-0',
-                                singleCard && 'mx-auto max-w-3xl'
-                              )}
+                              className={cn('relative shrink-0', STEP_CARD_WIDTH_CLASS)}
                             >
                               {item.length > 1 && (
                                 <button
@@ -518,15 +524,17 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                             </div>
                           )
                         })}
-                        <AddParallelButton
-                          open={parallelAddOpen === topIndex}
-                          kinds={availableStepKinds}
-                          droppableId={`parallel-drop-${topIndex}`}
-                          onToggle={() =>
-                            setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
-                          }
-                          onPick={(kind) => addParallelStep(topIndex, kind)}
-                        />
+                        <div className="absolute bottom-0 left-full top-0 ml-2 flex">
+                          <AddParallelButton
+                            open={parallelAddOpen === topIndex}
+                            kinds={availableStepKinds}
+                            droppableId={`parallel-drop-${topIndex}`}
+                            onToggle={() =>
+                              setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
+                            }
+                            onPick={(kind) => addParallelStep(topIndex, kind)}
+                          />
+                        </div>
                       </ParallelGroupContainer>
                     </div>
                   )
@@ -535,8 +543,8 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                 return (
                   <div key={item.id}>
                     {topIndex > 0 && <StepConnector />}
-                    <div className="flex items-stretch gap-2">
-                      <div className="flex-1">
+                    <div className="flex justify-center">
+                      <div className={cn('relative', STEP_CARD_WIDTH_CLASS)}>
                         <ChainEditorStepCardRouter
                           step={item}
                           index={flatIndex}
@@ -550,16 +558,18 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                           onTimeoutChange={(val) => updateStep(item.id, { timeoutSeconds: val })}
                           onDelete={() => deleteStep(item.id)}
                         />
+                        <div className="absolute bottom-0 left-full top-0 ml-2 flex">
+                          <AddParallelButton
+                            open={parallelAddOpen === topIndex}
+                            kinds={availableStepKinds}
+                            droppableId={`parallel-drop-${topIndex}`}
+                            onToggle={() =>
+                              setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
+                            }
+                            onPick={(kind) => addParallelStep(topIndex, kind)}
+                          />
+                        </div>
                       </div>
-                      <AddParallelButton
-                        open={parallelAddOpen === topIndex}
-                        kinds={availableStepKinds}
-                        droppableId={`parallel-drop-${topIndex}`}
-                        onToggle={() =>
-                          setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
-                        }
-                        onPick={(kind) => addParallelStep(topIndex, kind)}
-                      />
                     </div>
                   </div>
                 )
@@ -728,8 +738,8 @@ function computeFlatIndex(steps: StepOrGroup[], topIndex: number, innerIndex: nu
 
 function StepConnector(): React.JSX.Element {
   return (
-    <div className="flex justify-center py-1">
-      <div className="h-4 w-px bg-border" />
+    <div className="-my-px flex justify-center">
+      <div className="h-6 w-px bg-border" />
     </div>
   )
 }
@@ -763,21 +773,21 @@ function ParallelGroupContainer({
   }
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="flex items-stretch gap-2">
-        <button
-          ref={setActivatorNodeRef}
-          type="button"
-          aria-label="Reorder group"
-          {...listeners}
-          className={cn(
-            'flex shrink-0 items-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
-            isDragging ? 'cursor-grabbing' : 'cursor-grab'
-          )}
-        >
-          <GripVertical className="size-4" />
-        </button>
-        <div className="mx-auto min-w-0 flex-1 overflow-x-auto pb-2 md:w-[min(100vw-8rem,72rem)] md:max-w-[calc(100vw-8rem)] md:flex-none">
-          <div className="flex w-full items-stretch gap-2">{children}</div>
+      <div className="relative left-1/2 w-screen -translate-x-1/2 overflow-x-auto px-12 pb-2 pt-3">
+        <div className="mx-auto flex w-max items-stretch gap-2">
+          <div className="relative flex items-stretch gap-2">{children}</div>
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            aria-label="Reorder group"
+            {...listeners}
+            className={cn(
+              'absolute bottom-0 left-2 top-0 z-10 flex items-center rounded bg-background/80 text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
+              isDragging ? 'cursor-grabbing' : 'cursor-grab'
+            )}
+          >
+            <GripVertical className="size-4" />
+          </button>
         </div>
       </div>
     </div>
