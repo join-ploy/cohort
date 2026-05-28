@@ -44,6 +44,7 @@ import {
   TERMINAL_RENDERING_SEARCH_ENTRIES,
   TERMINAL_SETUP_SCRIPT_SEARCH_ENTRIES,
   TERMINAL_TYPOGRAPHY_SEARCH_ENTRIES,
+  TERMINAL_UNIX_SHELL_SEARCH_ENTRY,
   TERMINAL_WINDOW_SEARCH_ENTRIES
 } from './terminal-search'
 import {
@@ -166,6 +167,32 @@ export function TerminalPane({
           </div>
           <p className="text-xs text-muted-foreground">
             Shell used when opening a new terminal pane. Takes effect for new terminals.
+          </p>
+        </SearchableSetting>
+      </section>
+    ) : null,
+    !isWindows && matchesSettingsSearch(searchQuery, TERMINAL_UNIX_SHELL_SEARCH_ENTRY) ? (
+      <section key="unix-shell" className="space-y-4">
+        <SearchableSetting
+          title="Default Shell"
+          description="Choose the default shell for new terminal panes on macOS and Linux."
+          keywords={['terminal', 'shell', 'default', 'fish', 'zsh', 'bash', 'login shell']}
+          className="space-y-2"
+        >
+          <Label>Default Shell</Label>
+          <Input
+            value={settings.terminalUnixShell ?? ''}
+            onChange={(event) => updateSettings({ terminalUnixShell: event.target.value })}
+            placeholder="System default ($SHELL)"
+            className="max-w-xl"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+          <p className="text-xs text-muted-foreground">
+            Absolute path to a shell (e.g. <code>/opt/homebrew/bin/fish</code> — find it with{' '}
+            <code>which fish</code>). Leave empty to use the system default ($SHELL). Takes effect
+            for new terminals.
           </p>
         </SearchableSetting>
       </section>

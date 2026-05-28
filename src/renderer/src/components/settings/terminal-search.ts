@@ -95,6 +95,25 @@ export const TERMINAL_FLOATING_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const TERMINAL_UNIX_SHELL_SEARCH_ENTRY: SettingsSearchEntry[] = [
+  {
+    title: 'Default Shell',
+    description: 'Choose the default shell for new terminal panes on macOS and Linux.',
+    keywords: [
+      'terminal',
+      'shell',
+      'default',
+      'macos',
+      'linux',
+      'fish',
+      'zsh',
+      'bash',
+      'sh',
+      'login shell'
+    ]
+  }
+]
+
 export const TERMINAL_PANE_STYLE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     title: 'Inactive Pane Opacity',

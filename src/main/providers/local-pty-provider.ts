@@ -130,6 +130,10 @@ export type LocalPtyProviderOptions = {
    *  IPC layer inject the persisted setting without coupling the provider to the
    *  settings store. Returns undefined when no preference is set. */
   getWindowsShell?: () => string | undefined
+  /** Why: macOS/Linux default to $SHELL (the account login shell). This lets the
+   *  IPC layer inject the user's persisted shell preference so they can open a
+   *  different shell (e.g. fish) by default. Returns undefined when unset. */
+  getUnixShell?: () => string | undefined
   getWindowsPowerShellImplementation?: () => 'auto' | 'powershell.exe' | 'pwsh.exe' | undefined
   pwshAvailable?: () => boolean
   onSpawned?: (id: string) => void
@@ -212,7 +216,7 @@ export class LocalPtyProvider implements IPtyProvider {
       effectiveCwd = resolved.effectiveCwd
       validationCwd = resolved.validationCwd
     } else {
-      shellPath = args.env?.SHELL || process.env.SHELL || '/bin/zsh'
+      shellPath = this.opts.getUnixShell?.() || args.env?.SHELL || process.env.SHELL || '/bin/zsh'
       shellArgs = ['-l']
       effectiveCwd = cwd
       validationCwd = cwd
@@ -296,6 +300,15 @@ export class LocalPtyProvider implements IPtyProvider {
       logHistoryInjection(worktreeId, historyResult)
     }
 
+    // Why: node-pty captures env at spawn time, so SHELL must reflect the
+    // resolved shell *before* spawning. Otherwise a custom shell (e.g. fish)
+    // runs while $SHELL still reports the account login shell, breaking tools
+    // that re-launch via $SHELL (tmux, vim :shell). The fallback path updates
+    // SHELL itself if the primary shell fails to spawn.
+    if (process.platform !== 'win32') {
+      finalEnv.SHELL = shellPath
+    }
+
     const spawnResult = spawnShellWithFallback({
       shellPath,
       shellArgs,
@@ -313,10 +326,6 @@ export class LocalPtyProvider implements IPtyProvider {
         : undefined
     })
     shellPath = spawnResult.shellPath
-
-    if (process.platform !== 'win32') {
-      finalEnv.SHELL = shellPath
-    }
 
     const proc = spawnResult.process
     ptyProcesses.set(id, proc)
@@ -550,7 +559,7 @@ export class LocalPtyProvider implements IPtyProvider {
     if (process.platform === 'win32') {
       return this.opts.getWindowsShell?.() || process.env.COMSPEC || 'powershell.exe'
     }
-    return process.env.SHELL || '/bin/zsh'
+    return this.opts.getUnixShell?.() || process.env.SHELL || '/bin/zsh'
   }
 
   async getProfiles(): Promise<{ name: string; path: string }[]> {

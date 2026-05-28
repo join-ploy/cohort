@@ -260,6 +260,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // Why: Windows users expect "PowerShell" to mean modern PowerShell when it
     // is installed, with a safe fallback to the inbox Windows PowerShell.
     terminalWindowsPowerShellImplementation: 'auto',
+    // Empty keeps the macOS/Linux login-shell ($SHELL) default.
+    terminalUnixShell: '',
     terminalMouseHideWhileTyping: false,
     // Default false: opt-in only (matches Ghostty's default). Existing users
     // on upgrade inherit this default via persistence.ts's

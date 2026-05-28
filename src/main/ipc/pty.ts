@@ -582,6 +582,7 @@ export function registerPtyHandlers(
     localProvider.configure({
       isHistoryEnabled: () => getSettings?.()?.terminalScopeHistoryByWorktree ?? true,
       getWindowsShell: () => getSettings?.()?.terminalWindowsShell,
+      getUnixShell: () => getSettings?.()?.terminalUnixShell || undefined,
       getWindowsPowerShellImplementation: () =>
         getSettings
           ? (getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')

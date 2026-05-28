@@ -1335,6 +1335,11 @@ export type GlobalSettings = {
   /** Why: "PowerShell" is the product-facing shell family. Auto resolves to
    *  PowerShell 7+ when present and falls back to inbox Windows PowerShell. */
   terminalWindowsPowerShellImplementation: 'auto' | 'powershell.exe' | 'pwsh.exe'
+  /** Why: macOS/Linux terminals default to the login shell ($SHELL), so users
+   *  whose preferred shell (e.g. fish) isn't their account's login shell had no
+   *  way to open it by default. A binary name or absolute path; empty string
+   *  keeps the $SHELL default. Only consulted on macOS/Linux. */
+  terminalUnixShell: string
   terminalFocusFollowsMouse: boolean
   /** Why: mirrors X11 / gnome-terminal "copy on select" UX — making a terminal
    *  selection copies it to the system clipboard automatically, so users can
