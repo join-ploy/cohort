@@ -3,6 +3,31 @@ import type { GitPushTarget } from '../../shared/types'
 import { validateGitPushTarget } from './push-target-validation'
 import { gitExecFileAsync } from './runner'
 
+/**
+ * Check whether `<remote>/<branch>` already exists. Treats any failure
+ * (no match, network down, unknown remote) as "doesn't exist" so the
+ * caller can fall through to a normal push attempt — that push will then
+ * surface a real failure if one exists.
+ *
+ * Used by the push collision-recovery path before the first push of a
+ * locally-generated branch.
+ */
+export async function refExistsOnRemote(
+  worktreePath: string,
+  remote: string,
+  branch: string
+): Promise<boolean> {
+  try {
+    const { stdout } = await gitExecFileAsync(
+      ['ls-remote', '--heads', '--exit-code', remote, branch],
+      { cwd: worktreePath }
+    )
+    return stdout.trim().length > 0
+  } catch {
+    return false
+  }
+}
+
 async function getConfiguredPushTarget(
   worktreePath: string
 ): Promise<{ remote: string; refspec: string } | null> {

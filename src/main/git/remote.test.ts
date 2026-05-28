@@ -8,7 +8,7 @@ vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock
 }))
 
-import { gitFetch, gitPull, gitPush } from './remote'
+import { gitFetch, gitPull, gitPush, refExistsOnRemote } from './remote'
 
 describe('git remote operations', () => {
   beforeEach(() => {
@@ -169,5 +169,30 @@ describe('git remote operations', () => {
     await expect(gitFetch('/repo')).rejects.toThrow(
       'Authentication failed. Check your remote credentials.'
     )
+  })
+
+  it('refExistsOnRemote returns true when ls-remote prints a matching ref', async () => {
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: 'abc123\trefs/heads/wopping_ferret_a1348\n',
+      stderr: ''
+    })
+    await expect(refExistsOnRemote('/repo', 'origin', 'wopping_ferret_a1348')).resolves.toBe(true)
+    expect(gitExecFileAsyncMock).toHaveBeenLastCalledWith(
+      ['ls-remote', '--heads', '--exit-code', 'origin', 'wopping_ferret_a1348'],
+      { cwd: '/repo' }
+    )
+  })
+
+  it('refExistsOnRemote returns false when ls-remote rejects with exit-code semantics', async () => {
+    // Why: git ls-remote --exit-code returns non-zero when no refs match,
+    // which surfaces as a thrown error from gitExecFileAsync. The helper
+    // swallows that and returns false.
+    gitExecFileAsyncMock.mockRejectedValueOnce(Object.assign(new Error('no match'), { code: 2 }))
+    await expect(refExistsOnRemote('/repo', 'origin', 'wopping_ferret_a1348')).resolves.toBe(false)
+  })
+
+  it('refExistsOnRemote returns false when ls-remote fails (network down, unknown remote, etc.)', async () => {
+    gitExecFileAsyncMock.mockRejectedValueOnce(new Error('Could not resolve host'))
+    await expect(refExistsOnRemote('/repo', 'origin', 'wopping_ferret_a1348')).resolves.toBe(false)
   })
 })
