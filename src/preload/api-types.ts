@@ -23,6 +23,7 @@ import type {
   GitPushTarget,
   GitStatusResult,
   GitUpstreamStatus,
+  PushResult,
   GitHubAssignableUser,
   GitHubPRFile,
   GitHubPRFileContents,
@@ -1059,7 +1060,7 @@ export type PreloadApi = {
       publish?: boolean
       connectionId?: string
       pushTarget?: GitPushTarget
-    }) => Promise<void>
+    }) => Promise<PushResult>
     pull: (args: { worktreePath: string; connectionId?: string }) => Promise<void>
     branchDiff: (args: {
       worktreePath: string
@@ -1346,10 +1347,7 @@ export type PreloadApi = {
     runNow: (args: { id: string; payload?: RunNowPayload }) => Promise<AutomationRun>
     cancelRun: (args: { runId: string }) => Promise<AutomationRun | null>
     retryRunFromStep: (args: { runId: string; stepIndex: number }) => Promise<AutomationRun | null>
-    retryParallelStep: (args: {
-      runId: string
-      stepId: string
-    }) => Promise<AutomationRun | null>
+    retryParallelStep: (args: { runId: string; stepId: string }) => Promise<AutomationRun | null>
     restartRun: (args: { runId: string }) => Promise<AutomationRun>
     listAutoDedup: (args?: {
       automationId?: string

@@ -8,6 +8,7 @@ import type {
   GitPushTarget,
   GitUpstreamStatus,
   GitWorktreeInfo,
+  PushResult,
   SearchOptions,
   SearchResult
 } from '../../shared/types'
@@ -149,7 +150,11 @@ export type IGitProvider = {
   detectConflictOperation(worktreePath: string): Promise<GitConflictOperation>
   getBranchCompare(worktreePath: string, baseRef: string): Promise<GitBranchCompareResult>
   getUpstreamStatus(worktreePath: string): Promise<GitUpstreamStatus>
-  pushBranch(worktreePath: string, publish?: boolean, pushTarget?: GitPushTarget): Promise<void>
+  pushBranch(
+    worktreePath: string,
+    publish?: boolean,
+    pushTarget?: GitPushTarget
+  ): Promise<PushResult>
   pullBranch(worktreePath: string): Promise<void>
   fetchRemote(worktreePath: string): Promise<void>
   getBranchDiff(

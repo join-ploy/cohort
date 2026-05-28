@@ -140,10 +140,12 @@ describe('SshGitProvider', () => {
   })
 
   it('pushBranch sends git.push request and forwards publish mode and target', async () => {
-    await provider.pushBranch('/home/user/repo', true, {
+    mux.request.mockResolvedValue({ renamed: null })
+    const result = await provider.pushBranch('/home/user/repo', true, {
       remoteName: 'pr-fork-orca',
       branchName: 'contributor/fix'
     })
+    expect(result).toEqual({ renamed: null })
     expect(mux.request).toHaveBeenCalledWith('git.push', {
       worktreePath: '/home/user/repo',
       publish: true,

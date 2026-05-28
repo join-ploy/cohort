@@ -26,6 +26,7 @@ import type {
   NotificationSoundResult,
   OnboardingState,
   FloatingTerminalCwdRequest,
+  PushResult,
   SearchResult,
   WorkspaceGroup,
   WorktreeBaseStatusEvent,
@@ -845,7 +846,6 @@ const api = {
       return () => ipcRenderer.removeListener('gh:workItemMutated', listener)
     },
 
-
     // Why: rate_limit is exempt from rate-limit accounting, but we still pass
     // `force` through so callers can bust the 30s in-process cache after a
     // known-expensive op (e.g. after ProjectPicker discovery).
@@ -963,7 +963,6 @@ const api = {
     teamMembers: (args: { teamId: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('linear:teamMembers', args)
   },
-
 
   // Why: telemetry uses a loose untyped surface at the preload boundary on
   // purpose — the main-side validator (src/main/telemetry/validator.ts) is
@@ -1754,7 +1753,7 @@ const api = {
       publish?: boolean
       connectionId?: string
       pushTarget?: unknown
-    }): Promise<void> => ipcRenderer.invoke('git:push', args),
+    }): Promise<PushResult> => ipcRenderer.invoke('git:push', args),
     pull: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
       ipcRenderer.invoke('git:pull', args),
     branchDiff: (args: {
@@ -2488,10 +2487,8 @@ const api = {
       ipcRenderer.invoke('automations:cancelRun', args),
     retryRunFromStep: (args: { runId: string; stepIndex: number }): Promise<AutomationRun | null> =>
       ipcRenderer.invoke('automations:retryRunFromStep', args),
-    retryParallelStep: (args: {
-      runId: string
-      stepId: string
-    }): Promise<AutomationRun | null> => ipcRenderer.invoke('automations:retryParallelStep', args),
+    retryParallelStep: (args: { runId: string; stepId: string }): Promise<AutomationRun | null> =>
+      ipcRenderer.invoke('automations:retryParallelStep', args),
     restartRun: (args: { runId: string }): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:restartRun', args),
     listAutoDedup: (args?: {

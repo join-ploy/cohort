@@ -16,9 +16,14 @@ import { commitChangesRelay, addWorktreeOp, removeWorktreeOp } from './git-handl
 import { detectConflictOperation, getStatusOp } from './git-handler-status-ops'
 import { resolveRelayPushTarget } from './git-handler-push-target'
 import { normalizeGitErrorMessage, isNoUpstreamError } from '../shared/git-remote-error'
+import { rerollHashOnBranch } from '../shared/workspace-name-generator'
+import type { PushResult } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 const MAX_GIT_BUFFER = 10 * 1024 * 1024
+// Why: cap re-roll attempts on remote branch-name collisions so a pathological
+// remote can't spin the relay forever. Mirrors src/main/git/remote.ts.
+const MAX_PUSH_RENAME_ATTEMPTS = 3
 const BULK_CHUNK_SIZE = 100
 
 export class GitHandler {
@@ -245,25 +250,132 @@ export class GitHandler {
     }
   }
 
-  private async push(params: Record<string, unknown>) {
+  private async push(params: Record<string, unknown>): Promise<PushResult> {
     const worktreePath = params.worktreePath as string
     // Why: mirror src/main/git/remote.ts. Push to a configured upstream when
     // present so SSH worktrees with non-origin targets do not get repointed.
     void params.publish
     try {
-      const target = await resolveRelayPushTarget(
-        this.git.bind(this),
-        worktreePath,
-        params.pushTarget
-      )
-      const args = target
-        ? ['push', '--set-upstream', target.remote, target.refspec]
-        : ['push', '--set-upstream', 'origin', 'HEAD']
-      await this.git(args, worktreePath)
+      // Explicit pushTarget = caller intent; push directly, no auto-recovery.
+      if (params.pushTarget !== undefined) {
+        const target = await resolveRelayPushTarget(
+          this.git.bind(this),
+          worktreePath,
+          params.pushTarget
+        )
+        const args = target
+          ? ['push', '--set-upstream', target.remote, target.refspec]
+          : ['push', '--set-upstream', 'origin', 'HEAD']
+        await this.git(args, worktreePath)
+        return { renamed: null }
+      }
+      // No explicit target: a configured-upstream branch pushes there directly;
+      // a first-push branch probes the remote and re-rolls its hash suffix on
+      // collision so two org members never clash on the generated name.
+      return await this.pushWithCollisionRecovery(worktreePath)
     } catch (error) {
       // Why: mirror the local gitPush normalization so SSH users see the same
       // "non-fast-forward / pull first" guidance instead of raw git stderr.
       throw new Error(normalizeGitErrorMessage(error, 'push'))
+    }
+  }
+
+  /** Mirror of src/main/git/remote.ts `pushWithCollisionRecovery`, using the
+   *  relay's `this.git` transport. Captures the pre-rename branch once so the
+   *  returned PushResult tells the renderer the final name. */
+  private async pushWithCollisionRecovery(worktreePath: string): Promise<PushResult> {
+    const remote = 'origin'
+    let originalBranch: string | null = null
+    for (let attempt = 0; attempt < MAX_PUSH_RENAME_ATTEMPTS; attempt += 1) {
+      let currentBranch: string | null = null
+      try {
+        const { stdout } = await this.git(
+          ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+          worktreePath
+        )
+        currentBranch = stdout.trim() || null
+      } catch {
+        currentBranch = null
+      }
+      if (!currentBranch) {
+        await this.git(['push', '--set-upstream', remote, 'HEAD'], worktreePath)
+        return { renamed: null }
+      }
+      if (originalBranch === null) {
+        originalBranch = currentBranch
+      }
+      const configured = await this.getConfiguredPushTargetForBranch(worktreePath, currentBranch)
+      if (configured) {
+        await this.git(
+          ['push', '--set-upstream', configured.remote, configured.refspec],
+          worktreePath
+        )
+        return originalBranch !== currentBranch
+          ? { renamed: { from: originalBranch, to: currentBranch } }
+          : { renamed: null }
+      }
+      const collides = await this.refExistsOnRemote(worktreePath, remote, currentBranch)
+      if (!collides) {
+        await this.git(['push', '--set-upstream', remote, 'HEAD'], worktreePath)
+        return originalBranch !== currentBranch
+          ? { renamed: { from: originalBranch, to: currentBranch } }
+          : { renamed: null }
+      }
+      const next = rerollHashOnBranch(currentBranch)
+      await this.git(['branch', '-m', next], worktreePath)
+    }
+    throw new Error(
+      `Failed to push after ${MAX_PUSH_RENAME_ATTEMPTS} rename attempts due to remote collisions. Try renaming the branch manually.`
+    )
+  }
+
+  /** Resolve a branch's configured upstream, or null when none is set. Mirrors
+   *  the local getConfiguredPushTargetForBranch so a configured-upstream branch
+   *  skips the collision probe. */
+  private async getConfiguredPushTargetForBranch(
+    worktreePath: string,
+    branch: string
+  ): Promise<{ remote: string; refspec: string } | null> {
+    try {
+      const { stdout: remoteStdout } = await this.git(
+        ['config', '--get', `branch.${branch}.remote`],
+        worktreePath
+      )
+      const { stdout: mergeStdout } = await this.git(
+        ['config', '--get', `branch.${branch}.merge`],
+        worktreePath
+      )
+      const remote = remoteStdout.trim()
+      const mergeRef = mergeStdout.trim()
+      const branchRef = mergeRef.replace(/^refs\/heads\//, '')
+      if (!remote || !branchRef || remote === '.' || branchRef === mergeRef) {
+        return null
+      }
+      if (remote === 'origin' && branchRef !== branch) {
+        return null
+      }
+      return { remote, refspec: `HEAD:${branchRef}` }
+    } catch {
+      return null
+    }
+  }
+
+  /** True when `<remote>/<branch>` already exists. Any failure (no match,
+   *  network down, unknown remote) is treated as "doesn't exist" so the caller
+   *  falls through to a normal push. Mirrors refExistsOnRemote in remote.ts. */
+  private async refExistsOnRemote(
+    worktreePath: string,
+    remote: string,
+    branch: string
+  ): Promise<boolean> {
+    try {
+      const { stdout } = await this.git(
+        ['ls-remote', '--heads', '--exit-code', remote, branch],
+        worktreePath
+      )
+      return stdout.trim().length > 0
+    } catch {
+      return false
     }
   }
 

@@ -8,7 +8,8 @@ import type {
   GitConflictOperation,
   GitPushTarget,
   GitUpstreamStatus,
-  GitWorktreeInfo
+  GitWorktreeInfo,
+  PushResult
 } from '../../shared/types'
 
 export class SshGitProvider implements IGitProvider {
@@ -95,8 +96,12 @@ export class SshGitProvider implements IGitProvider {
     worktreePath: string,
     publish = false,
     pushTarget?: GitPushTarget
-  ): Promise<void> {
-    await this.mux.request('git.push', { worktreePath, publish, pushTarget })
+  ): Promise<PushResult> {
+    return (await this.mux.request('git.push', {
+      worktreePath,
+      publish,
+      pushTarget
+    })) as PushResult
   }
 
   async pullBranch(worktreePath: string): Promise<void> {

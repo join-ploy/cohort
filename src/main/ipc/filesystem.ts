@@ -14,6 +14,7 @@ import type {
   GitUpstreamStatus,
   GitStatusResult,
   MarkdownDocument,
+  PushResult,
   SearchOptions,
   SearchResult
 } from '../../shared/types'
@@ -616,7 +617,7 @@ export function registerFilesystemHandlers(store: Store): void {
         connectionId?: string
         pushTarget?: GitPushTarget
       }
-    ): Promise<void> => {
+    ): Promise<PushResult> => {
       // Why: coerce to strict boolean at the IPC boundary so a malformed
       // renderer payload (e.g. string 'false') can't silently enable
       // --set-upstream mode. Mirrors the relay handler in src/relay/git-handler.ts.
@@ -635,7 +636,9 @@ export function registerFilesystemHandlers(store: Store): void {
       if (args.pushTarget) {
         await validateGitPushTarget(worktreePath, args.pushTarget)
       }
-      await gitPush(worktreePath, publish, args.pushTarget)
+      // Why: surface the push-time rename (if any) to the renderer so it can
+      // update Worktree.branch and toast the user.
+      return gitPush(worktreePath, publish, args.pushTarget)
     }
   )
 
