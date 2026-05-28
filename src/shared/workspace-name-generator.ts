@@ -191,29 +191,19 @@ export function suggestWorkspaceName(): string {
   return `${pickRandom(ADJECTIVES)}_${pickRandom(NOUNS)}_${pickHashSuffix()}`
 }
 
-/** Generate a name unique across `takenNames`; appends `_2`, `_3`, … on collision. */
+/**
+ * Generate a name unique across `takenNames`. Re-rolls the random hash suffix
+ * on collision. The 60M hash space makes 32 attempts effectively unbounded
+ * in practice; the `Date.now()` fallback is unreachable but kept defensively.
+ */
 export function generateUniqueWorkspaceName(takenNames: ReadonlySet<string>): string {
-  // Why: keep retrying fresh suggestions if the suffix path would overflow
-  // the 16-char budget; numeric suffix is preferred over re-rolling because
-  // it makes the relationship between siblings visible at a glance.
   for (let attempt = 0; attempt < 32; attempt += 1) {
-    const base = suggestWorkspaceName()
-    if (!takenNames.has(base)) {
-      return base
-    }
-    for (let suffix = 2; suffix < 1000; suffix += 1) {
-      const candidate = `${base}_${suffix}`
-      if (candidate.length > 16) {
-        // Suffix would push past the format budget; try a fresh base instead.
-        break
-      }
-      if (!takenNames.has(candidate)) {
-        return candidate
-      }
+    const candidate = suggestWorkspaceName()
+    if (!takenNames.has(candidate)) {
+      return candidate
     }
   }
-  // Pathological fallback: drop the format constraint to guarantee uniqueness.
-  // In practice unreachable — 80 × 80 = 6400 base combinations.
+  // Pathological fallback (unreachable in practice).
   let fallback = `${suggestWorkspaceName()}_${Date.now().toString(36)}`
   while (takenNames.has(fallback)) {
     fallback = `${suggestWorkspaceName()}_${Date.now().toString(36)}`

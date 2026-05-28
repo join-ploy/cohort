@@ -56,22 +56,22 @@ describe('generateUniqueWorkspaceName', () => {
     expect(name).toMatch(WORKSPACE_NAME_PATTERN)
   })
 
-  it('appends _2 when the suggested name is already taken', () => {
-    // Force suggestWorkspaceName to deterministically return the first word
-    // of each list — the generator uses Math.random under the hood.
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const first = suggestWorkspaceName() // e.g. "wise_otter"
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const taken = new Set([first])
-    expect(generateUniqueWorkspaceName(taken)).toBe(`${first}_2`)
+  it('avoids returning a name from the taken set', () => {
+    // Generate a batch and then ban them all. The next attempt should still
+    // succeed by re-rolling a fresh suggestion (60M hash space makes this
+    // probabilistically certain).
+    const taken = new Set<string>()
+    for (let i = 0; i < 20; i += 1) {
+      taken.add(suggestWorkspaceName())
+    }
+    const next = generateUniqueWorkspaceName(taken)
+    expect(taken.has(next)).toBe(false)
+    expect(next).toMatch(WORKSPACE_NAME_PATTERN)
   })
 
-  it('appends _3 when both base and _2 are taken', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const first = suggestWorkspaceName()
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const taken = new Set([first, `${first}_2`])
-    expect(generateUniqueWorkspaceName(taken)).toBe(`${first}_3`)
+  it('does not append _2/_3 numeric suffixes (legacy retry path is removed)', () => {
+    const name = generateUniqueWorkspaceName(new Set())
+    expect(name).not.toMatch(/_\d+$/)
   })
 })
 
