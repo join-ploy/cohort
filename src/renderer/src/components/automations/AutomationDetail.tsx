@@ -86,6 +86,24 @@ export function isRestartable(status: AutomationRunStatus): boolean {
   return RESTARTABLE_STATUSES.has(status)
 }
 
+// Why: a failed/cancelled run can stop after a succeeded step without
+// recording the next step — e.g. the next step's state was lost to a mid-tick
+// restart, or simply never ran. "Continue" resumes the chain from the next
+// un-run step, keeping the succeeded work (vs. Restart, which redoes
+// everything). Gated to runs whose recorded steps are ALL terminal-successes:
+// a recorded failed step is re-run via its own per-step retry button, and a
+// run with nothing recorded belongs to Restart.
+export function canContinueRun(run: AutomationRun, steps: StepOrGroup[]): boolean {
+  if (!isRestartable(run.status)) {
+    return false
+  }
+  const states = run.stepStates
+  if (!states || states.length === 0 || states.length >= countSteps(steps)) {
+    return false
+  }
+  return states.every((s) => s.status === 'succeeded' || s.status === 'skipped')
+}
+
 // Why: run IDs are UUIDs; the first 8 hex chars are enough to disambiguate
 // in the lineage links without bloating the header.
 function shortId(id: string): string {
@@ -462,7 +480,10 @@ function AutoTriggersSummary({
                 </div>
                 <div className="flex items-center gap-2">
                   {trig.enabled && poll ? (
-                    <TriggerPollCountdown lastPollAt={poll.lastPollAt} intervalMs={poll.intervalMs} />
+                    <TriggerPollCountdown
+                      lastPollAt={poll.lastPollAt}
+                      intervalMs={poll.intervalMs}
+                    />
                   ) : null}
                   <Badge variant={trig.enabled ? 'outline' : 'secondary'}>
                     {trig.enabled ? 'Active' : 'Disabled'}
@@ -518,9 +539,7 @@ function TriggerPollCountdown({
 /** Fetches trigger poll status on mount and re-fetches every 5s while any
  *  trigger is enabled — keeps the countdown accurate between main-process
  *  broadcasts. */
-function useTriggerPollStatus(
-  triggers: AutoTrigger[]
-): Map<TriggerSourceId, TriggerPollStatus> {
+function useTriggerPollStatus(triggers: AutoTrigger[]): Map<TriggerSourceId, TriggerPollStatus> {
   const [statuses, setStatuses] = useState<Map<TriggerSourceId, TriggerPollStatus>>(new Map())
   const hasEnabled = triggers.some((t) => t.enabled)
 
@@ -728,7 +747,7 @@ function StepRunRow({
   const statusLine =
     step.statusMessage && countdown != null
       ? `${step.statusMessage} — next check in ${countdown}s`
-      : step.statusMessage ?? null
+      : (step.statusMessage ?? null)
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -1052,6 +1071,7 @@ export function AutomationDetail({
             const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
             const restartChildren = findRestartChildren(run.id, runs)
             const showRestart = isRestartable(run.status) && onRestartRun !== undefined
+            const showContinue = canContinueRun(run, automation.steps ?? [])
             const rowClassName =
               'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
             const rowContent = (
@@ -1082,6 +1102,30 @@ export function AutomationDetail({
                   </Badge>
                 </div>
                 <div className="flex items-center justify-end gap-1">
+                  {showContinue ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Continue run"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // Resume the chain from the next un-run step,
+                            // keeping the already-succeeded steps intact.
+                            onRetryRunFromStep(run, run.stepStates!.length)
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Play className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" sideOffset={6}>
+                        Continue from next step
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   {showRestart ? (
                     <Tooltip>
                       <TooltipTrigger asChild>

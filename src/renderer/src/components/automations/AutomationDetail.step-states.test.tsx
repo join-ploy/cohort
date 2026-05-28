@@ -5,6 +5,7 @@ import type {
   AutomationRun,
   AutomationRunStatus,
   Step,
+  StepOrGroup,
   StepRunState
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
@@ -732,5 +733,138 @@ describe('isRestartable', () => {
     for (const status of nonRestartable) {
       expect(isRestartable(status)).toBe(false)
     }
+  })
+})
+
+describe('canContinueRun', () => {
+  const step = (id: string): Step => ({
+    id,
+    kind: 'run-prompt',
+    config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'x', doneDebounceSeconds: 0 },
+    onFailure: 'halt',
+    timeoutSeconds: null
+  })
+  const state = (stepId: string, status: StepRunState['status']): StepRunState => ({
+    stepId,
+    status,
+    startedAt: 0,
+    finishedAt: 0,
+    output: null,
+    error: status === 'failed' ? 'boom' : null
+  })
+  const threeStep: StepOrGroup[] = [step('a'), step('b'), step('c')]
+  const mk = (status: AutomationRunStatus, stepStates: StepRunState[]): AutomationRun => ({
+    ...chainRun,
+    status,
+    stepStates
+  })
+
+  it('is true for a failed run that stopped after a succeeded step (next step unrecorded)', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    expect(canContinueRun(mk('failed', [state('a', 'succeeded')]), threeStep)).toBe(true)
+  })
+
+  it('is false when every step in the chain is already recorded', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    expect(
+      canContinueRun(
+        mk('failed', [state('a', 'succeeded'), state('b', 'succeeded'), state('c', 'succeeded')]),
+        threeStep
+      )
+    ).toBe(false)
+  })
+
+  it('is false when a recorded step failed (retry that step instead)', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    expect(
+      canContinueRun(mk('failed', [state('a', 'succeeded'), state('b', 'failed')]), threeStep)
+    ).toBe(false)
+  })
+
+  it('is false when no steps were recorded (use Restart)', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    expect(canContinueRun(mk('failed', []), threeStep)).toBe(false)
+  })
+
+  it('is false for non-restartable statuses (completed / running)', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    expect(canContinueRun(mk('completed', [state('a', 'succeeded')]), threeStep)).toBe(false)
+    expect(canContinueRun(mk('running', [state('a', 'succeeded')]), threeStep)).toBe(false)
+  })
+
+  it('counts a parallel group as multiple flat steps', async () => {
+    const { canContinueRun } = await import('./AutomationDetail')
+    // group of 2 + 1 solo = 3 flat steps; both group members recorded as
+    // succeeded, so the next (solo) step is the unrecorded one to continue to.
+    const grouped: StepOrGroup[] = [[step('a'), step('b')], step('c')]
+    expect(
+      canContinueRun(mk('failed', [state('a', 'succeeded'), state('b', 'succeeded')]), grouped)
+    ).toBe(true)
+  })
+})
+
+describe('AutomationDetail Continue button', () => {
+  const step = (id: string): Step => ({
+    id,
+    kind: 'run-prompt',
+    config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'x', doneDebounceSeconds: 0 },
+    onFailure: 'halt',
+    timeoutSeconds: null
+  })
+  const succeeded = (stepId: string): StepRunState => ({
+    stepId,
+    status: 'succeeded',
+    startedAt: 0,
+    finishedAt: 1,
+    output: null,
+    error: null
+  })
+  const automationWithSteps: Automation = {
+    ...baseAutomation,
+    steps: [step('a'), step('b')]
+  } as Automation
+
+  const renderDetail = async (run: AutomationRun): Promise<string> => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    return renderToStaticMarkup(
+      <AutomationDetail
+        automation={automationWithSteps}
+        runs={[run]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        onRetryParallelStep={noop}
+        onRestartRun={noop}
+      />
+    )
+  }
+
+  it('renders a Continue button for a failed run that stopped after a succeeded step', async () => {
+    const markup = await renderDetail({
+      ...chainRun,
+      id: 'r-continue',
+      status: 'failed',
+      stepStates: [succeeded('a')]
+    })
+    expect(markup).toContain('Continue run')
+  })
+
+  it('does not render a Continue button when every step is already recorded', async () => {
+    const markup = await renderDetail({
+      ...chainRun,
+      id: 'r-complete',
+      status: 'failed',
+      stepStates: [succeeded('a'), succeeded('b')]
+    })
+    expect(markup).not.toContain('Continue run')
   })
 })

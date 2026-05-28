@@ -657,6 +657,82 @@ describe('runNow drives chain-shape automations end-to-end', () => {
     expect(persisted?.stepStates).toHaveLength(3)
   })
 
+  it('continues a failed run from the next un-run step, preserving succeeded steps', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Resume chain',
+      prompt: '(ignored)',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2030-01-01T00:00:00').getTime()
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    stored.trigger = { kind: 'manual' }
+    stored.steps = [mkPromptStep('s1'), mkPromptStep('s2')]
+
+    // Seed a failed run where s1 succeeded but s2's state was never recorded —
+    // the disappeared-step scenario the "Continue" button targets.
+    const seeded = store.createAutomationRun(stored, Date.now(), 'manual')
+    seeded.status = 'failed'
+    seeded.context = { automation: { workspaceId: 'wt1', projectId: 'r1' }, trigger: {} }
+    seeded.stepStates = [
+      {
+        stepId: 's1',
+        status: 'succeeded',
+        startedAt: 0,
+        finishedAt: 1,
+        output: { paneKey: 'tab-old:1' },
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(seeded)
+
+    const { ipc, listeners } = makeFakeIpc()
+    const send = vi.fn((channel: string, payload?: { requestId?: string }) => {
+      if (channel !== 'automations:openPromptPane' || !payload?.requestId) {
+        return
+      }
+      listeners.get(`automations:openPromptPane:reply:${payload.requestId}`)?.(
+        {},
+        { ok: true, paneKey: 'tab-new:1' }
+      )
+    })
+    const service = new AutomationService(store, {
+      tickMs: 10,
+      getAgentStatus: () => ({ state: 'done', updatedAt: Date.now() }),
+      getIpcMain: () => ipc as never
+    })
+    service.setWebContents({ isDestroyed: () => false, send } as never)
+    service.setRendererReady()
+
+    // Continue from the next un-run step: stepIndex === recorded step count.
+    service.retryRunFromStep(seeded.id, seeded.stepStates!.length)
+    service.start()
+    try {
+      await vi.waitFor(
+        () => {
+          const r = store.getAutomationRun(seeded.id)
+          expect(r?.status).toBe('completed')
+        },
+        { timeout: 5_000, interval: 25 }
+      )
+    } finally {
+      service.stop()
+    }
+
+    const final = store.getAutomationRun(seeded.id)
+    expect(final?.stepStates).toHaveLength(2)
+    // s1 preserved untouched (same finishedAt), s2 newly run to success.
+    expect(final?.stepStates?.[0]).toMatchObject({ stepId: 's1', status: 'succeeded' })
+    expect(final?.stepStates?.[0].finishedAt).toBe(1)
+    expect(final?.stepStates?.[1]).toMatchObject({ stepId: 's2', status: 'succeeded' })
+  })
+
   it('uses the legacy dispatch path for automations without trigger+steps', async () => {
     const store = await createStore()
     store.addRepo(makeRepo())
