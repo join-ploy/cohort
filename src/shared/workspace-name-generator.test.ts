@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   WORKSPACE_NAME_PATTERN,
   generateUniqueWorkspaceName,
+  rerollHashOnBranch,
   suggestWorkspaceName,
   validateWorkspaceName
 } from './workspace-name-generator'
@@ -106,5 +107,24 @@ describe('validateWorkspaceName', () => {
 
   it('rejects taken names', () => {
     expect(validateWorkspaceName('wise_panther', new Set(['wise_panther']))).toBeTruthy()
+  })
+})
+
+describe('rerollHashOnBranch', () => {
+  it('swaps the trailing 5-char hash with a fresh one', () => {
+    const next = rerollHashOnBranch('wopping_ferret_a1348')
+    expect(next).toMatch(/^wopping_ferret_[a-z0-9]{5}$/)
+    expect(next).not.toBe('wopping_ferret_a1348')
+  })
+
+  it('appends a hash when the input has no trailing hash (pre-hash names)', () => {
+    const next = rerollHashOnBranch('bold_eagle')
+    expect(next).toMatch(/^bold_eagle_[a-z0-9]{5}$/)
+  })
+
+  it('preserves multi-word prefixes when re-rolling', () => {
+    const next = rerollHashOnBranch('legacy_name_with_extras_a1348')
+    expect(next).toMatch(/^legacy_name_with_extras_[a-z0-9]{5}$/)
+    expect(next).not.toBe('legacy_name_with_extras_a1348')
   })
 })

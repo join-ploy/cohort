@@ -211,6 +211,28 @@ export function generateUniqueWorkspaceName(takenNames: ReadonlySet<string>): st
   return fallback
 }
 
+// Why: a hash tail is `_xxxxx` preceded by at least one earlier underscore.
+// Naïve `/_[a-z0-9]{5}$/` would also match 5-char nouns like `_eagle` on
+// pre-hash names (`bold_eagle`), causing us to strip the noun instead of
+// preserving it.
+const HASH_TAIL = /_[a-z0-9]+_[a-z0-9]{5}$/
+
+/**
+ * Swap the trailing 5-char hash suffix with a fresh one. Used by the push
+ * collision-recovery path when a remote branch with the same name already
+ * exists. Falls back to appending a hash for legacy pre-hash names.
+ */
+export function rerollHashOnBranch(branchName: string): string {
+  const base = HASH_TAIL.test(branchName) ? branchName.replace(/_[a-z0-9]{5}$/, '') : branchName
+  let next = `${base}_${pickHashSuffix()}`
+  // Guarantee progress: if the random hash happens to match the original,
+  // re-roll. With 60M combinations this loop terminates after ~1 iteration.
+  while (next === branchName) {
+    next = `${base}_${pickHashSuffix()}`
+  }
+  return next
+}
+
 /** Validation. Returns null if `name` is acceptable, otherwise an error message. */
 export function validateWorkspaceName(
   name: string,
