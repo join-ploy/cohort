@@ -7,11 +7,11 @@ import {
 } from './workspace-name-generator'
 
 describe('WORKSPACE_NAME_PATTERN', () => {
-  it('matches snake_case names starting with a letter and up to 16 chars', () => {
+  it('matches snake_case names starting with a letter and up to 22 chars', () => {
     expect(WORKSPACE_NAME_PATTERN.test('a')).toBe(true)
-    expect(WORKSPACE_NAME_PATTERN.test('wise_panther')).toBe(true)
-    expect(WORKSPACE_NAME_PATTERN.test('wise_panther_99')).toBe(true)
-    expect(WORKSPACE_NAME_PATTERN.test('a234567890123456')).toBe(true) // 16 chars
+    expect(WORKSPACE_NAME_PATTERN.test('wise_panther')).toBe(true) // pre-hash, still valid
+    expect(WORKSPACE_NAME_PATTERN.test('wopping_ferret_a1348')).toBe(true) // hash shape
+    expect(WORKSPACE_NAME_PATTERN.test('a234567890123456789012')).toBe(true) // 22 chars
   })
 
   it('rejects leading digit, uppercase, special chars, and over-length names', () => {
@@ -20,7 +20,7 @@ describe('WORKSPACE_NAME_PATTERN', () => {
     expect(WORKSPACE_NAME_PATTERN.test('Wise')).toBe(false)
     expect(WORKSPACE_NAME_PATTERN.test('wise-panther')).toBe(false)
     expect(WORKSPACE_NAME_PATTERN.test('wise panther')).toBe(false)
-    expect(WORKSPACE_NAME_PATTERN.test('a2345678901234567')).toBe(false) // 17 chars
+    expect(WORKSPACE_NAME_PATTERN.test('a2345678901234567890123')).toBe(false) // 23 chars
   })
 })
 
@@ -36,12 +36,13 @@ describe('suggestWorkspaceName', () => {
     }
   })
 
-  it('uses adjective_noun shape (single underscore)', () => {
+  it('uses adjective_noun_hash shape (two underscores, 5-char base36 tail)', () => {
     const name = suggestWorkspaceName()
     const parts = name.split('_')
-    expect(parts.length).toBe(2)
+    expect(parts.length).toBe(3)
     expect(parts[0].length).toBeGreaterThan(0)
     expect(parts[1].length).toBeGreaterThan(0)
+    expect(parts[2]).toMatch(/^[a-z0-9]{5}$/)
   })
 })
 
@@ -78,7 +79,8 @@ describe('validateWorkspaceName', () => {
   it('returns null for valid names', () => {
     expect(validateWorkspaceName('wise_panther', new Set())).toBeNull()
     expect(validateWorkspaceName('a', new Set())).toBeNull()
-    expect(validateWorkspaceName('a234567890123456', new Set())).toBeNull()
+    expect(validateWorkspaceName('wopping_ferret_a1348', new Set())).toBeNull()
+    expect(validateWorkspaceName('a234567890123456789012', new Set())).toBeNull()
   })
 
   it('rejects empty strings', () => {
@@ -98,8 +100,8 @@ describe('validateWorkspaceName', () => {
     expect(validateWorkspaceName('wise panther', new Set())).toBeTruthy()
   })
 
-  it('rejects names over 16 characters', () => {
-    expect(validateWorkspaceName('a2345678901234567', new Set())).toBeTruthy()
+  it('rejects names over 22 characters', () => {
+    expect(validateWorkspaceName('a2345678901234567890123', new Set())).toBeTruthy()
   })
 
   it('rejects taken names', () => {

@@ -1,6 +1,9 @@
-// Why: short, snake_case, DB- and shell-safe identifier per the design doc.
-// Composes cleanly into Postgres database names and `$VAR` expansions.
-export const WORKSPACE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,15}$/
+import { randomBytes } from 'node:crypto'
+
+// Why: short, snake_case, DB- and shell-safe identifier. Composes cleanly
+// into Postgres database names and `$VAR` expansions. Budget grew from 16
+// to 22 to fit the 5-char hash suffix appended for cross-machine uniqueness.
+export const WORKSPACE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,21}$/
 
 // Curated lists of friendly, short, positive-feeling words (3–7 chars each).
 // Inlined to avoid a runtime dependency; ~5 KB of source.
@@ -166,15 +169,23 @@ const NOUNS: readonly string[] = [
   'zebra'
 ]
 
+// Why: 5-char base36 random tail gives ~60M combinations per adj_noun pair.
+// Combined with 6400 base combos, the chance of two members independently
+// rolling the same full slug is ~1/400B. Uses crypto.randomBytes so tests
+// that mock Math.random don't accidentally make the hash deterministic.
+function pickHashSuffix(): string {
+  return randomBytes(4).readUInt32BE(0).toString(36).padStart(5, '0').slice(0, 5)
+}
+
 function pickRandom<T>(items: readonly T[]): T {
   // Why: Math.floor(Math.random() * len) is the standard uniform pick. We
   // mock Math.random in tests to make collision behavior deterministic.
   return items[Math.floor(Math.random() * items.length)]
 }
 
-/** Generate a fresh adjective_noun suggestion (no collision check). */
+/** Generate a fresh adjective_noun_hash suggestion (no collision check). */
 export function suggestWorkspaceName(): string {
-  return `${pickRandom(ADJECTIVES)}_${pickRandom(NOUNS)}`
+  return `${pickRandom(ADJECTIVES)}_${pickRandom(NOUNS)}_${pickHashSuffix()}`
 }
 
 /** Generate a name unique across `takenNames`; appends `_2`, `_3`, … on collision. */
@@ -216,7 +227,7 @@ export function validateWorkspaceName(
     return 'Workspace name is required.'
   }
   if (!WORKSPACE_NAME_PATTERN.test(name)) {
-    return 'Use lowercase letters, digits, and underscores (max 16 chars, must start with a letter).'
+    return 'Use lowercase letters, digits, and underscores (max 22 chars, must start with a letter).'
   }
   if (takenNames.has(name)) {
     return 'This workspace name is already in use for this repo.'
