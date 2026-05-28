@@ -1,7 +1,10 @@
 import { normalizeGitErrorMessage } from '../../shared/git-remote-error'
-import type { GitPushTarget } from '../../shared/types'
+import type { GitPushTarget, PushResult } from '../../shared/types'
+import { rerollHashOnBranch } from '../../shared/workspace-name-generator'
 import { validateGitPushTarget } from './push-target-validation'
 import { gitExecFileAsync } from './runner'
+
+const MAX_PUSH_RENAME_ATTEMPTS = 3
 
 /**
  * Check whether `<remote>/<branch>` already exists. Treats any failure
@@ -28,23 +31,35 @@ export async function refExistsOnRemote(
   }
 }
 
-async function getConfiguredPushTarget(
-  worktreePath: string
+async function getCurrentBranch(worktreePath: string): Promise<string | null> {
+  try {
+    const { stdout } = await gitExecFileAsync(['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+      cwd: worktreePath
+    })
+    const branch = stdout.trim()
+    return branch || null
+  } catch {
+    return null
+  }
+}
+
+async function getConfiguredPushTargetForBranch(
+  worktreePath: string,
+  branch: string
 ): Promise<{ remote: string; refspec: string } | null> {
   try {
-    const { stdout: branchStdout } = await gitExecFileAsync(
-      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+    // Why: probe config.remote first; when no upstream is configured, this
+    // rejects and we fall through without firing the merge lookup. Keeping
+    // the two lookups sequential matches the test expectations and avoids an
+    // unnecessary git call on the common first-push path.
+    const { stdout: remoteStdout } = await gitExecFileAsync(
+      ['config', '--get', `branch.${branch}.remote`],
       { cwd: worktreePath }
     )
-    const branch = branchStdout.trim()
-    if (!branch) {
-      return null
-    }
-
-    const [{ stdout: remoteStdout }, { stdout: mergeStdout }] = await Promise.all([
-      gitExecFileAsync(['config', '--get', `branch.${branch}.remote`], { cwd: worktreePath }),
-      gitExecFileAsync(['config', '--get', `branch.${branch}.merge`], { cwd: worktreePath })
-    ])
+    const { stdout: mergeStdout } = await gitExecFileAsync(
+      ['config', '--get', `branch.${branch}.merge`],
+      { cwd: worktreePath }
+    )
     const remote = remoteStdout.trim()
     const mergeRef = mergeStdout.trim()
     const branchRef = mergeRef.replace(/^refs\/heads\//, '')
@@ -64,35 +79,80 @@ function explicitPushTarget(target: GitPushTarget): { remote: string; refspec: s
   return { remote: target.remoteName, refspec: `HEAD:${target.branchName}` }
 }
 
+async function pushOnce(worktreePath: string, args: string[]): Promise<void> {
+  await gitExecFileAsync(args, { cwd: worktreePath })
+}
+
 export async function gitPush(
   worktreePath: string,
   _publish = false,
   pushTarget?: GitPushTarget
-): Promise<void> {
+): Promise<PushResult> {
   try {
     if (pushTarget) {
       await validateGitPushTarget(worktreePath, pushTarget)
+      const target = explicitPushTarget(pushTarget)
+      await pushOnce(worktreePath, ['push', '--set-upstream', target.remote, target.refspec])
+      return { renamed: null }
     }
-    // Why: push to the branch's configured upstream when one exists. PR-created
-    // worktrees can track a contributor fork remote; hardcoding origin here
-    // would send review commits to the upstream repository instead.
-    //
-    // When no upstream exists, keep the existing first-publish behavior:
-    // create/update origin/<current branch> and set it as upstream.
-    //
-    // Branch-vs-base reporting (the "Committed on Branch" section) is
-    // unaffected because it uses branchCompare against an explicit baseRef
-    // from worktree config, not the upstream relationship.
-    const target = pushTarget
-      ? explicitPushTarget(pushTarget)
-      : await getConfiguredPushTarget(worktreePath)
-    const args = target
-      ? ['push', '--set-upstream', target.remote, target.refspec]
-      : ['push', '--set-upstream', 'origin', 'HEAD']
-    await gitExecFileAsync(args, { cwd: worktreePath })
+
+    // First-push path: probe the remote, re-roll the hash and retry on collision.
+    // Configured-upstream branches short-circuit out of the loop on the first
+    // iteration and skip the ls-remote probe.
+    return await pushWithCollisionRecovery(worktreePath)
   } catch (error) {
     throw new Error(normalizeGitErrorMessage(error, 'push'))
   }
+}
+
+async function pushWithCollisionRecovery(worktreePath: string): Promise<PushResult> {
+  const remote = 'origin'
+  let originalBranch: string | null = null
+
+  for (let attempt = 0; attempt < MAX_PUSH_RENAME_ATTEMPTS; attempt += 1) {
+    const currentBranch = await getCurrentBranch(worktreePath)
+    if (!currentBranch) {
+      // Detached HEAD or other unusual state: fall through to a default push;
+      // git will surface the real error if any.
+      await pushOnce(worktreePath, ['push', '--set-upstream', remote, 'HEAD'])
+      return { renamed: null }
+    }
+    if (originalBranch === null) {
+      originalBranch = currentBranch
+    }
+
+    // Why: PR-created worktrees can track a contributor fork remote; hardcoding
+    // origin would send review commits to the upstream repository instead. A
+    // configured upstream also implies "not a first-push", so we skip the
+    // collision probe entirely on this branch.
+    const configured = await getConfiguredPushTargetForBranch(worktreePath, currentBranch)
+    if (configured) {
+      await pushOnce(worktreePath, [
+        'push',
+        '--set-upstream',
+        configured.remote,
+        configured.refspec
+      ])
+      return originalBranch !== currentBranch
+        ? { renamed: { from: originalBranch, to: currentBranch } }
+        : { renamed: null }
+    }
+
+    const collides = await refExistsOnRemote(worktreePath, remote, currentBranch)
+    if (!collides) {
+      await pushOnce(worktreePath, ['push', '--set-upstream', remote, 'HEAD'])
+      return originalBranch !== currentBranch
+        ? { renamed: { from: originalBranch, to: currentBranch } }
+        : { renamed: null }
+    }
+
+    const next = rerollHashOnBranch(currentBranch)
+    await gitExecFileAsync(['branch', '-m', next], { cwd: worktreePath })
+  }
+
+  throw new Error(
+    `Failed to push after ${MAX_PUSH_RENAME_ATTEMPTS} rename attempts due to remote collisions. Try renaming the branch manually.`
+  )
 }
 
 export async function gitPull(worktreePath: string): Promise<void> {
