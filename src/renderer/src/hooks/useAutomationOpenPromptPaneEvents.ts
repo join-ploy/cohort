@@ -1,34 +1,8 @@
 import { useEffect } from 'react'
 import { launchAgentBackgroundSession } from '@/lib/launch-agent-background-session'
+import { rememberOpenPromptPane } from '@/lib/open-prompt-pane-dedupe'
 import { FIRST_PANE_ID } from '../../../shared/pane-key'
 import type { TuiAgent } from '../../../shared/types'
-
-type OpenPromptPaneReply = { ok: true; paneKey: string } | { ok: false; error: string }
-
-const openPromptPaneByDedupeKey = new Map<string, Promise<OpenPromptPaneReply>>()
-const MAX_DEDUPE_ENTRIES = 500
-
-function rememberOpenPromptPane(
-  key: string,
-  launch: () => Promise<OpenPromptPaneReply>
-): Promise<OpenPromptPaneReply> {
-  const existing = openPromptPaneByDedupeKey.get(key)
-  if (existing) {
-    return existing
-  }
-  // Why: parallel automation ticks can retry or duplicate-deliver the same
-  // run-step open request while an agent immediately flips to waiting. Cache
-  // by stable runId/stepId so the renderer launches at most one pane.
-  const promise = launch()
-  openPromptPaneByDedupeKey.set(key, promise)
-  if (openPromptPaneByDedupeKey.size > MAX_DEDUPE_ENTRIES) {
-    const oldest = openPromptPaneByDedupeKey.keys().next().value
-    if (oldest) {
-      openPromptPaneByDedupeKey.delete(oldest)
-    }
-  }
-  return promise
-}
 
 /**
  * Handle main-process chain-executor requests to open a prompt pane.

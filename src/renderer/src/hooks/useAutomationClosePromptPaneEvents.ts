@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../store'
+import { evictOpenPromptPaneDedupeForPane } from '@/lib/open-prompt-pane-dedupe'
 
 /**
  * Handle main-process chain-executor requests to close a prompt pane it
@@ -11,6 +12,10 @@ import { useAppStore } from '../store'
 export function useAutomationClosePromptPaneEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onClosePromptPane(({ paneKey }) => {
+      // Why: drop the open-pane dedupe entry for this pane first, so a retry of
+      // the same run-step (same ${runId}:${stepId} dedupeKey) launches a fresh
+      // agent instead of being handed this now-closed pane's stale paneKey.
+      evictOpenPromptPaneDedupeForPane(paneKey)
       const tabId = paneKey.split(':', 1)[0]
       if (!tabId) {
         return
