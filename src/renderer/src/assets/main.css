@@ -128,8 +128,8 @@
   /* Why: dedicated chrome tokens for the titlebar and left worktree sidebar so
      theme tweaks here don't bleed into the right sidebar or other panels that
      share the broader `--sidebar` token. */
-  --titlebar-background: #201e1c;
-  --left-sidebar-background: #1b1917;
+  --titlebar-background: #fbfaf8;
+  --left-sidebar-background: #faf8f5;
 }
 
 /* ── Dark Mode ───────────────────────────────────────── */
