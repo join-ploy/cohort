@@ -172,7 +172,9 @@ function App(): React.JSX.Element {
   const [caffeinateActive, setCaffeinateActive] = useState(false)
 
   useEffect(() => {
-    if (!isMac) return
+    if (!isMac) {
+      return
+    }
     void window.api.shell.caffeinateStatus().then(setCaffeinateActive)
   }, [])
 
@@ -1150,19 +1152,26 @@ function App(): React.JSX.Element {
             ) : null}
             <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
               {showSidebar ? (
-                workspaceActive ? (
-                  /* Why: left column wraps the sidebar with a titlebar-height
-                     header above it. The header holds the same controls
-                     (traffic lights, sidebar toggle, "Orca" title, agent badge)
-                     that the full-width titlebar held while the center and right
-                     columns keep their own top strips at the same 36px height.
-                     When the sidebar is collapsed, take this header out of flex
-                     layout so the terminal/editor reclaim the left edge instead of
-                     leaving behind a content-width blank strip. */
-                  <div
-                    className={`flex min-h-0 flex-col shrink-0${sidebarOpen ? '' : ' relative w-0 overflow-visible'}`}
-                  >
+                /* Why: keep Sidebar at the same JSX position regardless of
+                   workspaceActive so React doesn't unmount/remount it (and the
+                   WorktreeList virtualizer) when transitioning between terminal
+                   and full-page views (Tasks/Automations). The remount used to
+                   leave the virtualizer with a stale 0-height scrollRect on
+                   single-repo setups, hiding worktrees under the folder header
+                   until a follow-up render triggered re-measurement. The outer
+                   wrappers use display:contents in non-workspace views so the
+                   layout collapses to "Sidebar as a direct child of the row
+                   flex container" exactly as before. */
+                <div
+                  className={
+                    workspaceActive
+                      ? `flex min-h-0 flex-col shrink-0${sidebarOpen ? '' : ' relative w-0 overflow-visible'}`
+                      : 'contents'
+                  }
+                >
+                  {workspaceActive ? (
                     <div
+                      key="titlebar"
                       // Why: when the sidebar is collapsed, titlebar-left floats
                       // absolutely on top of the center column's own `border-l`
                       // (see TabGroupSplitLayout), occluding that seam. Add a
@@ -1181,18 +1190,20 @@ function App(): React.JSX.Element {
                     >
                       {titlebarLeftControls}
                     </div>
-                    <div className="flex min-h-0 flex-1">
-                      {/* Why: the workspace-view wrapper adds a fixed 36px header
-                          above the sidebar. Without a flex-1/min-h-0 slot here,
-                          the sidebar falls back to its content height, so the
-                          worktree list loses its scroll viewport and the fixed
-                          bottom toolbar (including Add Project) gets pushed offscreen. */}
-                      <Sidebar />
-                    </div>
+                  ) : null}
+                  <div
+                    key="sidebar-slot"
+                    className={workspaceActive ? 'flex min-h-0 flex-1' : 'contents'}
+                  >
+                    {/* Why: in workspace view, this flex-1/min-h-0 slot sits
+                        below the titlebar-left header so the sidebar gets a
+                        full-height column instead of falling back to its
+                        content height (which would push the bottom toolbar
+                        offscreen). In non-workspace views, display:contents
+                        makes this slot transparent to layout. */}
+                    <Sidebar />
                   </div>
-                ) : (
-                  <Sidebar />
-                )
+                </div>
               ) : null}
               <div className="relative flex flex-1 min-w-0 min-h-0 overflow-hidden">
                 {/* Why: in workspace view the right-sidebar toggle now lives
