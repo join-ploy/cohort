@@ -166,6 +166,17 @@ export type GitPushTarget = {
   remoteUrl?: string
 }
 
+/**
+ * Outcome of a `git push` triggered through Orca's push IPC. When the
+ * remote already has a ref with the local branch's name, the main process
+ * re-rolls the hash suffix via `git branch -m` and retries; `renamed`
+ * surfaces that fact to the renderer so it can update the Worktree.branch
+ * field and toast the user.
+ */
+export type PushResult = {
+  renamed: { from: string; to: string } | null
+}
+
 // ─── WorkspaceGroup ─────────────────────────────────────────────────
 /**
  * A workspace that owns N worktrees from N distinct repos, co-located under
