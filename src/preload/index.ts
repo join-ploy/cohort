@@ -1185,6 +1185,16 @@ const api = {
     caffeinateStatus: (): Promise<boolean> => ipcRenderer.invoke('shell:caffeinateStatus')
   },
 
+  externalTool: {
+    run: (args: {
+      tool: 'editor' | 'diff' | 'database'
+      worktreeId: string
+      worktreePath: string
+      repoId: string
+      workspaceName: string
+    }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('externalTool:run', args)
+  },
+
   pet: {
     import: (): Promise<CustomPet | null> => ipcRenderer.invoke('pet:import'),
     importPetBundle: (): Promise<CustomPet | null> => ipcRenderer.invoke('pet:importPetBundle'),

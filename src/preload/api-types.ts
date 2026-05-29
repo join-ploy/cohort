@@ -890,6 +890,15 @@ export type PreloadApi = {
     caffeinateStop: () => Promise<void>
     caffeinateStatus: () => Promise<boolean>
   }
+  externalTool: {
+    run: (args: {
+      tool: 'editor' | 'diff' | 'database'
+      worktreeId: string
+      worktreePath: string
+      repoId: string
+      workspaceName: string
+    }) => Promise<{ ok: boolean; error?: string }>
+  }
   pet: {
     import: () => Promise<CustomPet | null>
     importPetBundle: () => Promise<CustomPet | null>
