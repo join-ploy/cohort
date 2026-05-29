@@ -325,6 +325,15 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // from the General settings pane.
     reviewCommands: getDefaultReviewCommands(),
     createPrCommands: getDefaultCreatePrCommands(),
+    // Why: VS Code preset + empty custom commands so the Editor button works out
+    // of the box and Diff/Database custom stay disabled (faded) until configured.
+    // Upgraded profiles inherit these via the `{ ...defaults, ...parsed }` merge
+    // in persistence.ts, so the fields can be required (non-optional).
+    externalEditorKind: 'vscode',
+    externalEditorCommand: '',
+    externalDiffCommand: '',
+    externalDatabaseKind: 'url',
+    externalDatabaseCommand: '',
     // Why: hydrate an empty default so the renderer's optional-chained reads
     // (`settings?.githubProjects?.activeProject`) land on a stable shape
     // instead of `undefined`. Upgraded profiles inherit this via the

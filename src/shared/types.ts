@@ -1519,6 +1519,17 @@ export type GlobalSettings = {
    *  `reviewCommands`; the button only renders when the active worktree's
    *  branch has no open PR cached. */
   createPrCommands: SidebarPromptCommand[]
+  /** External-tool launcher commands for the worktree context bar. Editor and
+   *  Database each have a preset mode (VS Code launch / open the DB URL) plus a
+   *  custom shell-command mode; Diff is always a custom command. Custom commands
+   *  run via the shell with `${...}` placeholders substituted (see
+   *  src/main/external-tools/resolve-worktree-tool-command.ts). Global per-user,
+   *  so — unlike orca.yaml hooks — they need no trust gate. */
+  externalEditorKind: 'vscode' | 'custom'
+  externalEditorCommand: string
+  externalDiffCommand: string
+  externalDatabaseKind: 'url' | 'custom'
+  externalDatabaseCommand: string
   /** GitHub Project mode state — pinned/recent/active project, last selected
    *  view per project. Optional because profiles created before this feature
    *  landed won't have the key; `getDefaultSettings()` hydrates the empty
