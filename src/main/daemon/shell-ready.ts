@@ -211,11 +211,19 @@ export function resolvePtyShellPath(env: Record<string, string>): string {
   return env.SHELL || process.env.SHELL || '/bin/zsh'
 }
 
-export function supportsPtyStartupBarrier(env: Record<string, string>): boolean {
+export function supportsPtyStartupBarrier(
+  env: Record<string, string>,
+  shellOverride?: string
+): boolean {
   if (process.platform === 'win32') {
     return false
   }
-  const shellName = basename(resolvePtyShellPath(env)).toLowerCase()
+  // Why: the barrier (and its stdin queue) is keyed on the shell that actually
+  // runs. A shellOverride — e.g. the persisted Unix default shell — takes
+  // priority over env.SHELL (the inherited login shell). Only zsh/bash emit the
+  // ready marker the barrier waits for; gating on an unsupported override shell
+  // (fish) would hang its startup queries until the timeout.
+  const shellName = basename(shellOverride || resolvePtyShellPath(env)).toLowerCase()
   return shellName === 'zsh' || shellName === 'bash'
 }
 

@@ -279,3 +279,35 @@ describePosix('daemon shell-ready launch config', () => {
     }
   })
 })
+
+describePosix('supportsPtyStartupBarrier', () => {
+  let previousShell: string | undefined
+
+  beforeEach(() => {
+    previousShell = process.env.SHELL
+  })
+
+  afterEach(() => {
+    if (previousShell === undefined) {
+      delete process.env.SHELL
+    } else {
+      process.env.SHELL = previousShell
+    }
+  })
+
+  it('uses shellOverride over env.SHELL — fish override disables the barrier even when SHELL is zsh', async () => {
+    const { supportsPtyStartupBarrier } = await importFreshShellReady()
+    expect(supportsPtyStartupBarrier({ SHELL: '/bin/zsh' }, '/opt/homebrew/bin/fish')).toBe(false)
+  })
+
+  it('enables the barrier when shellOverride is a marker-capable shell (bash) regardless of env.SHELL', async () => {
+    const { supportsPtyStartupBarrier } = await importFreshShellReady()
+    expect(supportsPtyStartupBarrier({ SHELL: '/opt/homebrew/bin/fish' }, '/bin/bash')).toBe(true)
+  })
+
+  it('falls back to env.SHELL when no shellOverride is given', async () => {
+    const { supportsPtyStartupBarrier } = await importFreshShellReady()
+    expect(supportsPtyStartupBarrier({ SHELL: '/bin/zsh' })).toBe(true)
+    expect(supportsPtyStartupBarrier({ SHELL: '/opt/homebrew/bin/fish' })).toBe(false)
+  })
+})
