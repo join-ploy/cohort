@@ -572,7 +572,11 @@ describe('registerPtyHandlers', () => {
 
       function setupDaemonAdapter() {
         const daemonSpawn = vi.fn(
-          async (options: { env: Record<string, string>; sessionId?: string }) => ({
+          async (options: {
+            env: Record<string, string>
+            sessionId?: string
+            shellOverride?: string
+          }) => ({
             id: options.sessionId ?? 'daemon-pty'
           })
         )
@@ -713,6 +717,67 @@ describe('registerPtyHandlers', () => {
         } finally {
           mockedApp.isPackaged = prev
         }
+      })
+
+      it('relays the persisted Unix default shell as shellOverride on the daemon path', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+          terminalUnixShell: '/opt/homebrew/bin/fish'
+        })) as never)
+
+        await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24, env: {} })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBe('/opt/homebrew/bin/fish')
+      })
+
+      it('lets a per-tab shellOverride win over the persisted Unix default shell', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+          terminalUnixShell: '/opt/homebrew/bin/fish'
+        })) as never)
+
+        await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          env: {},
+          shellOverride: '/bin/bash'
+        })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBe('/bin/bash')
+      })
+
+      it('sends no shellOverride when the Unix default shell is empty (keeps $SHELL)', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+          terminalUnixShell: ''
+        })) as never)
+
+        await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24, env: {} })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBeUndefined()
+      })
+
+      it('relays the persisted Unix default shell on the runtime controller (agent/CLI) spawn path', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        const runtime = { setPtyController: vi.fn(), onPtyExit: vi.fn() }
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, runtime as never, undefined, (() => ({
+          terminalUnixShell: '/opt/homebrew/bin/fish'
+        })) as never)
+        const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+          spawn: (opts: {
+            cols: number
+            rows: number
+            env?: Record<string, string>
+          }) => Promise<{ id: string }>
+        }
+
+        await controller.spawn({ cols: 80, rows: 24, env: {} })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBe('/opt/homebrew/bin/fish')
       })
 
       it('passes the minted sessionId through to provider.spawn so the Pi overlay is keyed on a stable id', async () => {

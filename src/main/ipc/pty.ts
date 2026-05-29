@@ -893,11 +893,19 @@ export function registerPtyHandlers(
         spawnOptions.sessionId = sessionId
         ptySizes.set(sessionId, { cols: args.cols, rows: args.rows })
       }
-      if (process.platform === 'win32' && !args.connectionId) {
-        spawnOptions.shellOverride = getSettings?.()?.terminalWindowsShell
-        spawnOptions.terminalWindowsPowerShellImplementation = getSettings
-          ? (getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')
-          : undefined
+      // Why: agent/CLI-driven terminals must honour the persisted default shell
+      // too. On the daemon path resolvePtyShellPath(env) otherwise ignores it
+      // (COMSPEC on Windows, $SHELL on macOS/Linux); this mirrors the pty:spawn
+      // IPC handler so both spawn routes select the same shell.
+      if (!args.connectionId) {
+        if (process.platform === 'win32') {
+          spawnOptions.shellOverride = getSettings?.()?.terminalWindowsShell
+          spawnOptions.terminalWindowsPowerShellImplementation = getSettings
+            ? (getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')
+            : undefined
+        } else {
+          spawnOptions.shellOverride = getSettings?.()?.terminalUnixShell || undefined
+        }
       }
 
       let result: PtySpawnResult
@@ -1262,17 +1270,19 @@ export function registerPtyHandlers(
       if (effectiveSessionId !== undefined) {
         spawnOptions.sessionId = effectiveSessionId
       }
-      // Why: on Windows, fall back to the persisted default-shell setting
-      // when the renderer didn't send a per-tab override. Without this, the
-      // daemon path ignores the user's "Default Shell" preference entirely —
-      // it just calls resolvePtyShellPath(env) which reads COMSPEC (cmd.exe)
-      // or falls back to PowerShell. The LocalPtyProvider already consults
-      // getWindowsShell(); this mirrors that on the daemon path so users who
-      // set WSL as default actually get WSL when pressing Ctrl+T.
+      // Why: fall back to the persisted default-shell setting when the renderer
+      // didn't send a per-tab override. Without this, the daemon path ignores
+      // the user's "Default Shell" preference entirely — it just calls
+      // resolvePtyShellPath(env), which reads COMSPEC/PowerShell on Windows and
+      // $SHELL (the login shell) on macOS/Linux. The LocalPtyProvider consults
+      // getWindowsShell()/getUnixShell(); this mirrors both on the daemon path
+      // so e.g. a fish or WSL default actually applies when pressing Ctrl+T.
       const effectiveShellOverride =
         args.shellOverride ??
-        (process.platform === 'win32' && !args.connectionId
-          ? getSettings?.()?.terminalWindowsShell
+        (!args.connectionId
+          ? process.platform === 'win32'
+            ? getSettings?.()?.terminalWindowsShell
+            : getSettings?.()?.terminalUnixShell || undefined
           : undefined)
       if (effectiveShellOverride !== undefined) {
         spawnOptions.shellOverride = effectiveShellOverride

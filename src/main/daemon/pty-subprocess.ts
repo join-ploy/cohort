@@ -174,6 +174,12 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
       Object.assign(env, shellLaunch.env)
     }
     shellArgs = shellLaunch?.args ?? ['-l']
+    // Why: mirror LocalPtyProvider — node-pty captures env at spawn time, so
+    // SHELL must reflect the resolved shell (which may be the persisted default,
+    // e.g. fish) rather than the inherited login shell. Otherwise tools that
+    // re-launch via $SHELL (tmux, vim :shell) would diverge from the shell the
+    // user actually sees.
+    env.SHELL = shellPath
   }
 
   // Why: asar packaging can strip the +x bit from node-pty's spawn-helper

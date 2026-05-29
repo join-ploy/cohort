@@ -234,6 +234,23 @@ describe('createPtySubprocess', () => {
     expect(shellArg.length).toBeGreaterThan(0)
   })
 
+  it('sets SHELL to the resolved shellOverride so the child self-reports on non-Windows', () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+
+    createPtySubprocess({
+      sessionId: 'test',
+      cols: 80,
+      rows: 24,
+      env: { SHELL: '/bin/zsh' },
+      shellOverride: '/opt/homebrew/bin/fish'
+    })
+
+    const lastCall = spawnMock.mock.calls.at(-1)!
+    expect(lastCall[0]).toBe('/opt/homebrew/bin/fish')
+    expect(lastCall[2].env.SHELL).toBe('/opt/homebrew/bin/fish')
+  })
+
   it('passes custom env to spawned process', () => {
     const proc = mockPtyProcess()
     spawnMock.mockReturnValue(proc)
