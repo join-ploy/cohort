@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest'
+import {
+  getConfiguredToolCommand,
+  substituteToolPlaceholders,
+  type WorktreeToolPlaceholders
+} from './resolve-worktree-tool-command'
+import { getDefaultSettings } from '../../shared/constants'
+
+const VALUES: WorktreeToolPlaceholders = {
+  WORKTREE_PATH: '/wt/my feature',
+  WORKSPACE_NAME: 'wise_panther',
+  REPO_PATH: '/repo',
+  BASE_BRANCH: 'main',
+  MERGE_BASE: 'abc123',
+  HEAD: 'def456',
+  DATABASE_URL: 'postgresql://localhost/wise_panther_dev'
+}
+
+describe('substituteToolPlaceholders', () => {
+  it('substitutes every placeholder, preserving spaces verbatim', () => {
+    const out = substituteToolPlaceholders(
+      'emacsclient -n -e \'(magit-status "${WORKTREE_PATH}")\'',
+      VALUES
+    )
+    expect(out).toBe('emacsclient -n -e \'(magit-status "/wt/my feature")\'')
+  })
+
+  it('substitutes git refs and the database url', () => {
+    expect(substituteToolPlaceholders('${MERGE_BASE}..${HEAD}', VALUES)).toBe('abc123..def456')
+    expect(substituteToolPlaceholders('open ${DATABASE_URL}', VALUES)).toBe(
+      'open postgresql://localhost/wise_panther_dev'
+    )
+  })
+
+  it('leaves unknown placeholders untouched', () => {
+    expect(substituteToolPlaceholders('${WORKTREE_PATH} ${NOPE}', VALUES)).toBe(
+      '/wt/my feature ${NOPE}'
+    )
+  })
+
+  it('replaces repeated placeholders', () => {
+    expect(substituteToolPlaceholders('${HEAD} ${HEAD}', VALUES)).toBe('def456 def456')
+  })
+})
+
+describe('getConfiguredToolCommand', () => {
+  it('returns the command string for each tool', () => {
+    const settings = {
+      ...getDefaultSettings('/home/tester'),
+      externalEditorCommand: 'edit',
+      externalDiffCommand: 'diff',
+      externalDatabaseCommand: 'db'
+    }
+    expect(getConfiguredToolCommand(settings, 'editor')).toBe('edit')
+    expect(getConfiguredToolCommand(settings, 'diff')).toBe('diff')
+    expect(getConfiguredToolCommand(settings, 'database')).toBe('db')
+  })
+})
