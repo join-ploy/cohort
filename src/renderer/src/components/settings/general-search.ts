@@ -100,10 +100,31 @@ export const GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  {
+    title: 'External tools',
+    description:
+      'Configure the Editor, Diff, and Database buttons in the worktree context bar — VS Code / open-URL presets or custom shell commands like emacsclient.',
+    keywords: [
+      'external',
+      'tool',
+      'editor',
+      'emacs',
+      'emacsclient',
+      'diff',
+      'database',
+      'command',
+      'worktree',
+      'vscode'
+    ]
+  }
+]
+
 export const GENERAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   ...GENERAL_WORKSPACE_SEARCH_ENTRIES,
   ...GENERAL_EDITOR_SEARCH_ENTRIES,
   ...GENERAL_CLI_SEARCH_ENTRIES,
   ...GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
-  ...GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES
+  ...GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES,
+  ...GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES
 ]

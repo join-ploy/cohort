@@ -22,6 +22,7 @@ import {
   GENERAL_WORKSPACE_SEARCH_ENTRIES
 } from './general-search'
 import { SidebarPromptCommandsSection } from './SidebarPromptCommandsSection'
+import { ExternalToolsSection } from './ExternalToolsSection'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
@@ -454,7 +455,18 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
         onChangeReviewCommands={(next) => updateSettings({ reviewCommands: next })}
         onChangeCreatePrCommands={(next) => updateSettings({ createPrCommands: next })}
       />
-    ) : null
+    ) : null,
+    // Why: self-gates via its own SearchableSetting (renders null when filtered
+    // out), so it needs no matchesSettingsSearch wrapper here.
+    <ExternalToolsSection
+      key="external-tools"
+      editorKind={settings.externalEditorKind}
+      editorCommand={settings.externalEditorCommand}
+      diffCommand={settings.externalDiffCommand}
+      databaseKind={settings.externalDatabaseKind}
+      databaseCommand={settings.externalDatabaseCommand}
+      onChange={updateSettings}
+    />
     // Note: the Support section is rendered outside this array so it can own
     // its own loading placeholder and its own collapsing Separator. Without
     // that separation, a dangling divider would remain above the collapsed
