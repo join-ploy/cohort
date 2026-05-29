@@ -1,24 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ChevronDown,
   ChevronRight,
   Code2,
   Database,
   Ellipsis,
-  Folder,
   FolderOpen,
+  GitCompare,
   Layers,
   PanelRight
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAppStore } from '../store'
 import { getGroupByWorktreeId, useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { OrcaHooks } from '../../../shared/types'
 
 const isMac = navigator.userAgent.includes('Mac')
@@ -26,37 +21,31 @@ const isMac = navigator.userAgent.includes('Mac')
 /**
  * Above-tab-strip workspace context bar.
  *
- * Renders the active repo + worktree identity on the left, plus quick "open
- * folder externally" actions on the right. Returns null when the workspace is
- * not the active view (Settings, Tasks, Activity, Automations, landing) so the
- * bar never shows over non-terminal surfaces.
+ * Renders the active repo + worktree identity on the left, plus the worktree
+ * path readout and four "open externally" buttons on the right (Finder,
+ * Database, Editor, Diff). Returns null when the workspace is not the active
+ * view so the bar never shows over non-terminal surfaces.
  */
 export default function WorktreeContextBar(): React.JSX.Element | null {
   const activeView = useAppStore((s) => s.activeView)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
-  // Why: nullish-coalesce guards the brief pre-hydration window when the slice
-  // initializer has not yet run (older tests + first-paint), so the bar never
-  // renders an undefined opener choice.
-  const pathOpenerChoice = useAppStore((s) => s.pathOpenerChoice ?? 'finder')
-  const setPathOpenerChoice = useAppStore((s) => s.setPathOpenerChoice)
+  const settings = useAppStore((s) => s.settings)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
-  // Why: when the active worktree is a group member, the breadcrumb should
-  // read as "<group> > <repo>" — the group is the workspace identity, the
-  // repo is the inset position within it. Falls back to the standard
-  // "<repo> > <worktree>" shape for ungrouped worktrees.
+  // Why: when the active worktree is a group member, the breadcrumb should read
+  // as "<group>" — the group is the workspace identity. Falls back to the
+  // standard "<repo> > <worktree>" shape for ungrouped worktrees.
   const group = useAppStore((s) =>
     activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
   )
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
   const workspaceName = worktree?.workspaceName ?? ''
-  // Why: databaseUrl now lives in the repo's orca.yaml / conductor.json so
-  // teammates share one connection template. Mirror RunPanel's hooks:check
-  // pattern — re-fetch when the active repo changes and store the trimmed
-  // value in local state. Empty/missing → Database opener stays disabled.
+  // Why: databaseUrl lives in the repo's orca.yaml / conductor.json so teammates
+  // share one template. Mirror RunPanel's hooks:check pattern — re-fetch when the
+  // active repo changes. Empty/missing → the Database 'url' preset is unconfigured.
   const [databaseUrl, setDatabaseUrl] = useState<string>('')
   useEffect(() => {
     if (!repo?.id) {
@@ -82,57 +71,93 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
       cancelled = true
     }
   }, [repo?.id])
-  const databaseTemplateConfigured = databaseUrl.length > 0
 
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
 
-  // Why: macOS opens Finder, Windows opens File Explorer, Linux opens Files —
-  // the label matches what the underlying shell.openPath actually invokes.
-  const finderLabel = isMac
-    ? 'Reveal in Finder'
-    : navigator.userAgent.includes('Linux')
-      ? 'Open Containing Folder'
-      : 'Reveal in File Explorer'
+  // Why: pre-hydration settings can be null for a frame; treat missing config as
+  // not-yet-configured so the buttons render faded rather than crashing. The
+  // VS Code editor preset is always "configured"; custom commands require a
+  // non-empty string; the Database url preset requires a repo databaseUrl.
+  const editorConfigured =
+    settings?.externalEditorKind === 'vscode' ||
+    (settings?.externalEditorCommand.trim().length ?? 0) > 0
+  const diffConfigured = (settings?.externalDiffCommand.trim().length ?? 0) > 0
+  const databaseConfigured =
+    settings?.externalDatabaseKind === 'url'
+      ? databaseUrl.length > 0
+      : (settings?.externalDatabaseCommand.trim().length ?? 0) > 0
 
-  const primaryLabel =
-    pathOpenerChoice === 'vscode'
-      ? 'Open in VS Code'
-      : pathOpenerChoice === 'database'
-        ? 'Open in Database'
-        : finderLabel
-
-  const handleOpenPath = useCallback((): void => {
-    if (pathOpenerChoice === 'database') {
-      // Why: guard at click-time so a cleared template after the user picked
-      // Database in the dropdown silently no-ops instead of dispatching an
-      // invalid URL. Empty workspaceName is impossible for non-null worktree,
-      // but the check costs nothing and protects the URL substitution.
-      if (!databaseUrl || !workspaceName) {
+  const runTool = useCallback(
+    (tool: 'editor' | 'diff' | 'database'): void => {
+      if (!worktree || !repo) {
         return
       }
-      const resolvedUrl = databaseUrl.split('${WORKSPACE_NAME}').join(workspaceName)
-      void window.api.shell.openDatabase(resolvedUrl)
-      return
-    }
-    if (!worktreePath) {
-      return
-    }
-    if (pathOpenerChoice === 'vscode') {
-      // Why: vscode://file/ is a no-op on machines without VS Code installed,
-      // matching shell.openPath's "open whatever the OS associates" behavior.
-      window.api.shell.openVscode(worktreePath)
-    } else {
+      void window.api.externalTool
+        .run({
+          tool,
+          worktreeId: worktree.id,
+          worktreePath: worktree.path,
+          repoId: repo.id,
+          workspaceName: worktree.workspaceName
+        })
+        .then((result) => {
+          if (!result.ok) {
+            toast.error(`Couldn't run ${tool} command${result.error ? `: ${result.error}` : ''}`)
+          }
+        })
+        .catch(() => toast.error(`Couldn't run ${tool} command`))
+    },
+    [worktree, repo]
+  )
+
+  const handleFinder = useCallback((): void => {
+    if (worktreePath) {
       window.api.shell.openPath(worktreePath)
     }
-  }, [worktreePath, pathOpenerChoice, databaseUrl, workspaceName])
+  }, [worktreePath])
+
+  const handleDatabase = useCallback((): void => {
+    if (!databaseConfigured) {
+      return
+    }
+    if (settings?.externalDatabaseKind === 'custom') {
+      runTool('database')
+      return
+    }
+    if (!databaseUrl || !workspaceName) {
+      return
+    }
+    const resolvedUrl = databaseUrl.split('${WORKSPACE_NAME}').join(workspaceName)
+    void window.api.shell.openDatabase(resolvedUrl)
+  }, [databaseConfigured, settings?.externalDatabaseKind, databaseUrl, workspaceName, runTool])
+
+  const handleEditor = useCallback((): void => {
+    if (!editorConfigured) {
+      return
+    }
+    if (settings?.externalEditorKind === 'custom') {
+      runTool('editor')
+      return
+    }
+    // Why: vscode://file/ is a no-op on machines without VS Code installed,
+    // matching shell.openPath's "open whatever the OS associates" behavior.
+    if (worktreePath) {
+      window.api.shell.openVscode(worktreePath)
+    }
+  }, [editorConfigured, settings?.externalEditorKind, worktreePath, runTool])
+
+  const handleDiff = useCallback((): void => {
+    if (diffConfigured) {
+      runTool('diff')
+    }
+  }, [diffConfigured, runTool])
 
   const openContextMenuFromEllipsis = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
-      // Why: WorktreeContextMenu attaches an onContextMenuCapture on its
-      // wrapper. Synthesising a 'contextmenu' MouseEvent at the button's
-      // position re-uses the existing menu surface (same items, same
-      // positioning logic) instead of forking a parallel DropdownMenu.
+      // Why: WorktreeContextMenu attaches an onContextMenuCapture on its wrapper.
+      // Synthesising a 'contextmenu' MouseEvent at the button's position re-uses
+      // the existing menu surface instead of forking a parallel DropdownMenu.
       const target = wrapperRef.current
       if (!target) {
         return
@@ -149,10 +174,8 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     []
   )
 
-  // Why: the bar only makes sense above the workspace's central tab strip.
-  // Other views own their full content area and would be visually disrupted
-  // by an extra strip above their headers. Early return must follow the hook
-  // declarations so the hook order stays stable across renders.
+  // Why: the bar only makes sense above the workspace's central tab strip. Early
+  // return must follow the hook declarations so hook order stays stable.
   if (activeView !== 'terminal' || !activeWorktreeId || !worktree) {
     return null
   }
@@ -161,12 +184,10 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     <WorktreeContextMenu worktree={worktree}>
       <div
         ref={wrapperRef}
-        // Why: bar is a draggable window strip on macOS/Windows where the
-        // OS title chrome is hidden; interactive children opt out via
-        // -webkit-app-region: no-drag below. Matches how `.titlebar` works.
-        // Background uses --titlebar-background so the breadcrumb bar
-        // shares the exact chrome color as the terminal tab strip above
-        // (the strip is portaled into `.titlebar`, which reads the same var).
+        // Why: bar is a draggable window strip on macOS/Windows where the OS
+        // title chrome is hidden; interactive children opt out via
+        // -webkit-app-region: no-drag below. Background uses
+        // --titlebar-background so it shares the terminal tab strip's color.
         className="worktree-context-bar relative flex h-9 items-center justify-between border-b border-border pl-3 pr-1.5"
         style={
           {
@@ -176,15 +197,6 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         }
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-3">
-          {/* Why: breadcrumb uses text-xs (12px) so it sits visually below the
-              tab strip's labels — it's identity metadata, not a primary action.
-              For grouped workspaces, the GROUP is the workspace identity; we
-              don't render a second segment because the per-repo position is
-              already surfaced by the segmented tabs in Setup/Run/Diff/Source/
-              Checks. A Layers glyph + an inline "group" chip identify the
-              shape so the omission of the second segment doesn't look like a
-              regression. Ungrouped worktrees keep the original
-              "<repo> > <worktree>" shape. */}
           {group && (
             <Layers
               className="size-3.5 shrink-0 text-muted-foreground"
@@ -221,84 +233,49 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: split button — left segment dispatches to the currently
-              selected opener (Finder/Explorer/Files, VS Code, or the
-              configured Database client); right segment is the DropdownMenu
-              that picks which opener that primary click uses. The chosen
-              opener persists via PersistedUIState. */}
-          <div className="flex max-w-[260px] items-center">
-            {/* Why: backgroundColor inherits the bar's --titlebar-background
-                token so the selector visually flattens into the bar instead
-                of sitting on a darker bg-background that read as a heavy
-                inset. Hover keeps an accent wash for affordance. */}
-            <button
-              type="button"
-              onClick={handleOpenPath}
-              aria-label={primaryLabel}
-              title={primaryLabel}
-              className="flex h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm rounded-r-none border border-r-0 border-border px-2 font-mono text-xs font-medium text-foreground hover:bg-accent"
-              style={{ backgroundColor: 'var(--titlebar-background)' }}
-            >
-              {/* Why: icon mirrors the active opener choice so the button's
-                  glyph matches what clicking it will do. */}
-              {pathOpenerChoice === 'vscode' ? (
-                <Code2 className="size-3 shrink-0" />
-              ) : pathOpenerChoice === 'database' ? (
-                <Database className="size-3 shrink-0" />
-              ) : (
-                <FolderOpen className="size-3 shrink-0" />
-              )}
-              <span className="min-w-0 truncate">{worktreePath}</span>
-            </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Choose opener"
-                  className="flex h-6 cursor-pointer items-center rounded-sm rounded-l-none border border-border px-1.5 text-muted-foreground hover:bg-accent"
-                  style={{ backgroundColor: 'var(--titlebar-background)' }}
-                >
-                  <ChevronDown className="size-3" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 p-1">
-                <DropdownMenuItem
-                  onSelect={() => setPathOpenerChoice('finder')}
-                  className="flex items-center gap-2"
-                >
-                  <Folder className="size-3.5" />
-                  <span>Finder</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => setPathOpenerChoice('vscode')}
-                  className="flex items-center gap-2"
-                >
-                  <Code2 className="size-3.5" />
-                  <span>VS Code</span>
-                </DropdownMenuItem>
-                {/* Why: disabling the item (rather than hiding it) keeps the
-                    Database affordance discoverable. The inline "Configure in
-                    Settings" hint explains why it's greyed out — a `title`
-                    tooltip would never fire because Radix sets
-                    pointer-events: none on disabled items. */}
-                <DropdownMenuItem
-                  onSelect={() => setPathOpenerChoice('database')}
-                  disabled={!databaseTemplateConfigured}
-                  className="flex items-center gap-2"
-                >
-                  <Database className="size-3.5" />
-                  <span className="flex-1">Database</span>
-                  {!databaseTemplateConfigured && (
-                    <span className="text-[10px] text-muted-foreground">Configure</span>
-                  )}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          {/* Why: the worktree path is a plain readout, not a button — the Finder
+              button below owns the reveal action. */}
+          <span
+            className="max-w-[260px] truncate font-mono text-xs text-muted-foreground"
+            title={worktreePath}
+          >
+            {worktreePath}
+          </span>
+
+          {/* Why: local TooltipProvider so the bar's tooltips work even when
+              rendered outside App's provider (tests / portaled surfaces). */}
+          <TooltipProvider delayDuration={400}>
+            <div className="flex items-center gap-0.5">
+              <ToolButton
+                label="Reveal in Finder"
+                enabled
+                onClick={handleFinder}
+                icon={<FolderOpen className="size-3.5" />}
+              />
+              <ToolButton
+                label="Open in database"
+                enabled={databaseConfigured}
+                onClick={handleDatabase}
+                icon={<Database className="size-3.5" />}
+              />
+              <ToolButton
+                label="Open in external editor"
+                enabled={editorConfigured}
+                onClick={handleEditor}
+                icon={<Code2 className="size-3.5" />}
+              />
+              <ToolButton
+                label="Open diff in external tool"
+                enabled={diffConfigured}
+                onClick={handleDiff}
+                icon={<GitCompare className="size-3.5" />}
+              />
+            </div>
+          </TooltipProvider>
+
           {/* Why: hosts the right-sidebar toggle inside the bar's no-drag
-              region. App.tsx removes its workspace-view floating copy when
-              this bar is mounted; the right-sidebar header no longer hosts
-              a duplicate either. */}
+              region. App.tsx removes its workspace-view floating copy when this
+              bar is mounted. */}
           <button
             type="button"
             onClick={toggleRightSidebar}
@@ -311,5 +288,38 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         </div>
       </div>
     </WorktreeContextMenu>
+  )
+}
+
+type ToolButtonProps = {
+  label: string
+  enabled: boolean
+  onClick: () => void
+  icon: React.ReactNode
+}
+
+// Why: aria-label + Tooltip live on every button (configured or not). When
+// disabled we fade it and no-op the click rather than using the native
+// `disabled` attribute, which would suppress the explanatory tooltip.
+function ToolButton({ label, enabled, onClick, icon }: ToolButtonProps): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          aria-disabled={!enabled}
+          onClick={enabled ? onClick : undefined}
+          className={`flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground ${
+            enabled
+              ? 'cursor-pointer hover:bg-accent hover:text-foreground'
+              : 'cursor-not-allowed opacity-50'
+          }`}
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{enabled ? label : `${label} — not configured`}</TooltipContent>
+    </Tooltip>
   )
 }
