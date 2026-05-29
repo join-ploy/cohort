@@ -103,6 +103,40 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       const result = await adapter.spawn({ cols: 80, rows: 24, worktreeId: 'wt-1' })
       expect(result.id).toContain('wt-1')
     })
+
+    // Why: the shell-ready barrier queues ALL stdin (including the terminal's
+    // Primary Device Attribute reply) until the shell emits the ready marker.
+    // Only zsh/bash emit it. When a shellOverride selects an unsupported shell
+    // (e.g. fish) the barrier must be OFF, or the override shell's startup
+    // queries hang until the 15s timeout. The barrier-support check must follow
+    // shellOverride, not env.SHELL (which is the inherited login shell).
+    it('disables the shell-ready barrier when shellOverride is a non-marker shell (fish)', async () => {
+      await adapter.spawn({
+        cols: 80,
+        rows: 24,
+        command: 'claude',
+        shellOverride: '/opt/homebrew/bin/fish',
+        env: { SHELL: '/bin/zsh' }
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      // Barrier off → the startup command reaches the shell immediately instead
+      // of being queued behind a marker fish never sends.
+      expect(lastSubprocess.write).toHaveBeenCalledWith('claude\n')
+    })
+
+    it('keeps the shell-ready barrier for marker-capable shells (zsh)', async () => {
+      await adapter.spawn({
+        cols: 80,
+        rows: 24,
+        command: 'claude',
+        shellOverride: '/bin/zsh',
+        env: { SHELL: '/bin/zsh' }
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      // Barrier on → the startup command is queued until the ready marker, so it
+      // must NOT have been written to the shell yet.
+      expect(lastSubprocess.write).not.toHaveBeenCalledWith('claude\n')
+    })
   })
 
   describe('write', () => {

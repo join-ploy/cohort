@@ -122,7 +122,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
       // LocalPtyProvider.
       shellOverride: opts.shellOverride,
       terminalWindowsPowerShellImplementation: opts.terminalWindowsPowerShellImplementation,
-      shellReadySupported: opts.command ? supportsPtyStartupBarrier(opts.env ?? {}) : false
+      shellReadySupported: opts.command
+        ? supportsPtyStartupBarrier(opts.env ?? {}, opts.shellOverride)
+        : false
     })
 
     if (effectiveCwd) {
