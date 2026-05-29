@@ -106,7 +106,7 @@ export function ExternalToolsSection({
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5">
             <Label>Editor</Label>
-            <p className="text-xs text-muted-foreground">Opens the worktree folder.</p>
+            <p className="text-xs text-muted-foreground">Opens the worktree in your editor.</p>
           </div>
           <Select
             value={editorKind}
