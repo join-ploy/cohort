@@ -333,7 +333,8 @@ const api = {
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
       ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
     getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
-      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args),
+    getHomeDir: (): Promise<string> => ipcRenderer.invoke('app:getHomeDir')
   },
 
   wsl: {
@@ -1183,6 +1184,17 @@ const api = {
     caffeinateStop: (): Promise<void> => ipcRenderer.invoke('shell:caffeinateStop'),
 
     caffeinateStatus: (): Promise<boolean> => ipcRenderer.invoke('shell:caffeinateStatus')
+  },
+
+  externalTool: {
+    run: (args: {
+      tool: 'editor' | 'diff' | 'database'
+      worktreeId: string
+      worktreePath: string
+      repoId: string
+      workspaceName: string
+      displayName: string
+    }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('externalTool:run', args)
   },
 
   pet: {

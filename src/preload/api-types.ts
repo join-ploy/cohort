@@ -415,6 +415,9 @@ export type AppApi = {
   getKeyboardInputSourceId: () => Promise<string | null>
   /** Updates the macOS Dock unread badge. No-op on Windows/Linux. */
   setUnreadDockBadgeCount: (count: number) => Promise<void>
+  /** The OS home directory (`app.getPath('home')`). Used to abbreviate the home
+   *  prefix of displayed paths to `~`. */
+  getHomeDir: () => Promise<string>
   /** Resolves the launch directory for global Floating Terminal tabs. */
   getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest) => Promise<string>
 }
@@ -889,6 +892,16 @@ export type PreloadApi = {
     caffeinateStart: () => Promise<boolean>
     caffeinateStop: () => Promise<void>
     caffeinateStatus: () => Promise<boolean>
+  }
+  externalTool: {
+    run: (args: {
+      tool: 'editor' | 'diff' | 'database'
+      worktreeId: string
+      worktreePath: string
+      repoId: string
+      workspaceName: string
+      displayName: string
+    }) => Promise<{ ok: boolean; error?: string }>
   }
   pet: {
     import: () => Promise<CustomPet | null>

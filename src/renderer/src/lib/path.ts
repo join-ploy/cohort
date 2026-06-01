@@ -51,6 +51,25 @@ export function dirname(path: string): string {
   return normalizedPath.slice(0, lastSeparatorIndex)
 }
 
+// Why: render absolute paths with the user's home directory collapsed to `~`
+// (e.g. /Users/me/orca → ~/orca). Cross-platform — keeps whatever separator
+// follows the home prefix, and only collapses when the path is genuinely under
+// home (next char is a separator), so /Users/meadow isn't mangled when home is
+// /Users/me. Returns the path unchanged when homeDir is empty or not a prefix.
+export function tildifyPath(absolutePath: string, homeDir: string): string {
+  if (!homeDir || !absolutePath) {
+    return absolutePath
+  }
+  if (absolutePath === homeDir) {
+    return '~'
+  }
+  const nextChar = absolutePath[homeDir.length]
+  if (absolutePath.startsWith(homeDir) && (nextChar === '/' || nextChar === '\\')) {
+    return `~${absolutePath.slice(homeDir.length)}`
+  }
+  return absolutePath
+}
+
 export function joinPath(basePath: string, relativePath: string): string {
   if (!basePath) {
     return relativePath

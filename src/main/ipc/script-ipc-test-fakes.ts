@@ -98,7 +98,14 @@ export function makeMultiRepoStore(repos: Repo[]) {
   }
 }
 
-export function makeWindow() {
+// Why: the explicit return type (mirroring FakeProvider's `ReturnType<typeof
+// vi.fn>` above) is required because `composite: true` turns on declaration
+// emit, and an inferred return type containing `vi.fn()` references @vitest/spy
+// internals that can't be named portably (TS2883).
+export function makeWindow(): {
+  isDestroyed: () => boolean
+  webContents: { send: ReturnType<typeof vi.fn> }
+} {
   return {
     isDestroyed: () => false,
     webContents: { send: vi.fn() }

@@ -17,11 +17,13 @@ import {
   GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
+  GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES,
   GENERAL_PANE_SEARCH_ENTRIES,
   GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES,
   GENERAL_WORKSPACE_SEARCH_ENTRIES
 } from './general-search'
 import { SidebarPromptCommandsSection } from './SidebarPromptCommandsSection'
+import { ExternalToolsSection } from './ExternalToolsSection'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
@@ -453,6 +455,17 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
         createPrCommands={settings.createPrCommands ?? []}
         onChangeReviewCommands={(next) => updateSettings({ reviewCommands: next })}
         onChangeCreatePrCommands={(next) => updateSettings({ createPrCommands: next })}
+      />
+    ) : null,
+    matchesSettingsSearch(searchQuery, GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES) ? (
+      <ExternalToolsSection
+        key="external-tools"
+        editorKind={settings.externalEditorKind}
+        editorCommand={settings.externalEditorCommand}
+        diffCommand={settings.externalDiffCommand}
+        databaseKind={settings.externalDatabaseKind}
+        databaseCommand={settings.externalDatabaseCommand}
+        onChange={updateSettings}
       />
     ) : null
     // Note: the Support section is rendered outside this array so it can own
