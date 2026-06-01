@@ -38,10 +38,10 @@ if (
 type StoreState = Record<string, unknown>
 let mockState: StoreState = {}
 
-const activateAndRevealWorktreeMock = vi.fn()
-vi.mock('@/lib/worktree-activation', () => ({
-  activateAndRevealWorktree: (id: string) => activateAndRevealWorktreeMock(id)
-}))
+// Why: the repo switcher focuses a member via the store's setActiveWorktree
+// action (a lightweight switch, no agent spawn). Capture it module-side so the
+// switch test can assert which member was focused.
+const setActiveWorktreeMock = vi.fn()
 
 vi.mock('@/store', () => ({
   useAppStore: (selector?: (state: StoreState) => unknown) =>
@@ -141,6 +141,7 @@ function baseState(overrides: Partial<StoreState> = {}): StoreState {
     activeWorktreeId: baseWorktree.id,
     rightSidebarOpen: false,
     toggleRightSidebar: vi.fn(),
+    setActiveWorktree: setActiveWorktreeMock,
     settings: settingsWith(),
     worktreesById: new Map<string, Worktree>([[baseWorktree.id, baseWorktree]]),
     reposById: new Map<string, Repo>([[baseRepo.id, baseRepo]]),
@@ -357,13 +358,13 @@ describe('WorktreeContextBar — group repo switcher', () => {
     expect(screen.getByRole('button', { name: 'Switch repo' })).toBeTruthy()
   })
 
-  it('selecting a member focuses that repo via activateAndRevealWorktree', async () => {
+  it('selecting a member focuses that repo via setActiveWorktree (no agent spawn)', async () => {
     const Bar = await importBar()
     render(<Bar />)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Switch repo' }))
     await user.click(screen.getByRole('menuitem', { name: /ploy-web/ }))
-    expect(activateAndRevealWorktreeMock).toHaveBeenCalledWith('repo-2::/wt/web')
+    expect(setActiveWorktreeMock).toHaveBeenCalledWith('repo-2::/wt/web')
   })
 
   it('stays a plain readout (no switcher) for a single-member group', async () => {

@@ -29,7 +29,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { tildifyPath } from '../lib/path'
 import type { OrcaHooks, Repo, Worktree } from '../../../shared/types'
 
@@ -52,6 +51,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
+  const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
   const settings = useAppStore((s) => s.settings)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
@@ -62,9 +62,11 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
   )
   // Why: for a multi-repo group the path readout doubles as a repo switcher.
-  // Selecting a member focuses it (same as clicking its tab), so the buttons
-  // below retarget to that repo. Guard on groupId so ungrouped worktrees pay
-  // no selector cost.
+  // Selecting a member focuses it via setActiveWorktree — the same lightweight
+  // switch the in-group tab strip uses, so the buttons below retarget to that
+  // repo and the member's existing surface is restored WITHOUT spawning a new
+  // agent terminal (which activateAndRevealWorktree would). Guard on groupId so
+  // ungrouped worktrees pay no selector cost.
   const groupId = group?.id ?? null
   const groupMembers = useAppStore(
     useShallow((s) => (groupId ? getMemberWorktreesForGroup(s, groupId) : EMPTY_MEMBERS))
@@ -302,7 +304,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                   return (
                     <DropdownMenuItem
                       key={member.id}
-                      onSelect={() => activateAndRevealWorktree(member.id)}
+                      onSelect={() => setActiveWorktree(member.id)}
                       title={member.path}
                       className="flex items-center gap-2"
                     >
