@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  Check,
+  ChevronDown,
   ChevronRight,
   Code2,
   Database,
@@ -9,15 +11,33 @@ import {
   Layers,
   PanelRight
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { toast } from 'sonner'
 import { useAppStore } from '../store'
-import { getGroupByWorktreeId, useRepoById, useWorktreeById } from '../store/selectors'
+import {
+  getGroupByWorktreeId,
+  getMemberWorktreesForGroup,
+  getRepoMapFromState,
+  useRepoById,
+  useWorktreeById
+} from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { tildifyPath } from '../lib/path'
-import type { OrcaHooks } from '../../../shared/types'
+import type { OrcaHooks, Repo, Worktree } from '../../../shared/types'
 
 const isMac = navigator.userAgent.includes('Mac')
+// Why: stable empty references so the non-group path skips the member/repo
+// selectors entirely without churning shallow-equality on every render.
+const EMPTY_MEMBERS: Worktree[] = []
+const EMPTY_REPO_MAP = new Map<string, Repo>()
 
 /**
  * Above-tab-strip workspace context bar.
@@ -41,6 +61,15 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const group = useAppStore((s) =>
     activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
   )
+  // Why: for a multi-repo group the path readout doubles as a repo switcher.
+  // Selecting a member focuses it (same as clicking its tab), so the buttons
+  // below retarget to that repo. Guard on groupId so ungrouped worktrees pay
+  // no selector cost.
+  const groupId = group?.id ?? null
+  const groupMembers = useAppStore(
+    useShallow((s) => (groupId ? getMemberWorktreesForGroup(s, groupId) : EMPTY_MEMBERS))
+  )
+  const repoMap = useAppStore((s) => (groupId ? getRepoMapFromState(s) : EMPTY_REPO_MAP))
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
   const workspaceName = worktree?.workspaceName ?? ''
@@ -191,6 +220,12 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     return null
   }
 
+  // Why: archived members have no renderable surface to switch to, so they're
+  // excluded as switch targets. The switcher only appears once a group has more
+  // than one live member — a single-member group has nothing to pick between.
+  const switchableMembers = groupMembers.filter((m) => !m.isArchived)
+  const showRepoSwitcher = group != null && switchableMembers.length > 1
+
   return (
     <WorktreeContextMenu worktree={worktree}>
       <div
@@ -244,16 +279,54 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: the worktree path is a plain readout, not a button — the Finder
-              button below owns the reveal action. Shown in full (no truncation)
-              with the home prefix collapsed to `~`; the title carries the real
-              absolute path. */}
-          <span
-            className="whitespace-nowrap font-mono text-xs text-muted-foreground"
-            title={worktreePath}
-          >
-            {tildifyPath(worktreePath, homeDir)}
-          </span>
+          {/* Why: the worktree path is shown in full (no truncation) with the
+              home prefix collapsed to `~`. In a multi-repo group it becomes a
+              dropdown to switch the focused repo (which retargets the buttons);
+              otherwise it's a plain readout — the Finder button owns reveal. */}
+          {showRepoSwitcher ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Switch repo"
+                  title={worktreePath}
+                  className="flex items-center gap-1 whitespace-nowrap rounded-sm px-1 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <span>{tildifyPath(worktreePath, homeDir)}</span>
+                  <ChevronDown className="size-3 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 p-1">
+                {switchableMembers.map((member) => {
+                  const memberRepo = repoMap.get(member.repoId)
+                  return (
+                    <DropdownMenuItem
+                      key={member.id}
+                      onSelect={() => activateAndRevealWorktree(member.id)}
+                      title={member.path}
+                      className="flex items-center gap-2"
+                    >
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: memberRepo?.badgeColor ?? 'var(--border)' }}
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        {memberRepo?.displayName ?? member.displayName}
+                      </span>
+                      {member.id === activeWorktreeId && <Check className="size-3.5 shrink-0" />}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <span
+              className="whitespace-nowrap font-mono text-xs text-muted-foreground"
+              title={worktreePath}
+            >
+              {tildifyPath(worktreePath, homeDir)}
+            </span>
+          )}
 
           {/* Why: local TooltipProvider so the bar's tooltips work even when
               rendered outside App's provider (tests / portaled surfaces). */}

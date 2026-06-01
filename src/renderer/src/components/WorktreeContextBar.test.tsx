@@ -2,7 +2,34 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { GlobalSettings, Repo, Worktree } from '../../../shared/types'
+import userEvent from '@testing-library/user-event'
+import type { GlobalSettings, Repo, WorkspaceGroup, Worktree } from '../../../shared/types'
+
+// Why: Radix DropdownMenu (the repo switcher) reaches for ResizeObserver /
+// hasPointerCapture / scrollIntoView in jsdom; shim them so opening the menu
+// doesn't crash. Same pattern as WorktreeJumpPalette.groups.test.tsx.
+class TestResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+;(globalThis as unknown as { ResizeObserver: typeof TestResizeObserver }).ResizeObserver =
+  TestResizeObserver
+if (
+  typeof Element !== 'undefined' &&
+  typeof (Element.prototype as unknown as { hasPointerCapture?: unknown }).hasPointerCapture !==
+    'function'
+) {
+  ;(Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () =>
+    false
+}
+if (
+  typeof Element !== 'undefined' &&
+  typeof (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView !==
+    'function'
+) {
+  ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+}
 
 // Why: WorktreeContextBar reaches into the store and into WorktreeContextMenu
 // (its own large surface). Mock both so the test stays focused on the bar's own
@@ -11,17 +38,26 @@ import type { GlobalSettings, Repo, Worktree } from '../../../shared/types'
 type StoreState = Record<string, unknown>
 let mockState: StoreState = {}
 
+const activateAndRevealWorktreeMock = vi.fn()
+vi.mock('@/lib/worktree-activation', () => ({
+  activateAndRevealWorktree: (id: string) => activateAndRevealWorktreeMock(id)
+}))
+
 vi.mock('@/store', () => ({
   useAppStore: (selector?: (state: StoreState) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
 
+// Why: thin mocks that read the group/member/repo shape off mockState so each
+// test can opt into a grouped workspace without a real store.
 vi.mock('../store/selectors', () => ({
   useWorktreeById: (id: string | null) =>
     id ? ((mockState.worktreesById as Map<string, Worktree>).get(id) ?? null) : null,
   useRepoById: (id: string | null) =>
     id ? ((mockState.reposById as Map<string, Repo>).get(id) ?? null) : null,
-  getGroupByWorktreeId: () => null
+  getGroupByWorktreeId: () => (mockState.group as WorkspaceGroup | null) ?? null,
+  getMemberWorktreesForGroup: () => (mockState.groupMembers as Worktree[]) ?? [],
+  getRepoMapFromState: () => (mockState.reposById as Map<string, Repo>) ?? new Map()
 }))
 
 vi.mock('./sidebar/WorktreeContextMenu', () => ({
@@ -268,5 +304,72 @@ describe('WorktreeContextBar — button routing', () => {
     fireEvent.click(dbButton)
     expect(api.shell.openDatabase).toHaveBeenCalledWith('postgresql://localhost/wise_panther_dev')
     expect(api.externalTool.run).not.toHaveBeenCalled()
+  })
+})
+
+describe('WorktreeContextBar — group repo switcher', () => {
+  const repoWeb = {
+    ...baseRepo,
+    id: 'repo-2',
+    displayName: 'ploy-web',
+    badgeColor: '#22cc88'
+  } as Repo
+  const memberWeb = {
+    ...baseWorktree,
+    id: 'repo-2::/wt/web',
+    path: '/wt/web',
+    repoId: 'repo-2',
+    displayName: 'web-feature'
+  } as Worktree
+  const group = {
+    id: 'group:1',
+    displayName: 'team_build',
+    memberWorktreeIds: [baseWorktree.id, memberWeb.id]
+  } as WorkspaceGroup
+
+  function groupState(): StoreState {
+    return baseState({
+      group,
+      groupMembers: [baseWorktree, memberWeb],
+      reposById: new Map<string, Repo>([
+        [baseRepo.id, baseRepo],
+        [repoWeb.id, repoWeb]
+      ]),
+      worktreesById: new Map<string, Worktree>([
+        [baseWorktree.id, baseWorktree],
+        [memberWeb.id, memberWeb]
+      ])
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api = makeApi()
+    ;(window as unknown as { api: ApiMock }).api = api
+    mockState = groupState()
+  })
+
+  afterEach(() => cleanup())
+
+  it('renders a repo switcher in place of the plain path readout', async () => {
+    const Bar = await importBar()
+    render(<Bar />)
+    expect(screen.getByRole('button', { name: 'Switch repo' })).toBeTruthy()
+  })
+
+  it('selecting a member focuses that repo via activateAndRevealWorktree', async () => {
+    const Bar = await importBar()
+    render(<Bar />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Switch repo' }))
+    await user.click(screen.getByRole('menuitem', { name: /ploy-web/ }))
+    expect(activateAndRevealWorktreeMock).toHaveBeenCalledWith('repo-2::/wt/web')
+  })
+
+  it('stays a plain readout (no switcher) for a single-member group', async () => {
+    mockState = baseState({ group, groupMembers: [baseWorktree] })
+    const Bar = await importBar()
+    render(<Bar />)
+    expect(screen.queryByRole('button', { name: 'Switch repo' })).toBeNull()
   })
 })
