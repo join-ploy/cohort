@@ -2,19 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GlobalSettings, Repo, WorktreeMeta } from '../../shared/types'
 import { getDefaultSettings } from '../../shared/constants'
 
-const { handleMock, spawnMock, gitExecMock, getEffectiveHooksMock, getDefaultBaseRefMock } =
-  vi.hoisted(() => ({
-    handleMock: vi.fn(),
-    spawnMock: vi.fn(),
-    gitExecMock: vi.fn(),
-    getEffectiveHooksMock: vi.fn(),
-    getDefaultBaseRefMock: vi.fn()
-  }))
+const { handleMock, spawnMock, gitExecMock, getDefaultBaseRefMock } = vi.hoisted(() => ({
+  handleMock: vi.fn(),
+  spawnMock: vi.fn(),
+  gitExecMock: vi.fn(),
+  getDefaultBaseRefMock: vi.fn()
+}))
 
 vi.mock('electron', () => ({ ipcMain: { handle: handleMock } }))
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 vi.mock('../git/runner', () => ({ gitExecFileAsync: gitExecMock }))
-vi.mock('../hooks', () => ({ getEffectiveHooks: getEffectiveHooksMock }))
 vi.mock('../git/repo', () => ({ getDefaultBaseRef: getDefaultBaseRefMock }))
 
 import { registerExternalToolHandlers } from './external-tools'
@@ -67,7 +64,6 @@ describe('registerExternalToolHandlers', () => {
     vi.clearAllMocks()
     spawnMock.mockImplementation(() => makeChild())
     gitExecMock.mockResolvedValue({ stdout: 'sha\n', stderr: '' })
-    getEffectiveHooksMock.mockReturnValue({ databaseUrl: '' })
     getDefaultBaseRefMock.mockReturnValue('main')
   })
 
@@ -98,14 +94,13 @@ describe('registerExternalToolHandlers', () => {
     })
   })
 
-  it('resolves ${DATABASE_URL} from effective hooks with the workspace name', async () => {
-    getEffectiveHooksMock.mockReturnValue({
-      databaseUrl: 'postgresql://localhost/${WORKSPACE_NAME}_dev'
-    })
+  it('does NOT substitute ${DATABASE_URL} — repo-sourced data must not reach the shell', async () => {
+    // Why: the DB URL comes from the repo's orca.yaml; substituting it into a
+    // shell:true command would be an injection vector. The token is left literal.
     const handler = getRunHandler(makeStore({ externalDatabaseCommand: 'db ${DATABASE_URL}' }))
     await handler({}, { tool: 'database', ...baseArgs })
     expect(spawnMock).toHaveBeenCalledWith(
-      'db postgresql://localhost/wise_panther_dev',
+      'db ${DATABASE_URL}',
       expect.objectContaining({ shell: true })
     )
   })

@@ -2,7 +2,6 @@ import { ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import type { Store } from '../persistence'
 import { gitExecFileAsync } from '../git/runner'
-import { getEffectiveHooks } from '../hooks'
 import { getDefaultBaseRef } from '../git/repo'
 import {
   getConfiguredToolCommand,
@@ -59,11 +58,6 @@ export function registerExternalToolHandlers(store: Store): void {
         ? await resolveRefSafe(['merge-base', baseBranch, 'HEAD'], args.worktreePath)
         : ''
 
-      const rawDatabaseUrl = repo
-        ? (getEffectiveHooks(repo, args.worktreePath)?.databaseUrl ?? '')
-        : ''
-      const databaseUrl = rawDatabaseUrl.split('${WORKSPACE_NAME}').join(args.workspaceName)
-
       const values: WorktreeToolPlaceholders = {
         WORKTREE_PATH: args.worktreePath,
         WORKSPACE_NAME: args.workspaceName,
@@ -71,8 +65,7 @@ export function registerExternalToolHandlers(store: Store): void {
         REPO_PATH: repo?.path ?? '',
         BASE_BRANCH: baseBranch,
         MERGE_BASE: mergeBase,
-        HEAD: head,
-        DATABASE_URL: databaseUrl
+        HEAD: head
       }
 
       const command = substituteToolPlaceholders(template, values)

@@ -13,8 +13,7 @@ const VALUES: WorktreeToolPlaceholders = {
   REPO_PATH: '/repo',
   BASE_BRANCH: 'main',
   MERGE_BASE: 'abc123',
-  HEAD: 'def456',
-  DATABASE_URL: 'postgresql://localhost/wise_panther_dev'
+  HEAD: 'def456'
 }
 
 describe('substituteToolPlaceholders', () => {
@@ -32,11 +31,13 @@ describe('substituteToolPlaceholders', () => {
     ).toBe('wise_panther / plo-3884 my feature')
   })
 
-  it('substitutes git refs and the database url', () => {
+  it('substitutes git refs', () => {
     expect(substituteToolPlaceholders('${MERGE_BASE}..${HEAD}', VALUES)).toBe('abc123..def456')
-    expect(substituteToolPlaceholders('open ${DATABASE_URL}', VALUES)).toBe(
-      'open postgresql://localhost/wise_panther_dev'
-    )
+  })
+
+  it('leaves ${DATABASE_URL} unsubstituted — it is deliberately not a placeholder', () => {
+    // Why: repo-sourced data must never reach a shell:true command (injection).
+    expect(substituteToolPlaceholders('db ${DATABASE_URL}', VALUES)).toBe('db ${DATABASE_URL}')
   })
 
   it('leaves unknown placeholders untouched', () => {

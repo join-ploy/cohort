@@ -2,6 +2,12 @@ import type { GlobalSettings } from '../../shared/types'
 
 export type ExternalTool = 'editor' | 'diff' | 'database'
 
+// Why: no DATABASE_URL placeholder. Unlike the others (Orca/user/git-generated),
+// the DB URL is sourced from the repo's committed orca.yaml — repo-controlled
+// data. Substituting it verbatim into a `shell: true` command would re-open the
+// injection vector that shell:openDatabase is hardened against (scheme allowlist
+// + no shell), and shell quoting can't make it safe across user command
+// contexts. Open the repo's DB URL via the safe 'url' preset instead.
 export type WorktreeToolPlaceholders = {
   WORKTREE_PATH: string
   WORKSPACE_NAME: string
@@ -10,7 +16,6 @@ export type WorktreeToolPlaceholders = {
   BASE_BRANCH: string
   MERGE_BASE: string
   HEAD: string
-  DATABASE_URL: string
 }
 
 /** Custom-command string the user configured for `tool`. Empty string means the
