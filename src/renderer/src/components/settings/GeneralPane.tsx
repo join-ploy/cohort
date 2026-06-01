@@ -17,6 +17,7 @@ import {
   GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
+  GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES,
   GENERAL_PANE_SEARCH_ENTRIES,
   GENERAL_SIDEBAR_PROMPT_SEARCH_ENTRIES,
   GENERAL_WORKSPACE_SEARCH_ENTRIES
@@ -456,17 +457,17 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
         onChangeCreatePrCommands={(next) => updateSettings({ createPrCommands: next })}
       />
     ) : null,
-    // Why: self-gates via its own SearchableSetting (renders null when filtered
-    // out), so it needs no matchesSettingsSearch wrapper here.
-    <ExternalToolsSection
-      key="external-tools"
-      editorKind={settings.externalEditorKind}
-      editorCommand={settings.externalEditorCommand}
-      diffCommand={settings.externalDiffCommand}
-      databaseKind={settings.externalDatabaseKind}
-      databaseCommand={settings.externalDatabaseCommand}
-      onChange={updateSettings}
-    />
+    matchesSettingsSearch(searchQuery, GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES) ? (
+      <ExternalToolsSection
+        key="external-tools"
+        editorKind={settings.externalEditorKind}
+        editorCommand={settings.externalEditorCommand}
+        diffCommand={settings.externalDiffCommand}
+        databaseKind={settings.externalDatabaseKind}
+        databaseCommand={settings.externalDatabaseCommand}
+        onChange={updateSettings}
+      />
+    ) : null
     // Note: the Support section is rendered outside this array so it can own
     // its own loading placeholder and its own collapsing Separator. Without
     // that separation, a dangling divider would remain above the collapsed

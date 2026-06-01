@@ -8,12 +8,6 @@ import { ExternalToolsSection } from './ExternalToolsSection'
 // manually between tests or accumulated DOM makes getByLabelText ambiguous.
 afterEach(() => cleanup())
 
-// SearchableSetting reads settingsSearchQuery from the store; stub it open.
-vi.mock('../../store', () => ({
-  useAppStore: (selector?: (s: unknown) => unknown) =>
-    selector ? selector({ settingsSearchQuery: '' }) : { settingsSearchQuery: '' }
-}))
-
 function setup(overrides: Record<string, unknown> = {}) {
   const onChange = vi.fn()
   render(

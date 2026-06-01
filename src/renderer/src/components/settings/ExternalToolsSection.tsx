@@ -3,7 +3,6 @@ import type { GlobalSettings } from '../../../../shared/types'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import { SearchableSetting } from './SearchableSetting'
 
 type ExternalToolsSectionProps = {
   editorKind: 'vscode' | 'custom'
@@ -20,17 +19,6 @@ const PLACEHOLDER_HELP =
 const EDITOR_EXAMPLE = 'emacsclient -n -e \'(magit-status "${WORKTREE_PATH}")\''
 const DIFF_EXAMPLE = 'emacsclient -n -e \'(magit-diff-range "${MERGE_BASE}..HEAD")\''
 const DATABASE_EXAMPLE = 'dbeaver ${DATABASE_URL}'
-
-const KEYWORDS = [
-  'external',
-  'tool',
-  'editor',
-  'emacs',
-  'emacsclient',
-  'diff',
-  'database',
-  'command'
-]
 
 // Why: commit-on-blur (not per-keystroke) so editing a command does not
 // round-trip through the persisted settings store on every character — mirrors
@@ -83,13 +71,12 @@ export function ExternalToolsSection({
   databaseCommand,
   onChange
 }: ExternalToolsSectionProps): React.JSX.Element {
+  // Why: visibility under settings search is owned by the GeneralPane entry's
+  // matchesSettingsSearch(GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES) gate — a single
+  // source of truth that avoids a dangling Separator when the query matches
+  // another section but not this one.
   return (
-    <SearchableSetting
-      title="External tools"
-      description="Configure the Editor, Diff, and Database buttons in the worktree bar."
-      keywords={KEYWORDS}
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       <div className="space-y-1">
         <h3 className="text-sm font-semibold">External tools</h3>
         <p className="text-xs text-muted-foreground">
@@ -171,6 +158,6 @@ export function ExternalToolsSection({
           />
         ) : null}
       </div>
-    </SearchableSetting>
+    </div>
   )
 }
