@@ -104,6 +104,10 @@ export function registerAppHandlers(): void {
     setUnreadDockBadgeCount(Number.isFinite(count) ? count : 0)
   })
 
+  // Why: lets the renderer abbreviate the home prefix of absolute paths to `~`
+  // for display. Stable per session, so the renderer fetches it once.
+  ipcMain.handle('app:getHomeDir', (): string => app.getPath('home'))
+
   ipcMain.handle('app:getFloatingTerminalCwd', (_event, args?: FloatingTerminalCwdRequest) =>
     resolveFloatingTerminalCwd(args)
   )

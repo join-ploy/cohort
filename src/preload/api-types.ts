@@ -415,6 +415,9 @@ export type AppApi = {
   getKeyboardInputSourceId: () => Promise<string | null>
   /** Updates the macOS Dock unread badge. No-op on Windows/Linux. */
   setUnreadDockBadgeCount: (count: number) => Promise<void>
+  /** The OS home directory (`app.getPath('home')`). Used to abbreviate the home
+   *  prefix of displayed paths to `~`. */
+  getHomeDir: () => Promise<string>
   /** Resolves the launch directory for global Floating Terminal tabs. */
   getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest) => Promise<string>
 }

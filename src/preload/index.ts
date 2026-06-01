@@ -333,7 +333,8 @@ const api = {
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
       ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
     getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
-      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args),
+    getHomeDir: (): Promise<string> => ipcRenderer.invoke('app:getHomeDir')
   },
 
   wsl: {

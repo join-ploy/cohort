@@ -31,6 +31,7 @@ vi.mock('./sidebar/WorktreeContextMenu', () => ({
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 type ApiMock = {
+  app: { getHomeDir: ReturnType<typeof vi.fn> }
   hooks: { check: ReturnType<typeof vi.fn> }
   shell: {
     openPath: ReturnType<typeof vi.fn>
@@ -42,8 +43,9 @@ type ApiMock = {
 
 let api: ApiMock
 
-function makeApi(databaseUrl = ''): ApiMock {
+function makeApi(databaseUrl = '', homeDir = '/Users/hoyon'): ApiMock {
   return {
+    app: { getHomeDir: vi.fn().mockResolvedValue(homeDir) },
     hooks: {
       check: vi.fn().mockResolvedValue({
         hasHooks: Boolean(databaseUrl),
@@ -174,6 +176,22 @@ describe('WorktreeContextBar — button routing', () => {
   })
 
   afterEach(() => cleanup())
+
+  it('collapses the home prefix of the path readout to ~', async () => {
+    const homeWorktree = {
+      ...baseWorktree,
+      id: 'repo-1::/Users/hoyon/orca/ws/abc',
+      path: '/Users/hoyon/orca/ws/abc'
+    } as Worktree
+    mockState = baseState({
+      activeWorktreeId: homeWorktree.id,
+      worktreesById: new Map<string, Worktree>([[homeWorktree.id, homeWorktree]])
+    })
+    const Bar = await importBar()
+    render(<Bar />)
+    // findByText waits for the async getHomeDir effect to resolve + re-render.
+    expect(await screen.findByText('~/orca/ws/abc')).toBeTruthy()
+  })
 
   it('Finder reveals the worktree path', async () => {
     const Bar = await importBar()

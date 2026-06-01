@@ -14,6 +14,7 @@ import { useAppStore } from '../store'
 import { getGroupByWorktreeId, useRepoById, useWorktreeById } from '../store/selectors'
 import WorktreeContextMenu from './sidebar/WorktreeContextMenu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { tildifyPath } from '../lib/path'
 import type { OrcaHooks } from '../../../shared/types'
 
 const isMac = navigator.userAgent.includes('Mac')
@@ -43,6 +44,15 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const worktreePath = worktree?.path ?? ''
   const workspaceName = worktree?.workspaceName ?? ''
+  // Why: the renderer has no direct access to the OS home dir; fetch it once so
+  // the path readout can collapse the home prefix to `~`. Stable per session.
+  const [homeDir, setHomeDir] = useState<string>('')
+  useEffect(() => {
+    void window.api.app
+      .getHomeDir()
+      .then(setHomeDir)
+      .catch(() => {})
+  }, [])
   // Why: databaseUrl lives in the repo's orca.yaml / conductor.json so teammates
   // share one template. Mirror RunPanel's hooks:check pattern — re-fetch when the
   // active repo changes. Empty/missing → the Database 'url' preset is unconfigured.
@@ -234,12 +244,14 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Why: the worktree path is a plain readout, not a button — the Finder
-              button below owns the reveal action. */}
+              button below owns the reveal action. Shown in full (no truncation)
+              with the home prefix collapsed to `~`; the title carries the real
+              absolute path. */}
           <span
-            className="max-w-[260px] truncate font-mono text-xs text-muted-foreground"
+            className="whitespace-nowrap font-mono text-xs text-muted-foreground"
             title={worktreePath}
           >
-            {worktreePath}
+            {tildifyPath(worktreePath, homeDir)}
           </span>
 
           {/* Why: local TooltipProvider so the bar's tooltips work even when
