@@ -17,6 +17,9 @@ export type RunExternalToolArgs = {
   worktreePath: string
   repoId: string
   workspaceName: string
+  /** The user-facing label given to the workspace (Worktree.displayName), as
+   *  opposed to the git-safe `workspaceName` slug. */
+  displayName: string
 }
 
 export type RunExternalToolResult = { ok: boolean; error?: string }
@@ -64,6 +67,7 @@ export function registerExternalToolHandlers(store: Store): void {
       const values: WorktreeToolPlaceholders = {
         WORKTREE_PATH: args.worktreePath,
         WORKSPACE_NAME: args.workspaceName,
+        WORKSPACE_DISPLAY_NAME: args.displayName,
         REPO_PATH: repo?.path ?? '',
         BASE_BRANCH: baseBranch,
         MERGE_BASE: mergeBase,

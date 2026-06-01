@@ -5,6 +5,7 @@ export type ExternalTool = 'editor' | 'diff' | 'database'
 export type WorktreeToolPlaceholders = {
   WORKTREE_PATH: string
   WORKSPACE_NAME: string
+  WORKSPACE_DISPLAY_NAME: string
   REPO_PATH: string
   BASE_BRANCH: string
   MERGE_BASE: string

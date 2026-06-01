@@ -900,6 +900,7 @@ export type PreloadApi = {
       worktreePath: string
       repoId: string
       workspaceName: string
+      displayName: string
     }) => Promise<{ ok: boolean; error?: string }>
   }
   pet: {

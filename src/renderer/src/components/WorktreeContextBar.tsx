@@ -109,7 +109,8 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           worktreeId: worktree.id,
           worktreePath: worktree.path,
           repoId: repo.id,
-          workspaceName: worktree.workspaceName
+          workspaceName: worktree.workspaceName,
+          displayName: worktree.displayName
         })
         .then((result) => {
           if (!result.ok) {

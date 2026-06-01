@@ -58,7 +58,8 @@ const baseArgs = {
   worktreeId: 'repo-1::/wt/feature',
   worktreePath: '/wt/feature',
   repoId: 'repo-1',
-  workspaceName: 'wise_panther'
+  workspaceName: 'wise_panther',
+  displayName: 'plo-3884-feature'
 }
 
 describe('registerExternalToolHandlers', () => {

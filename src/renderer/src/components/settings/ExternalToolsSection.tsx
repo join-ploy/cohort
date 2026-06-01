@@ -15,7 +15,7 @@ type ExternalToolsSectionProps = {
 }
 
 const PLACEHOLDER_HELP =
-  '${WORKTREE_PATH}, ${WORKSPACE_NAME}, ${REPO_PATH}, ${BASE_BRANCH}, ${MERGE_BASE}, ${HEAD}, ${DATABASE_URL}'
+  '${WORKTREE_PATH}, ${WORKSPACE_NAME} (git-safe slug), ${WORKSPACE_DISPLAY_NAME} (the name you gave), ${REPO_PATH}, ${BASE_BRANCH}, ${MERGE_BASE}, ${HEAD}, ${DATABASE_URL}'
 
 const EDITOR_EXAMPLE = 'emacsclient -n -e \'(magit-status "${WORKTREE_PATH}")\''
 const DIFF_EXAMPLE = 'emacsclient -n -e \'(magit-diff-range "${MERGE_BASE}..HEAD")\''

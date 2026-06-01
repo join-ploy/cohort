@@ -9,6 +9,7 @@ import { getDefaultSettings } from '../../shared/constants'
 const VALUES: WorktreeToolPlaceholders = {
   WORKTREE_PATH: '/wt/my feature',
   WORKSPACE_NAME: 'wise_panther',
+  WORKSPACE_DISPLAY_NAME: 'plo-3884 my feature',
   REPO_PATH: '/repo',
   BASE_BRANCH: 'main',
   MERGE_BASE: 'abc123',
@@ -23,6 +24,12 @@ describe('substituteToolPlaceholders', () => {
       VALUES
     )
     expect(out).toBe('emacsclient -n -e \'(magit-status "/wt/my feature")\'')
+  })
+
+  it('substitutes the workspace display name distinctly from the git-safe name', () => {
+    expect(
+      substituteToolPlaceholders('${WORKSPACE_NAME} / ${WORKSPACE_DISPLAY_NAME}', VALUES)
+    ).toBe('wise_panther / plo-3884 my feature')
   })
 
   it('substitutes git refs and the database url', () => {

@@ -1193,6 +1193,7 @@ const api = {
       worktreePath: string
       repoId: string
       workspaceName: string
+      displayName: string
     }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('externalTool:run', args)
   },
 
