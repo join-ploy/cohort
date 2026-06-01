@@ -308,7 +308,7 @@ describe('WorktreeContextBar — button routing', () => {
   })
 })
 
-describe('WorktreeContextBar — group repo switcher', () => {
+describe('WorktreeContextBar — group repo target selector', () => {
   const repoWeb = {
     ...baseRepo,
     id: 'repo-2',
@@ -352,25 +352,44 @@ describe('WorktreeContextBar — group repo switcher', () => {
 
   afterEach(() => cleanup())
 
-  it('renders a repo switcher in place of the plain path readout', async () => {
+  it('renders a repo target selector in place of the plain path readout', async () => {
     const Bar = await importBar()
     render(<Bar />)
-    expect(screen.getByRole('button', { name: 'Switch repo' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Choose repo for actions' })).toBeTruthy()
   })
 
-  it('selecting a member focuses that repo via setActiveWorktree (no agent spawn)', async () => {
+  it('picking a repo retargets the buttons without changing the focused worktree', async () => {
+    // Editor in custom kind so the button routes through externalTool.run, whose
+    // payload reveals which repo the buttons are pointed at.
+    mockState = {
+      ...groupState(),
+      settings: settingsWith({ externalEditorKind: 'custom', externalEditorCommand: 'emacsclient' })
+    }
     const Bar = await importBar()
     render(<Bar />)
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Switch repo' }))
+    await user.click(screen.getByRole('button', { name: 'Choose repo for actions' }))
     await user.click(screen.getByRole('menuitem', { name: /ploy-web/ }))
-    expect(setActiveWorktreeMock).toHaveBeenCalledWith('repo-2::/wt/web')
+
+    // The on-screen view must NOT move — Option B never calls setActiveWorktree.
+    expect(setActiveWorktreeMock).not.toHaveBeenCalled()
+
+    // ...but the buttons now act on the picked repo (repo-2), not the focused one.
+    fireEvent.click(screen.getByLabelText('Open in external editor'))
+    expect(api.externalTool.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: 'editor',
+        worktreeId: 'repo-2::/wt/web',
+        worktreePath: '/wt/web',
+        repoId: 'repo-2'
+      })
+    )
   })
 
-  it('stays a plain readout (no switcher) for a single-member group', async () => {
+  it('stays a plain readout (no selector) for a single-member group', async () => {
     mockState = baseState({ group, groupMembers: [baseWorktree] })
     const Bar = await importBar()
     render(<Bar />)
-    expect(screen.queryByRole('button', { name: 'Switch repo' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Choose repo for actions' })).toBeNull()
   })
 })

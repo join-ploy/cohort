@@ -51,7 +51,6 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar)
-  const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
   const settings = useAppStore((s) => s.settings)
   const worktree = useWorktreeById(activeWorktreeId)
   const repo = useRepoById(worktree?.repoId ?? null)
@@ -61,20 +60,34 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const group = useAppStore((s) =>
     activeWorktreeId ? getGroupByWorktreeId(s, activeWorktreeId) : null
   )
-  // Why: for a multi-repo group the path readout doubles as a repo switcher.
-  // Selecting a member focuses it via setActiveWorktree — the same lightweight
-  // switch the in-group tab strip uses, so the buttons below retarget to that
-  // repo and the member's existing surface is restored WITHOUT spawning a new
-  // agent terminal (which activateAndRevealWorktree would). Guard on groupId so
-  // ungrouped worktrees pay no selector cost.
+  // Why: guard on groupId so ungrouped worktrees pay no member/repo selector cost.
   const groupId = group?.id ?? null
   const groupMembers = useAppStore(
     useShallow((s) => (groupId ? getMemberWorktreesForGroup(s, groupId) : EMPTY_MEMBERS))
   )
   const repoMap = useAppStore((s) => (groupId ? getRepoMapFromState(s) : EMPTY_REPO_MAP))
+
+  // Why: in a multi-repo group the path readout is a repo *target* selector for
+  // the action buttons. Picking a member deliberately does NOT change what's on
+  // screen (no setActiveWorktree) — it only points Finder/Editor/Diff/Database at
+  // that repo, so the user can act on a sibling repo while staying in the
+  // group's main terminal. `targetOverride` is the user's pick; it's ignored once
+  // it's no longer a live member of the current group (e.g. after moving to
+  // another workspace), so the target falls back to the focused worktree.
+  const [targetOverride, setTargetOverride] = useState<string | null>(null)
+  const switchableMembers = groupMembers.filter((m) => !m.isArchived)
+  const showRepoSwitcher = group != null && switchableMembers.length > 1
+  const targetWorktreeId =
+    targetOverride != null && switchableMembers.some((m) => m.id === targetOverride)
+      ? targetOverride
+      : activeWorktreeId
+  // The action buttons operate on targetWorktree/targetRepo — the focused
+  // worktree unless the user picked another group member from the switcher.
+  const targetWorktree = useWorktreeById(targetWorktreeId)
+  const targetRepo = useRepoById(targetWorktree?.repoId ?? null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
-  const worktreePath = worktree?.path ?? ''
-  const workspaceName = worktree?.workspaceName ?? ''
+  const targetPath = targetWorktree?.path ?? ''
+  const targetWorkspaceName = targetWorktree?.workspaceName ?? ''
   // Why: the renderer has no direct access to the OS home dir; fetch it once so
   // the path readout can collapse the home prefix to `~`. Stable per session.
   const [homeDir, setHomeDir] = useState<string>('')
@@ -85,17 +98,17 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
       .catch(() => {})
   }, [])
   // Why: databaseUrl lives in the repo's orca.yaml / conductor.json so teammates
-  // share one template. Mirror RunPanel's hooks:check pattern — re-fetch when the
-  // active repo changes. Empty/missing → the Database 'url' preset is unconfigured.
+  // share one template. Re-fetch for the TARGET repo (the Database button acts on
+  // it). Empty/missing → the Database 'url' preset is unconfigured.
   const [databaseUrl, setDatabaseUrl] = useState<string>('')
   useEffect(() => {
-    if (!repo?.id) {
+    if (!targetRepo?.id) {
       setDatabaseUrl('')
       return
     }
     let cancelled = false
     void window.api.hooks
-      .check({ repoId: repo.id })
+      .check({ repoId: targetRepo.id })
       .then((result) => {
         if (cancelled) {
           return
@@ -111,7 +124,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     return () => {
       cancelled = true
     }
-  }, [repo?.id])
+  }, [targetRepo?.id])
 
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
@@ -131,17 +144,17 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
 
   const runTool = useCallback(
     (tool: 'editor' | 'diff' | 'database'): void => {
-      if (!worktree || !repo) {
+      if (!targetWorktree || !targetRepo) {
         return
       }
       void window.api.externalTool
         .run({
           tool,
-          worktreeId: worktree.id,
-          worktreePath: worktree.path,
-          repoId: repo.id,
-          workspaceName: worktree.workspaceName,
-          displayName: worktree.displayName
+          worktreeId: targetWorktree.id,
+          worktreePath: targetWorktree.path,
+          repoId: targetRepo.id,
+          workspaceName: targetWorktree.workspaceName,
+          displayName: targetWorktree.displayName
         })
         .then((result) => {
           if (!result.ok) {
@@ -150,14 +163,14 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
         })
         .catch(() => toast.error(`Couldn't run ${tool} command`))
     },
-    [worktree, repo]
+    [targetWorktree, targetRepo]
   )
 
   const handleFinder = useCallback((): void => {
-    if (worktreePath) {
-      window.api.shell.openPath(worktreePath)
+    if (targetPath) {
+      window.api.shell.openPath(targetPath)
     }
-  }, [worktreePath])
+  }, [targetPath])
 
   const handleDatabase = useCallback((): void => {
     if (!databaseConfigured) {
@@ -167,12 +180,18 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
       runTool('database')
       return
     }
-    if (!databaseUrl || !workspaceName) {
+    if (!databaseUrl || !targetWorkspaceName) {
       return
     }
-    const resolvedUrl = databaseUrl.split('${WORKSPACE_NAME}').join(workspaceName)
+    const resolvedUrl = databaseUrl.split('${WORKSPACE_NAME}').join(targetWorkspaceName)
     void window.api.shell.openDatabase(resolvedUrl)
-  }, [databaseConfigured, settings?.externalDatabaseKind, databaseUrl, workspaceName, runTool])
+  }, [
+    databaseConfigured,
+    settings?.externalDatabaseKind,
+    databaseUrl,
+    targetWorkspaceName,
+    runTool
+  ])
 
   const handleEditor = useCallback((): void => {
     if (!editorConfigured) {
@@ -184,10 +203,10 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
     }
     // Why: vscode://file/ is a no-op on machines without VS Code installed,
     // matching shell.openPath's "open whatever the OS associates" behavior.
-    if (worktreePath) {
-      window.api.shell.openVscode(worktreePath)
+    if (targetPath) {
+      window.api.shell.openVscode(targetPath)
     }
-  }, [editorConfigured, settings?.externalEditorKind, worktreePath, runTool])
+  }, [editorConfigured, settings?.externalEditorKind, targetPath, runTool])
 
   const handleDiff = useCallback((): void => {
     if (diffConfigured) {
@@ -221,12 +240,6 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   if (activeView !== 'terminal' || !activeWorktreeId || !worktree) {
     return null
   }
-
-  // Why: archived members have no renderable surface to switch to, so they're
-  // excluded as switch targets. The switcher only appears once a group has more
-  // than one live member — a single-member group has nothing to pick between.
-  const switchableMembers = groupMembers.filter((m) => !m.isArchived)
-  const showRepoSwitcher = group != null && switchableMembers.length > 1
 
   return (
     <WorktreeContextMenu worktree={worktree}>
@@ -281,20 +294,21 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           className="flex shrink-0 items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Why: the worktree path is shown in full (no truncation) with the
-              home prefix collapsed to `~`. In a multi-repo group it becomes a
-              dropdown to switch the focused repo (which retargets the buttons);
-              otherwise it's a plain readout — the Finder button owns reveal. */}
+          {/* Why: the path is shown in full (no truncation) with the home prefix
+              collapsed to `~`. In a multi-repo group it's a dropdown that picks
+              which repo the action buttons target (without changing the on-screen
+              view); otherwise a plain readout. The shown path is always the
+              target's, so it reflects exactly what the buttons will act on. */}
           {showRepoSwitcher ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  aria-label="Switch repo"
-                  title={worktreePath}
+                  aria-label="Choose repo for actions"
+                  title={targetPath}
                   className="flex items-center gap-1 whitespace-nowrap rounded-sm px-1 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
-                  <span>{tildifyPath(worktreePath, homeDir)}</span>
+                  <span>{tildifyPath(targetPath, homeDir)}</span>
                   <ChevronDown className="size-3 shrink-0" />
                 </button>
               </DropdownMenuTrigger>
@@ -304,7 +318,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                   return (
                     <DropdownMenuItem
                       key={member.id}
-                      onSelect={() => setActiveWorktree(member.id)}
+                      onSelect={() => setTargetOverride(member.id)}
                       title={member.path}
                       className="flex items-center gap-2"
                     >
@@ -315,7 +329,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
                       <span className="min-w-0 flex-1 truncate">
                         {memberRepo?.displayName ?? member.displayName}
                       </span>
-                      {member.id === activeWorktreeId && <Check className="size-3.5 shrink-0" />}
+                      {member.id === targetWorktreeId && <Check className="size-3.5 shrink-0" />}
                     </DropdownMenuItem>
                   )
                 })}
@@ -324,9 +338,9 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           ) : (
             <span
               className="whitespace-nowrap font-mono text-xs text-muted-foreground"
-              title={worktreePath}
+              title={targetPath}
             >
-              {tildifyPath(worktreePath, homeDir)}
+              {tildifyPath(targetPath, homeDir)}
             </span>
           )}
 
