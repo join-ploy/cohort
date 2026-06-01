@@ -66,6 +66,15 @@ vi.mock('./sidebar/WorktreeContextMenu', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
+// Why: the Finder button label is platform-specific; derive the expected value
+// the same way the component does so assertions hold regardless of the
+// platform/jsdom userAgent the suite runs under.
+const expectedFinderLabel = navigator.userAgent.includes('Mac')
+  ? 'Reveal in Finder'
+  : navigator.userAgent.includes('Linux')
+    ? 'Open Containing Folder'
+    : 'Reveal in File Explorer'
+
 type ApiMock = {
   app: { getHomeDir: ReturnType<typeof vi.fn> }
   hooks: { check: ReturnType<typeof vi.fn> }
@@ -173,7 +182,7 @@ describe('WorktreeContextBar — structure', () => {
   it('renders all four external-tool buttons', async () => {
     const Bar = await importBar()
     const markup = renderToStaticMarkup(<Bar />)
-    expect(markup).toContain('aria-label="Reveal in Finder"')
+    expect(markup).toContain(`aria-label="${expectedFinderLabel}"`)
     expect(markup).toContain('aria-label="Open in database"')
     expect(markup).toContain('aria-label="Open in external editor"')
     expect(markup).toContain('aria-label="Open diff in external tool"')
@@ -233,7 +242,7 @@ describe('WorktreeContextBar — button routing', () => {
   it('Finder reveals the worktree path', async () => {
     const Bar = await importBar()
     render(<Bar />)
-    fireEvent.click(screen.getByLabelText('Reveal in Finder'))
+    fireEvent.click(screen.getByLabelText(expectedFinderLabel))
     expect(api.shell.openPath).toHaveBeenCalledWith('/wt/feature')
   })
 

@@ -129,6 +129,15 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
   const toggleSidebarLabel = rightSidebarOpen ? 'Close right sidebar' : 'Open right sidebar'
   const toggleSidebarShortcut = `${isMac ? '⌘' : 'Ctrl+'}L`
 
+  // Why: the Finder button's label/tooltip must name what shell.openPath
+  // actually opens on each platform — Finder on macOS, File Explorer on Windows,
+  // the file manager on Linux (AGENTS.md cross-platform labelling rule).
+  const finderLabel = isMac
+    ? 'Reveal in Finder'
+    : navigator.userAgent.includes('Linux')
+      ? 'Open Containing Folder'
+      : 'Reveal in File Explorer'
+
   // Why: pre-hydration settings can be null for a frame; treat missing config as
   // not-yet-configured so the buttons render faded rather than crashing. The
   // VS Code editor preset is always "configured"; custom commands require a
@@ -349,7 +358,7 @@ export default function WorktreeContextBar(): React.JSX.Element | null {
           <TooltipProvider delayDuration={400}>
             <div className="flex items-center gap-0.5">
               <ToolButton
-                label="Reveal in Finder"
+                label={finderLabel}
                 enabled
                 onClick={handleFinder}
                 icon={<FolderOpen className="size-3.5" />}
