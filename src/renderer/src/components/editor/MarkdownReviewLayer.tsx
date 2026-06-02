@@ -65,6 +65,14 @@ export function MarkdownReviewLayer({
     return () => clearReviewHighlights()
   }, [draft.comments, activeCommentId, content, getBody])
 
+  // Why: a submit clears the whole draft, so drop a now-dangling active id
+  // (it never matches a card, but keeping it would misfocus the next comment).
+  useEffect(() => {
+    if (activeCommentId && !draft.comments.some((c) => c.id === activeCommentId)) {
+      setActiveCommentId(null)
+    }
+  }, [draft.comments, activeCommentId])
+
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection()
     const body = getBody()
@@ -73,12 +81,12 @@ export function MarkdownReviewLayer({
       return
     }
     const range = selection.getRangeAt(0)
-    if (!body.contains(range.commonAncestorContainer)) {
+    if (!body.contains(range.commonAncestorContainer) || !wrapperRef.current) {
       setPopover(null)
       return
     }
     const rect = range.getBoundingClientRect()
-    const wrapperRect = wrapperRef.current!.getBoundingClientRect()
+    const wrapperRect = wrapperRef.current.getBoundingClientRect()
     setPopover({ x: rect.left - wrapperRect.left, y: rect.bottom - wrapperRect.top })
   }, [getBody])
 
