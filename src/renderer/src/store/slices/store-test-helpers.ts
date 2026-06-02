@@ -33,6 +33,7 @@ import { createScriptsSlice } from './scripts'
 import { createAutomationRunsSlice } from './automation-runs'
 import { createAutomationsSlice } from './automations'
 import { createWorkspaceGroupsSlice } from './workspace-groups'
+import { createMarkdownReviewSlice } from './markdown-review'
 
 export const TEST_REPO = {
   id: 'repo1',
@@ -68,7 +69,8 @@ export function createTestStore() {
     ...createScriptsSlice(...a),
     ...createAutomationRunsSlice(...a),
     ...createAutomationsSlice(...a),
-    ...createWorkspaceGroupsSlice(...a)
+    ...createWorkspaceGroupsSlice(...a),
+    ...createMarkdownReviewSlice(...a)
   }))
 }
 

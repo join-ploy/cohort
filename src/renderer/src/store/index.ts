@@ -25,6 +25,7 @@ import { createScriptsSlice } from './slices/scripts'
 import { createAutomationRunsSlice } from './slices/automation-runs'
 import { createAutomationsSlice } from './slices/automations'
 import { createWorkspaceGroupsSlice } from './slices/workspace-groups'
+import { createMarkdownReviewSlice } from './slices/markdown-review'
 import { e2eConfig } from '@/lib/e2e-config'
 import { registerHttpLinkStoreAccessor } from '@/lib/http-link-routing'
 
@@ -53,7 +54,8 @@ export const useAppStore = create<AppState>()((...a) => ({
   ...createScriptsSlice(...a),
   ...createAutomationRunsSlice(...a),
   ...createAutomationsSlice(...a),
-  ...createWorkspaceGroupsSlice(...a)
+  ...createWorkspaceGroupsSlice(...a),
+  ...createMarkdownReviewSlice(...a)
 }))
 
 registerHttpLinkStoreAccessor(() => useAppStore.getState())
