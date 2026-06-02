@@ -680,6 +680,10 @@ function EditorPanelInner({
         setEditorViewMode(fileId, 'changes')
         return
       }
+      if (next === 'review') {
+        setEditorViewMode(fileId, 'review')
+        return
+      }
       // Why: selecting any non-Changes segment implicitly exits Changes mode.
       // For markdown/mermaid files, also persist the chosen language sub-mode
       // so that next time Changes is toggled off, the file returns to that view.
@@ -1052,6 +1056,12 @@ function EditorPanelInner({
   )
 
   const isMarkdown = resolvedLanguage === 'markdown'
+  const isReviewMode =
+    activeFile.mode === 'edit' &&
+    isMarkdown &&
+    editorViewMode[activeFile.id] === 'review' &&
+    !fileContents[activeFile.id]?.isBinary &&
+    !fileContents[activeFile.id]?.loadError
   const isMermaid = resolvedLanguage === 'mermaid'
   const isCsv = resolvedLanguage === 'csv' || resolvedLanguage === 'tsv'
   const isNotebook = resolvedLanguage === 'notebook'
@@ -1112,7 +1122,7 @@ function EditorPanelInner({
   // rather than offering a segment the renderer will immediately ignore.
   const availableEditorToggleModes =
     isBinaryEditSurface || !canUseChangesMode
-      ? editorToggleModes.filter((mode) => mode !== 'changes')
+      ? editorToggleModes.filter((mode) => mode !== 'changes' && mode !== 'review')
       : editorToggleModes
   // Why: a toggle with a single option is just a decorative pill with nothing
   // to switch to. Binary plain-code tabs end up here after 'changes' is
@@ -1121,9 +1131,11 @@ function EditorPanelInner({
   const hasEditorToggle = availableEditorToggleModes.length > 1
   const effectiveToggleValue: EditorToggleValue = isChangesMode
     ? 'changes'
-    : hasViewModeToggle
-      ? mdViewMode
-      : 'edit'
+    : isReviewMode
+      ? 'review'
+      : hasViewModeToggle
+        ? mdViewMode
+        : 'edit'
   const canShowMarkdownPreview = canOpenMarkdownPreview({
     language: resolvedLanguage,
     mode: activeFile.mode,
@@ -1355,6 +1367,7 @@ function EditorPanelInner({
           isNotebook={isNotebook}
           mdViewMode={mdViewMode}
           isChangesMode={isChangesMode}
+          isReviewMode={isReviewMode}
           sideBySide={sideBySide}
           pendingEditorReveal={pendingEditorReveal}
           handleContentChange={handleContentChange}

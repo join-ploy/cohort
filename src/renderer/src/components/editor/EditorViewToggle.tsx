@@ -4,6 +4,7 @@ import {
   Eye,
   FileText,
   GitCompareArrows,
+  MessageSquare,
   NotebookText,
   Pencil,
   Table as TableIcon,
@@ -19,7 +20,7 @@ import type { MarkdownViewMode } from '@/store/slices/editor'
 // once. 'edit' is the code-file counterpart to markdown's 'source' — it means
 // "the normal editor for this file" without implying the markdown source/raw
 // distinction. See reviews/changes-view-mode-plan.md.
-export type EditorToggleValue = MarkdownViewMode | 'edit' | 'changes'
+export type EditorToggleValue = MarkdownViewMode | 'edit' | 'changes' | 'review'
 
 type ViewModeMetadata = { label: string; icon: LucideIcon; title?: string }
 
@@ -39,6 +40,11 @@ const DEFAULT_VIEW_MODE_METADATA: Record<EditorToggleValue, ViewModeMetadata> = 
   edit: {
     label: 'Edit',
     icon: FileText
+  },
+  review: {
+    label: 'Review',
+    icon: MessageSquare,
+    title: 'Annotate and send a review to the agent'
   },
   changes: {
     label: 'Changes',

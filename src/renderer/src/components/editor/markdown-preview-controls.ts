@@ -34,6 +34,10 @@ export function getEditorToggleModes(target: MarkdownPreviewTarget): readonly Ed
   }
   const languageModes = getMarkdownViewModes(target)
   if (languageModes.length > 0) {
+    // Why: Review is markdown-only — mermaid/csv have no annotation surface.
+    if (target.language === 'markdown') {
+      return [...languageModes, 'review', 'changes']
+    }
     return [...languageModes, 'changes']
   }
   return CODE_EDIT_TOGGLE_MODES
