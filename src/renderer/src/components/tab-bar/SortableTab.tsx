@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
-import { X, Minimize2, Columns2, Rows2 } from 'lucide-react'
+import { Minimize2, Columns2, Rows2 } from 'lucide-react'
 import { ShellIcon } from './shell-icons'
 import {
   DropdownMenu,
@@ -19,6 +19,8 @@ import {
   getDropIndicatorClasses,
   type DropIndicator
 } from './drop-indicator'
+import { TabShortcutHint } from './tab-shortcut-hint'
+import { TabCloseButton } from './tab-close-button'
 
 type SortableTabProps = {
   tab: TerminalTab
@@ -40,6 +42,9 @@ type SortableTabProps = {
    *  different member of the active workspace group. null/undefined when the
    *  tab is part of the strip's own worktree. */
   memberBadge?: { color: string; name: string } | null
+  /** Cmd/Ctrl+N jump hint shown on the right (e.g. "⌘1"). null when this tab
+   *  isn't in the focused group's first nine. */
+  shortcutHint?: string | null
 }
 
 export const TAB_COLORS = [
@@ -73,7 +78,8 @@ export default function SortableTab({
   onSplitGroup,
   dragData,
   dropIndicator,
-  memberBadge
+  memberBadge,
+  shortcutHint
 }: SortableTabProps): React.JSX.Element {
   const { attributes, listeners, setNodeRef } = useSortable({
     id: tab.id,
@@ -215,7 +221,7 @@ export default function SortableTab({
           // tab still reads as "selected + has activity". The wash is
           // rendered as an absolutely-positioned child below so the ::after
           // pseudo-element stays free for the drop indicator.
-          className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
+          className={`group relative flex items-center h-full px-2 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
             isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
           onDoubleClick={(e) => {
@@ -338,11 +344,11 @@ export default function SortableTab({
               // shrink it to ~0 when many tabs compete for horizontal space.
               // Force a minimum width that matches the normal title box so the
               // rename input stays usable even when the tab bar is saturated.
-              className="h-5 w-[72px] min-w-[72px] max-w-[72px] mr-1 px-1 py-0 text-xs"
+              className="h-5 w-[96px] min-w-[96px] max-w-[96px] mr-1 px-1 py-0 text-xs"
               spellCheck={false}
             />
           ) : (
-            <span className="truncate max-w-[72px] mr-1">{tab.customTitle ?? tab.title}</span>
+            <span className="truncate max-w-[96px] mr-1">{tab.customTitle ?? tab.title}</span>
           )}
           {tab.color && !isEditing && (
             <span
@@ -368,27 +374,14 @@ export default function SortableTab({
               <Minimize2 className="w-3 h-3" />
             </button>
           )}
+          {shortcutHint && !isEditing && <TabShortcutHint label={shortcutHint} />}
+          {/* Why: stable accessible name so E2E can drive the user path (hover →
+              click X) rather than bypassing the render layer via the store. */}
           {!isEditing && (
-            <button
-              className={`flex items-center justify-center w-4 h-4 rounded-sm shrink-0 ${
-                isActive
-                  ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  : 'text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted'
-              }`}
-              // Why: per-tab close affordance needs a stable accessible name so
-              // E2E specs can drive the same path a user takes (hover → click X)
-              // instead of bypassing the render layer by calling closeTab() on
-              // the store — a store-only assertion would pass even if this
-              // button had been accidentally unmounted.
-              aria-label={`Close tab ${tab.customTitle ?? tab.title}`}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose(tab.id)
-              }}
-            >
-              <X className="w-3 h-3" />
-            </button>
+            <TabCloseButton
+              ariaLabel={`Close tab ${tab.customTitle ?? tab.title}`}
+              onClose={() => onClose(tab.id)}
+            />
           )}
         </div>
       </div>

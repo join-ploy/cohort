@@ -6,7 +6,6 @@ import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
 import { SPLIT_TERMINAL_PANE_EVENT, CLOSE_TERMINAL_PANE_EVENT } from '@/constants/terminal'
 import type { SplitTerminalPaneDetail, CloseTerminalPaneDetail } from '@/constants/terminal'
-import { getVisibleWorktreeIds } from '@/components/sidebar/visible-worktrees'
 import { nextEditorFontZoomLevel, computeEditorFontSize } from '@/lib/editor-font-zoom'
 import type { UpdateStatus } from '../../../shared/types'
 import type { RateLimitState } from '../../../shared/rate-limit-types'
@@ -17,7 +16,8 @@ import { resolveZoomTarget } from './resolve-zoom-target'
 import {
   handleSwitchTab,
   handleSwitchTabAcrossAllTypes,
-  handleSwitchTerminalTab
+  handleSwitchTerminalTab,
+  handleSwitchToTabIndex
 } from './ipc-tab-switch'
 import {
   normalizeAgentStatusPayload,
@@ -203,15 +203,12 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
-      window.api.ui.onJumpToWorktreeIndex((index) => {
+      window.api.ui.onJumpToTabIndex((index) => {
         const store = useAppStore.getState()
         if (store.activeView !== 'terminal') {
           return
         }
-        const visibleIds = getVisibleWorktreeIds()
-        if (index < visibleIds.length) {
-          activateAndRevealWorktree(visibleIds[index])
-        }
+        handleSwitchToTabIndex(index)
       })
     )
 

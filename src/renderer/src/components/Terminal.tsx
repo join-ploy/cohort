@@ -1211,6 +1211,7 @@ function Terminal(): React.JSX.Element | null {
             onCloseAllFiles={handleCloseAllFiles}
             onPinFile={pinFile}
             tabBarOrder={tabBarOrder}
+            showShortcutHints
           />,
           titlebarTabsTarget
         )}

@@ -18,8 +18,10 @@ vi.mock('@/components/tab-bar/group-tab-order', () => ({
 import {
   handleSwitchTab,
   handleSwitchTabAcrossAllTypes,
-  handleSwitchTerminalTab
+  handleSwitchTerminalTab,
+  handleSwitchToTabIndex
 } from './ipc-tab-switch'
+import { setFocusedTabStripActivator } from '@/components/tab-bar/focused-tab-strip'
 
 type ActiveTabType = 'terminal' | 'editor' | 'browser'
 
@@ -311,5 +313,76 @@ describe('handleSwitchTabAcrossAllTypes', () => {
     expect(handleSwitchTabAcrossAllTypes(1)).toBe(false)
     expect(store.setActiveTab).not.toHaveBeenCalled()
     expect(store.setActiveTabType).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleSwitchToTabIndex', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setFocusedTabStripActivator(null)
+  })
+
+  it('prefers the focused strip activator over the store nav order', () => {
+    const activate = vi.fn().mockReturnValue(true)
+    setFocusedTabStripActivator(activate)
+
+    expect(handleSwitchToTabIndex(2)).toBe(true)
+    expect(activate).toHaveBeenCalledWith(2)
+    expect(getActiveTabNavOrderMock).not.toHaveBeenCalled()
+  })
+
+  it('no-ops via the focused strip when no tab sits at the index', () => {
+    const activate = vi.fn().mockReturnValue(false)
+    setFocusedTabStripActivator(activate)
+
+    expect(handleSwitchToTabIndex(8)).toBe(false)
+    expect(activate).toHaveBeenCalledWith(8)
+    expect(getActiveTabNavOrderMock).not.toHaveBeenCalled()
+  })
+
+  it('activates the terminal tab at the given index', () => {
+    const store = makeStore('terminal')
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-1' },
+      { type: 'editor', id: 'file-1', tabId: 'tab-file-1' },
+      { type: 'terminal', id: 'term-2' }
+    ])
+
+    expect(handleSwitchToTabIndex(2)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-2')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
+  it('activates an editor tab by its unified tab id', () => {
+    const store = makeStore('terminal')
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-1' },
+      { type: 'editor', id: 'file-1', tabId: 'tab-file-1' }
+    ])
+
+    expect(handleSwitchToTabIndex(1)).toBe(true)
+    expect(store.setActiveFile).toHaveBeenCalledWith('file-1')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-file-1')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('editor')
+  })
+
+  it('returns false when no tab exists at the index', () => {
+    const store = makeStore('terminal')
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([{ type: 'terminal', id: 'term-1' }])
+
+    expect(handleSwitchToTabIndex(4)).toBe(false)
+    expect(store.setActiveTab).not.toHaveBeenCalled()
+    expect(store.setActiveTabType).not.toHaveBeenCalled()
+  })
+
+  it('returns false when there is no active worktree', () => {
+    const store = makeStore('terminal', { activeWorktreeId: '' })
+    getStateMock.mockReturnValue(store)
+
+    expect(handleSwitchToTabIndex(0)).toBe(false)
+    expect(getActiveTabNavOrderMock).not.toHaveBeenCalled()
   })
 })

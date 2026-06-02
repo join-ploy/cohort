@@ -1,6 +1,10 @@
 import { useAppStore } from '../store'
 import { getActiveTabNavOrder } from '@/components/tab-bar/group-tab-order'
 import {
+  activateFocusedTabAtIndex,
+  hasFocusedTabStrip
+} from '@/components/tab-bar/focused-tab-strip'
+import {
   getActiveEntityIdForTabType,
   getNextTabAcrossAllTypes,
   getNextTabWithinActiveType,
@@ -77,6 +81,31 @@ function applyNextTab(store: AppStoreState, next: TypeCyclableTab): void {
     }
     store.setActiveTabType('editor')
   }
+}
+
+/**
+ * Activate the Nth (0-based) tab in the focused strip's visible order, for the
+ * Cmd/Ctrl+1-9 shortcuts. Prefers the order the focused TabBar publishes so the
+ * index matches exactly what the user sees — including aggregated sibling-member
+ * tabs in a grouped workspace. Falls back to the active group's store nav order
+ * when no strip is registered. No-ops when no tab sits at that index. Returns
+ * true if a switch occurred.
+ */
+export function handleSwitchToTabIndex(index: number): boolean {
+  if (hasFocusedTabStrip()) {
+    return activateFocusedTabAtIndex(index)
+  }
+  const store = useAppStore.getState()
+  const worktreeId = store.activeWorktreeId
+  if (!worktreeId) {
+    return false
+  }
+  const target = getActiveTabNavOrder(store, worktreeId)[index]
+  if (!target) {
+    return false
+  }
+  applyNextTab(store, target)
+  return true
 }
 
 /**

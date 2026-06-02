@@ -328,8 +328,8 @@ export function setupGuestShortcutForwarding(args: {
       renderer.send('ui:openQuickOpen')
     } else if (action?.type === 'openNewWorkspace') {
       renderer.send('ui:openNewWorkspace')
-    } else if (action?.type === 'jumpToWorktreeIndex') {
-      renderer.send('ui:jumpToWorktreeIndex', action.index)
+    } else if (action?.type === 'jumpToTabIndex') {
+      renderer.send('ui:jumpToTabIndex', action.index)
     } else {
       return
     }

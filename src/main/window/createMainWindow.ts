@@ -547,9 +547,9 @@ export function createMainWindow(
       return
     }
 
-    if (action.type === 'jumpToWorktreeIndex') {
-      // Forward Cmd/Ctrl+1-9 for quick worktree switching
-      mainWindow.webContents.send('ui:jumpToWorktreeIndex', action.index)
+    if (action.type === 'jumpToTabIndex') {
+      // Forward Cmd/Ctrl+1-9 to switch to the Nth tab in the focused group
+      mainWindow.webContents.send('ui:jumpToTabIndex', action.index)
       return
     }
 

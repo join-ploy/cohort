@@ -16,6 +16,7 @@ import BrowserTab, { getBrowserTabLabel } from './BrowserTab'
 import { QuickLaunchAgentMenuItems } from './QuickLaunchButton'
 import type { DropIndicator } from './drop-indicator'
 import { reconcileTabOrder } from './reconcile-order'
+import { setFocusedTabStripActivator } from './focused-tab-strip'
 import type { HoveredTabInsertion, TabDragItemData } from '../tab-group/useTabDragSplit'
 import { resolveTabIndicatorEdges } from '../tab-group/tab-insertion'
 import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
@@ -33,6 +34,7 @@ import {
 
 const isMac = navigator.userAgent.includes('Mac')
 const isWindows = navigator.userAgent.includes('Windows')
+const SHORTCUT_HINT_MODIFIER = isMac ? '⌘' : 'Ctrl+'
 const NEW_TERMINAL_SHORTCUT = isMac ? '⌘T' : 'Ctrl+T'
 const NEW_BROWSER_SHORTCUT = isMac ? '⌘⇧B' : 'Ctrl+Shift+B'
 const NEW_FILE_SHORTCUT = isMac ? '⌘⇧M' : 'Ctrl+Shift+M'
@@ -89,6 +91,9 @@ type TabBarProps = {
    *  for editors) to the worktree that owns the tab when this strip is
    *  aggregating sibling-member tabs. Undefined when not aggregating. */
   ownerByVisibleId?: ReadonlyMap<string, string>
+  /** When true, the first nine tabs show their Cmd/Ctrl+1-9 jump hint. Only
+   *  the focused group passes this so the hint matches the shortcut target. */
+  showShortcutHints?: boolean
 }
 
 /** Per-tab affordance rendered when this tab belongs to a different
@@ -157,7 +162,8 @@ function TabBarInner({
   onCreateSplitGroup,
   hoveredTabInsertion,
   wslAvailable,
-  ownerByVisibleId
+  ownerByVisibleId,
+  showShortcutHints = false
 }: TabBarProps): React.JSX.Element {
   const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
   const hasOwnerMap = (ownerByVisibleId?.size ?? 0) > 0
@@ -267,6 +273,34 @@ function TabBarInner({
   }, [tabBarOrder, terminalIds, editorFileIds, browserTabIds, terminalMap, editorMap, browserMap])
 
   const sortableIds = useMemo(() => orderedItems.map((item) => item.id), [orderedItems])
+
+  // Why: the focused strip publishes its visible order + per-item activators so
+  // the Cmd/Ctrl+1-9 handler (which runs via IPC, outside React) lands on the
+  // exact tab the user sees — including aggregated sibling-member tabs in a
+  // grouped workspace, which the store-only nav order can't resolve.
+  useEffect(() => {
+    if (!showShortcutHints) {
+      return
+    }
+    const activators = orderedItems.map((item) => {
+      if (item.type === 'terminal') {
+        return () => onActivate(item.id)
+      }
+      if (item.type === 'browser') {
+        return () => onActivateBrowserTab?.(item.id)
+      }
+      return () => onActivateFile?.(item.id)
+    })
+    setFocusedTabStripActivator((index) => {
+      const activate = activators[index]
+      if (!activate) {
+        return false
+      }
+      activate()
+      return true
+    })
+    return () => setFocusedTabStripActivator(null)
+  }, [showShortcutHints, orderedItems, onActivate, onActivateBrowserTab, onActivateFile])
 
   const activeIndicator =
     hoveredTabInsertion?.groupId === resolvedGroupId ? hoveredTabInsertion : null
@@ -421,6 +455,8 @@ function TabBarInner({
               color: item.type === 'terminal' ? (item.data.color ?? null) : null
             }
             const memberBadge = memberBadgeByVisibleId.get(item.id) ?? null
+            const shortcutHint =
+              showShortcutHints && index < 9 ? `${SHORTCUT_HINT_MODIFIER}${index + 1}` : null
             if (item.type === 'terminal') {
               return (
                 <SortableTab
@@ -443,6 +479,7 @@ function TabBarInner({
                   dragData={dragData}
                   dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
                   memberBadge={memberBadge}
+                  shortcutHint={shortcutHint}
                 />
               )
             }
@@ -463,6 +500,7 @@ function TabBarInner({
                   dragData={dragData}
                   dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
                   memberBadge={memberBadge}
+                  shortcutHint={shortcutHint}
                 />
               )
             }
@@ -484,6 +522,7 @@ function TabBarInner({
                 dragData={dragData}
                 dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
                 memberBadge={memberBadge}
+                shortcutHint={shortcutHint}
               />
             )
           })}

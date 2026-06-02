@@ -186,6 +186,7 @@ export default function TabGroupPanel({
       onCreateSplitGroup={commands.createSplitGroup}
       hoveredTabInsertion={hoveredTabInsertion}
       ownerByVisibleId={ownerByVisibleId}
+      showShortcutHints={isFocused}
     />
   )
 

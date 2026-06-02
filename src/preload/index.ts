@@ -1851,10 +1851,10 @@ const api = {
       ipcRenderer.on('ui:openNewWorkspace', listener)
       return () => ipcRenderer.removeListener('ui:openNewWorkspace', listener)
     },
-    onJumpToWorktreeIndex: (callback: (index: number) => void): (() => void) => {
+    onJumpToTabIndex: (callback: (index: number) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, index: number) => callback(index)
-      ipcRenderer.on('ui:jumpToWorktreeIndex', listener)
-      return () => ipcRenderer.removeListener('ui:jumpToWorktreeIndex', listener)
+      ipcRenderer.on('ui:jumpToTabIndex', listener)
+      return () => ipcRenderer.removeListener('ui:jumpToTabIndex', listener)
     },
     onWorktreeHistoryNavigate: (
       callback: (direction: 'back' | 'forward') => void
