@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
-import { Globe, X, ExternalLink, Columns2, Rows2, Copy } from 'lucide-react'
+import { Globe, ExternalLink, Columns2, Rows2, Copy } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,8 @@ import {
   getDropIndicatorClasses,
   type DropIndicator
 } from './drop-indicator'
+import { TabShortcutHint } from './tab-shortcut-hint'
+import { TabCloseButton } from './tab-close-button'
 
 function formatBrowserTabUrlLabel(url: string): string {
   if (url === ORCA_BROWSER_BLANK_URL || url === 'about:blank') {
@@ -59,7 +61,8 @@ export default function BrowserTab({
   onDuplicate,
   dragData,
   dropIndicator,
-  memberBadge
+  memberBadge,
+  shortcutHint
 }: {
   tab: BrowserTabState
   isActive: boolean
@@ -73,6 +76,8 @@ export default function BrowserTab({
   dropIndicator?: DropIndicator
   /** See TabBar's `memberBadge` prop. */
   memberBadge?: { color: string; name: string } | null
+  /** See TabBar's `showShortcutHints` prop — "⌘1" etc., or null. */
+  shortcutHint?: string | null
 }): React.JSX.Element {
   // Why: no transform/transition/isDragging styling — the drag design is
   // that tabs stay visually anchored; only the blue insertion bar moves.
@@ -129,7 +134,7 @@ export default function BrowserTab({
           ref={setNodeRef}
           {...attributes}
           {...listeners}
-          className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
+          className={`group relative flex items-center h-full px-2 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
             isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
           onPointerDown={(e) => {
@@ -170,24 +175,12 @@ export default function BrowserTab({
               style={{ backgroundColor: memberBadge.color }}
             />
           )}
-          <span className="truncate max-w-[100px] mr-1">{getBrowserTabLabel(tab)}</span>
+          <span className="truncate max-w-[112px] mr-1">{getBrowserTabLabel(tab)}</span>
           {tab.loading && !tab.loadError && !isBlankBrowserTab(tab) && (
             <span className="mr-1 size-1.5 rounded-full bg-sky-500/80 shrink-0" />
           )}
-          <button
-            className={`flex items-center justify-center w-4 h-4 rounded-sm shrink-0 ${
-              isActive
-                ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                : 'text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted'
-            }`}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClose()
-            }}
-          >
-            <X className="w-3 h-3" />
-          </button>
+          {shortcutHint && <TabShortcutHint label={shortcutHint} />}
+          <TabCloseButton ariaLabel={`Close tab ${getBrowserTabLabel(tab)}`} onClose={onClose} />
         </div>
       </div>
 

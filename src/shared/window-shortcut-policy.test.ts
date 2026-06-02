@@ -51,7 +51,7 @@ describe('resolveWindowShortcutAction', () => {
         { code: 'Digit3', key: '3', meta: true, control: false, alt: false, shift: false },
         'darwin'
       )
-    ).toEqual({ type: 'jumpToWorktreeIndex', index: 2 })
+    ).toEqual({ type: 'jumpToTabIndex', index: 2 })
   })
 
   it('requires shift for the non-mac worktree palette shortcut', () => {

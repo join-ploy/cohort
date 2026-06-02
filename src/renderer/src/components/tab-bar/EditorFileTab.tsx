@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import {
-  X,
   FileCode,
   GitCompareArrows,
   Copy,
@@ -34,6 +33,8 @@ import {
   getDropIndicatorClasses,
   type DropIndicator
 } from './drop-indicator'
+import { TabShortcutHint } from './tab-shortcut-hint'
+import { TabCloseButton } from './tab-close-button'
 import { canOpenMarkdownPreview } from '@/components/editor/markdown-preview-controls'
 
 const isMac = navigator.userAgent.includes('Mac')
@@ -59,7 +60,8 @@ export default function EditorFileTab({
   onSplitGroup,
   dragData,
   dropIndicator,
-  memberBadge
+  memberBadge,
+  shortcutHint
 }: {
   file: OpenFile & { tabId?: string }
   isActive: boolean
@@ -75,6 +77,8 @@ export default function EditorFileTab({
   dropIndicator?: DropIndicator
   /** See TabBar's `memberBadge` prop. */
   memberBadge?: { color: string; name: string } | null
+  /** See TabBar's `showShortcutHints` prop — "⌘1" etc., or null. */
+  shortcutHint?: string | null
 }): React.JSX.Element {
   const worktree = useWorktreeById(file.worktreeId)
   // Why: no transform/transition/isDragging styling — the drag design is
@@ -209,7 +213,7 @@ export default function EditorFileTab({
           ref={setNodeRef}
           {...attributes}
           {...listeners}
-          className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
+          className={`group relative flex items-center h-full px-2 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
             isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
           onPointerDown={(e) => {
@@ -271,7 +275,7 @@ export default function EditorFileTab({
                 defaultValue={basename(file.filePath)}
                 // Tiny border to make the edit affordance obvious without
                 // changing overall tab height. Size matches the label span.
-                className="truncate max-w-[80px] bg-transparent text-xs text-foreground outline-none border border-ring rounded-sm px-1 py-0"
+                className="truncate max-w-[96px] bg-transparent text-xs text-foreground outline-none border border-ring rounded-sm px-1 py-0"
                 onPointerDown={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
@@ -292,7 +296,7 @@ export default function EditorFileTab({
               />
             ) : (
               <span
-                className={`truncate max-w-[80px]${file.isPreview ? ' italic' : ''}${file.externalMutation ? ' line-through' : ''}`}
+                className={`truncate max-w-[96px]${file.isPreview ? ' italic' : ''}${file.externalMutation ? ' line-through' : ''}`}
                 style={tabStatusColor ? { color: tabStatusColor } : undefined}
                 onDoubleClick={(e) => {
                   // Why: the outer tab's onDoubleClick pins preview tabs. Scope
@@ -322,30 +326,14 @@ export default function EditorFileTab({
               </span>
             )}
           </span>
-          {/* Dirty dot and close button share the same slot to prevent tab width shift during auto-save.
-             When dirty: dot is shown, close button appears on hover (replacing the dot).
-             When clean: close button is shown normally (visible on active tab, on hover for others). */}
-          <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
-            {file.isDirty && (
-              <span className="absolute size-1.5 rounded-full bg-foreground/60 group-hover:hidden" />
-            )}
-            <button
-              className={`flex items-center justify-center w-4 h-4 rounded-sm ${
-                file.isDirty
-                  ? 'hidden group-hover:flex text-muted-foreground hover:text-foreground hover:bg-muted'
-                  : isActive
-                    ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    : 'text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted'
-              }`}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose()
-              }}
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
+          {file.isDirty && (
+            <span className="mr-1 size-1.5 shrink-0 rounded-full bg-foreground/60" />
+          )}
+          {shortcutHint && !isRenaming && <TabShortcutHint label={shortcutHint} />}
+          <TabCloseButton
+            ariaLabel={`Close tab ${getEditorDisplayLabel(file)}`}
+            onClose={onClose}
+          />
         </div>
       </div>
 

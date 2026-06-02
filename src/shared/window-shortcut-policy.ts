@@ -15,7 +15,7 @@ export type WindowShortcutAction =
   | { type: 'toggleRightSidebar' }
   | { type: 'openQuickOpen' }
   | { type: 'openNewWorkspace' }
-  | { type: 'jumpToWorktreeIndex'; index: number }
+  | { type: 'jumpToTabIndex'; index: number }
   | { type: 'worktreeHistoryNavigate'; direction: 'back' | 'forward' }
 
 function platformPrimaryModifier(
@@ -191,7 +191,7 @@ export function resolveWindowShortcutAction(
   }
 
   if (input.key && input.key >= '1' && input.key <= '9' && !input.shift) {
-    return { type: 'jumpToWorktreeIndex', index: parseInt(input.key, 10) - 1 }
+    return { type: 'jumpToTabIndex', index: parseInt(input.key, 10) - 1 }
   }
 
   // Why: this helper is the explicit allowlist for main-process interception.
