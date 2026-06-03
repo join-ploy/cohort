@@ -97,6 +97,7 @@ import { createScriptsSlice } from './scripts'
 import { createAutomationRunsSlice } from './automation-runs'
 import { createAutomationsSlice } from './automations'
 import { createWorkspaceGroupsSlice } from './workspace-groups'
+import { createMarkdownReviewSlice } from './markdown-review'
 
 function createTestStore() {
   return create<AppState>()((...a) => ({
@@ -124,7 +125,8 @@ function createTestStore() {
     ...createScriptsSlice(...a),
     ...createAutomationRunsSlice(...a),
     ...createAutomationsSlice(...a),
-    ...createWorkspaceGroupsSlice(...a)
+    ...createWorkspaceGroupsSlice(...a),
+    ...createMarkdownReviewSlice(...a)
   }))
 }
 

@@ -45,6 +45,15 @@ describe('getMarkdownViewModes', () => {
       })
     ).toEqual(['source', 'rich'])
   })
+
+  it('offers review and changes for markdown edit tabs', () => {
+    expect(
+      getEditorToggleModes({
+        language: 'markdown',
+        mode: 'edit'
+      })
+    ).toEqual(['source', 'rich', 'review', 'changes'])
+  })
 })
 
 describe('markdown preview helpers', () => {

@@ -141,7 +141,7 @@ export type MarkdownViewMode = 'source' | 'rich' | 'preview'
 // place of the normal editor, without creating a separate tab. The per-tab
 // Tab.contentType stays 'editor' for the whole lifetime; this slice drives
 // what EditorPanel *renders* for that tab. See reviews/changes-view-mode-plan.md.
-export type EditorViewMode = 'edit' | 'changes'
+export type EditorViewMode = 'edit' | 'changes' | 'review'
 
 /** Enough state to restore a tab via `openFile` after `closeFile` (id is always filePath). */
 export type ClosedEditorTabSnapshot = Omit<OpenFile, 'id' | 'isDirty'>

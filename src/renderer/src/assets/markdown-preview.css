@@ -92,6 +92,14 @@
   background: color-mix(in srgb, #fb923c 60%, transparent);
 }
 
+::highlight(markdown-review-comment) {
+  background-color: color-mix(in srgb, #facc15 50%, transparent);
+}
+
+::highlight(markdown-review-comment-active) {
+  background-color: color-mix(in srgb, #fb923c 60%, transparent);
+}
+
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,

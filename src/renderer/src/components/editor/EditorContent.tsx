@@ -15,6 +15,9 @@ import { RichMarkdownErrorBoundary } from './RichMarkdownErrorBoundary'
 import { useMarkdownDocuments } from './useMarkdownDocuments'
 
 const MonacoEditor = lazy(() => import('./MonacoEditor'))
+const MarkdownReviewLayer = lazy(() =>
+  import('./MarkdownReviewLayer').then((m) => ({ default: m.MarkdownReviewLayer }))
+)
 const DiffViewer = lazy(() => import('./DiffViewer'))
 const CombinedDiffViewer = lazy(() => import('./CombinedDiffViewer'))
 const RichMarkdownEditor = lazy(() => import('./RichMarkdownEditor'))
@@ -76,6 +79,7 @@ export function EditorContent({
   isNotebook,
   mdViewMode,
   isChangesMode,
+  isReviewMode,
   sideBySide,
   pendingEditorReveal,
   handleContentChange,
@@ -96,6 +100,7 @@ export function EditorContent({
   isNotebook: boolean
   mdViewMode: MarkdownViewMode
   isChangesMode: boolean
+  isReviewMode: boolean
   sideBySide: boolean
   pendingEditorReveal: {
     filePath?: string
@@ -384,6 +389,20 @@ export function EditorContent({
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           Binary file — cannot display
         </div>
+      )
+    }
+    if (isReviewMode) {
+      return (
+        <MarkdownReviewLayer
+          key={viewStateScopeId}
+          content={editBuffers[activeFile.id] ?? fc.content}
+          filePath={activeFile.filePath}
+          relativePath={activeFile.relativePath}
+          worktreeId={activeFile.worktreeId}
+          scrollCacheKey={`${editorViewStateKey}:review`}
+          markdownDocuments={md.markdownDocuments}
+          onOpenDocument={md.previewProps.onOpenDocument}
+        />
       )
     }
     if (isChangesMode) {

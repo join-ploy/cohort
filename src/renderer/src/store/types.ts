@@ -23,6 +23,7 @@ import type { ScriptsSlice } from './slices/scripts'
 import type { AutomationRunsSlice } from './slices/automation-runs'
 import type { AutomationsSlice } from './slices/automations'
 import type { WorkspaceGroupsSlice } from './slices/workspace-groups'
+import type { MarkdownReviewSlice } from './slices/markdown-review'
 
 export type AppState = RepoSlice &
   SparsePresetsSlice &
@@ -48,4 +49,5 @@ export type AppState = RepoSlice &
   ScriptsSlice &
   AutomationRunsSlice &
   AutomationsSlice &
-  WorkspaceGroupsSlice
+  WorkspaceGroupsSlice &
+  MarkdownReviewSlice

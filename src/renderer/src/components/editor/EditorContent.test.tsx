@@ -40,6 +40,7 @@ describe('EditorContent', () => {
         isNotebook
         mdViewMode="rich"
         isChangesMode={false}
+        isReviewMode={false}
         sideBySide={false}
         pendingEditorReveal={null}
         handleContentChange={vi.fn()}
