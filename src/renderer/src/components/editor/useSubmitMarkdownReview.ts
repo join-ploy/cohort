@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
+import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { compileMarkdownReview } from './compile-markdown-review'
 import { resolveReviewTargets, type ReviewTarget } from './markdown-review-target'
 
@@ -49,6 +50,17 @@ export function useSubmitMarkdownReview(args: {
       await new Promise((resolve) => setTimeout(resolve, ENTER_DELAY_MS))
       window.api.pty.write(ptyId, '\r')
       state.clearReview(filePath)
+
+      // Why: drop the user into the agent's terminal so they can watch it take
+      // the review. The pane id comes from the agent-status key (`${tabId}:${paneId}`)
+      // for keyboard focus; without it we still activate and reveal the tab.
+      const paneKey = Object.keys(state.agentStatusByPaneKey).find((key) =>
+        key.startsWith(`${tabId}:`)
+      )
+      const paneId = paneKey ? Number.parseInt(paneKey.slice(tabId.length + 1), 10) : NaN
+      state.setActiveTabType('terminal')
+      activateTabAndFocusPane(tabId, Number.isInteger(paneId) ? paneId : null)
+
       toast.success('Review sent to the agent.')
     },
     [filePath, relativePath]
