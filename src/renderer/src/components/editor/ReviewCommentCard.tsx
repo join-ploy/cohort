@@ -44,6 +44,9 @@ export function ReviewCommentCard({
         {comment.anchor.quote}
       </blockquote>
       <textarea
+        // Why: a freshly-added comment mounts as the active card, so autoFocus
+        // (which only fires on mount) drops the caret straight into its box.
+        autoFocus={isActive}
         className="w-full resize-y rounded border border-border bg-background p-1.5 text-xs outline-none focus:border-primary"
         rows={2}
         placeholder="Your comment…"

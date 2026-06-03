@@ -1,9 +1,19 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
-import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
 import { compileMarkdownReview } from './compile-markdown-review'
 import { resolveReviewTargets, type ReviewTarget } from './markdown-review-target'
+
+// Why: bracketed-paste markers keep the multi-line review intact in the agent's
+// input, and the submit `\r` is sent as a separate write after a short delay so
+// the agent's paste handler doesn't swallow the Enter (mirrors the automations
+// send-to-pane path). The target agent is already running, so we write straight
+// to its live PTY rather than waiting for the launch-time bracketed-paste
+// handshake — an idle agent emitted that handshake at startup and never repeats
+// it, so waiting for it would always time out.
+const BRACKETED_PASTE_BEGIN = '\x1b[200~'
+const BRACKETED_PASTE_END = '\x1b[201~'
+const ENTER_DELAY_MS = 80
 
 export function useSubmitMarkdownReview(args: {
   filePath: string
@@ -21,6 +31,11 @@ export function useSubmitMarkdownReview(args: {
   const sendToTab = useCallback(
     async (tabId: string): Promise<void> => {
       const state = useAppStore.getState()
+      const ptyId = state.ptyIdsByTabId[tabId]?.[0]
+      if (!ptyId) {
+        toast.message('That agent is no longer running.')
+        return
+      }
       const draft = state.markdownReviewDraftsByFilePath[filePath]
       if (!draft) {
         return
@@ -30,20 +45,11 @@ export function useSubmitMarkdownReview(args: {
         toast.message('Nothing to submit — add a comment or an overall note first.')
         return
       }
-      // Why: omit `agent` — pasteDraftWhenAgentReady early-returns for agents
-      // with a draftPromptFlag (e.g. Claude), which is the launch-with-prefill
-      // guard, not what we want when pasting into an already-running agent.
-      const ok = await pasteDraftWhenAgentReady({
-        tabId,
-        content,
-        submit: true,
-        onTimeout: () =>
-          toast.message("Agent wasn't ready — your review is still here, try again in a moment.")
-      })
-      if (ok) {
-        state.clearReview(filePath)
-        toast.success('Review sent to the agent.')
-      }
+      window.api.pty.write(ptyId, `${BRACKETED_PASTE_BEGIN}${content}${BRACKETED_PASTE_END}`)
+      await new Promise((resolve) => setTimeout(resolve, ENTER_DELAY_MS))
+      window.api.pty.write(ptyId, '\r')
+      state.clearReview(filePath)
+      toast.success('Review sent to the agent.')
     },
     [filePath, relativePath]
   )
