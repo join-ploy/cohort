@@ -1117,13 +1117,18 @@ function EditorPanelInner({
   const isBinaryEditSurface =
     activeFile.mode === 'edit' && fileContents[activeFile.id]?.isBinary === true
   const canUseChangesMode = canUseChangesModeForFile(activeFile)
-  // Why: edit-mode binary/image tabs already have their own dedicated renderers
-  // and external files have no repo-relative path for git diff. Hide Changes
-  // rather than offering a segment the renderer will immediately ignore.
-  const availableEditorToggleModes =
-    isBinaryEditSurface || !canUseChangesMode
-      ? editorToggleModes.filter((mode) => mode !== 'changes' && mode !== 'review')
-      : editorToggleModes
+  // Why: Changes needs a tracked, repo-relative file (binary tabs and external/
+  // untitled files have no git diff), but Review only needs a rendered markdown
+  // body — so it stays available on any non-binary markdown edit tab.
+  const availableEditorToggleModes = editorToggleModes.filter((mode) => {
+    if (mode === 'changes' && (isBinaryEditSurface || !canUseChangesMode)) {
+      return false
+    }
+    if (mode === 'review' && isBinaryEditSurface) {
+      return false
+    }
+    return true
+  })
   // Why: a toggle with a single option is just a decorative pill with nothing
   // to switch to. Binary plain-code tabs end up here after 'changes' is
   // stripped — on main they had no header toggle at all, so requiring >1 mode
