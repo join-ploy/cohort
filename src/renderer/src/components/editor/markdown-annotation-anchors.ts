@@ -34,12 +34,38 @@ function offsetForBoundary(
   container: Node,
   containerOffset: number
 ): number | null {
+  if (container.nodeType === Node.TEXT_NODE) {
+    for (const entry of offsets.nodes) {
+      if (entry.node === container) {
+        return entry.start + containerOffset
+      }
+    }
+    return null
+  }
+  // Why: a selection boundary can land on an element rather than a text node —
+  // triple-click selects a whole line and ends on the <p>, select-all ends on the
+  // body, and crossing a block boundary ends on the next element. The boundary sits
+  // immediately before childNodes[containerOffset] (or after the last child when it
+  // equals childNodes.length). Map it to the start of the first text node at or
+  // after that point so the anchor still resolves; without this the offset was null
+  // and the comment popover silently vanished.
+  const children = container.childNodes
+  const refNode = containerOffset < children.length ? children[containerOffset] : null
   for (const entry of offsets.nodes) {
-    if (entry.node === container) {
-      return entry.start + containerOffset
+    const rel =
+      refNode === null
+        ? container.compareDocumentPosition(entry.node)
+        : refNode.compareDocumentPosition(entry.node)
+    const isAtOrAfter =
+      refNode === null
+        ? Boolean(rel & Node.DOCUMENT_POSITION_FOLLOWING) &&
+          !(rel & Node.DOCUMENT_POSITION_CONTAINED_BY)
+        : rel === 0 || Boolean(rel & Node.DOCUMENT_POSITION_FOLLOWING)
+    if (isAtOrAfter) {
+      return entry.start
     }
   }
-  return null
+  return offsets.text.length
 }
 
 export function anchorFromRange(

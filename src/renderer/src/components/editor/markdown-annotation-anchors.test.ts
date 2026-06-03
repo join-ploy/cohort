@@ -45,6 +45,29 @@ describe('anchor offsets round-trip', () => {
     expect(rebuilt?.toString()).toBe('brave')
   })
 
+  it('resolves a triple-click selection whose end boundary is an element', () => {
+    // Why: triple-click selects the whole line; the browser ends the range on the
+    // <p> element (after its text child), not a text node.
+    const body = makeBody('<p>Hello brave world</p>')
+    const p = body.querySelector('p')!
+    const range = document.createRange()
+    range.setStart(p.firstChild!, 0)
+    range.setEnd(p, p.childNodes.length)
+
+    const anchor = anchorFromRange(body, range, 'Hello brave world', () => null)
+    expect(anchor).toMatchObject({ startOffset: 0, endOffset: 17, quote: 'Hello brave world' })
+  })
+
+  it('resolves a selection whose boundaries are both element nodes', () => {
+    const body = makeBody('<p>one two</p><p>three four</p>')
+    const range = document.createRange()
+    range.setStart(body, 0)
+    range.setEnd(body, body.childNodes.length)
+
+    const anchor = anchorFromRange(body, range, 'one two\nthree four', () => null)
+    expect(anchor).toMatchObject({ startOffset: 0, endOffset: 17, quote: 'one twothree four' })
+  })
+
   it('spans multiple block elements', () => {
     const body = makeBody('<p>one two</p><p>three four</p>')
     const offsets = bodyTextOffsets(body)
