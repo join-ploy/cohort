@@ -145,6 +145,25 @@ describe('MarkdownReviewLayer add/delete/re-add', () => {
     expect(comments()).toHaveLength(1)
   })
 
+  it('shows the Add comment button for a triple-click selection (element end boundary)', async () => {
+    const { container } = renderLayer()
+    await screen.findByText('Hello brave world')
+    const body = container.querySelector('.markdown-body') as HTMLElement
+    const p = body.querySelector('p')!
+    // Triple-click selects the line and ends the range on the <p>, not a text node.
+    const range = document.createRange()
+    range.setStart(p.firstChild!, 0)
+    range.setEnd(p, p.childNodes.length)
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      rangeCount: 1,
+      isCollapsed: false,
+      getRangeAt: () => range,
+      removeAllRanges: () => {}
+    } as unknown as Selection)
+    fireEvent.mouseUp(wrapper(container))
+    expect(screen.queryByText('Add comment')).not.toBeNull()
+  })
+
   it('still creates the comment when the selection is dropped before clicking Add', async () => {
     // Why: after deleting a comment and re-selecting, the browser can drop the
     // live selection between the popover appearing (mouseup) and the click. The
