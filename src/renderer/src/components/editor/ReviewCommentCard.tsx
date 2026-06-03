@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ReviewComment } from '@/store/slices/markdown-review'
@@ -19,6 +19,7 @@ export function ReviewCommentCard({
   onRemove: () => void
 }): React.JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Why: when a comment becomes active (e.g. by clicking its highlight in the
   // doc), bring its card into view in the rail. 'nearest' no-ops if already visible.
@@ -27,6 +28,20 @@ export function ReviewCommentCard({
       cardRef.current?.scrollIntoView({ block: 'nearest' })
     }
   }, [isActive])
+
+  // Why: grow the box to fit its text so multi-line comments are readable
+  // without dragging a resize handle, capped so one long comment can't swallow
+  // the rail (the textarea scrolls past the cap).
+  const autoResize = useCallback(() => {
+    const ta = textareaRef.current
+    if (!ta) {
+      return
+    }
+    ta.style.height = 'auto'
+    ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`
+  }, [])
+
+  useEffect(autoResize, [comment.body, autoResize])
 
   return (
     <div
@@ -55,10 +70,11 @@ export function ReviewCommentCard({
         {comment.anchor.quote}
       </blockquote>
       <textarea
+        ref={textareaRef}
         // Why: a freshly-added comment mounts as the active card, so autoFocus
         // (which only fires on mount) drops the caret straight into its box.
         autoFocus={isActive}
-        className="w-full resize-y rounded border border-border bg-background p-1.5 text-xs outline-none focus:border-primary"
+        className="w-full resize-none overflow-y-auto rounded border border-border bg-background p-1.5 text-xs outline-none focus:border-primary"
         rows={2}
         placeholder="Your comment…"
         value={comment.body}

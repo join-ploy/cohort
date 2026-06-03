@@ -29,10 +29,13 @@ export function resolveReviewTargets(input: {
     if (!entry) {
       continue
     }
+    // Why: mirror the tab bar's label (`customTitle ?? title`) so the picker
+    // names each agent by its tab, not the agent-status terminalTitle — which
+    // is the generic "Terminal N" and tells the user nothing about which agent.
     const label =
       tab.customTitle?.trim() ||
-      entry.terminalTitle?.trim() ||
       tab.title?.trim() ||
+      entry.terminalTitle?.trim() ||
       tab.defaultTitle?.trim() ||
       'Agent'
     targets.push({ tabId: tab.id, label })

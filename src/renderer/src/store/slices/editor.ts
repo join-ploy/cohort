@@ -622,6 +622,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     }),
 
   openFile: (file, options) => {
+    const existedBefore = get().openFiles.some((f) => f.id === file.filePath)
     set((s) => {
       const id = file.filePath
       const existing = s.openFiles.find((f) => f.id === id)
@@ -825,6 +826,21 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         ...activeResult
       }
     })
+    // Why: markdown opens into Review mode by default. Only on a fresh open of a
+    // new tab — re-activating an existing tab must keep whatever mode the user
+    // last chose. Skip untitled files (a brand-new doc wants the editor, not an
+    // annotation surface) and skip when a caller has already forced Source
+    // (markdown link / search line-reveal set markdownViewMode before openFile)
+    // so line navigation still lands in the Monaco editor.
+    if (
+      !existedBefore &&
+      file.mode === 'edit' &&
+      file.language === 'markdown' &&
+      !file.isUntitled &&
+      get().markdownViewMode[file.filePath] !== 'source'
+    ) {
+      get().setEditorViewMode(file.filePath, 'review')
+    }
     void openWorkspaceEditorItem(
       get(),
       file.filePath,
@@ -2360,12 +2376,23 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       const nextActiveTabType =
         nextActiveFileId || activeTabType !== 'editor' ? activeTabType : 'terminal'
 
+      // Why: restored markdown tabs default to Review mode too, so a restart
+      // doesn't leave them in Source/Rich while freshly-opened markdown opens
+      // into Review (see openFile).
+      const restoredEditorViewMode = { ...s.editorViewMode }
+      for (const f of openFiles) {
+        if (f.language === 'markdown' && !(f.id in restoredEditorViewMode)) {
+          restoredEditorViewMode[f.id] = 'review'
+        }
+      }
+
       return {
         openFiles,
         activeFileId: nextActiveFileId,
         activeFileIdByWorktree: filteredActiveFileIdByWorktree,
         activeTabType: nextActiveTabType,
-        activeTabTypeByWorktree: filteredActiveTabTypeByWorktree
+        activeTabTypeByWorktree: filteredActiveTabTypeByWorktree,
+        editorViewMode: restoredEditorViewMode
       }
     })
   }
