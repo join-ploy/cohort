@@ -6,7 +6,11 @@ import type { DraftReview } from '@/store/slices/markdown-review'
 import { ReviewCommentRail } from './ReviewCommentRail'
 import { SelectAgentPaneDialog } from './SelectAgentPaneDialog'
 import { useSubmitMarkdownReview } from './useSubmitMarkdownReview'
-import { anchorFromRange, findLineHintForQuote } from './markdown-annotation-anchors'
+import {
+  anchorFromRange,
+  commentIdAtPoint,
+  findLineHintForQuote
+} from './markdown-annotation-anchors'
 import { paintReviewHighlights, clearReviewHighlights } from './markdown-annotation-highlights'
 import type { MarkdownDocument } from '../../../../shared/types'
 
@@ -110,9 +114,34 @@ export function MarkdownReviewLayer({
     selection.removeAllRanges()
   }, [addReviewComment, content, filePath, getBody])
 
+  const handleSelectCommentAtPoint = useCallback(
+    (event: React.MouseEvent) => {
+      // Why: a drag-select is a new-comment gesture (handled on mouseup), so only
+      // treat a plain click (collapsed selection) as "select the comment here".
+      const selection = window.getSelection()
+      if (selection && !selection.isCollapsed) {
+        return
+      }
+      const body = getBody()
+      if (!body) {
+        return
+      }
+      const id = commentIdAtPoint(body, draft.comments, event.clientX, event.clientY)
+      if (id) {
+        setActiveCommentId(id)
+      }
+    },
+    [draft.comments, getBody]
+  )
+
   return (
     <div className="flex h-full min-h-0">
-      <div ref={wrapperRef} className="relative min-w-0 flex-1" onMouseUp={handleMouseUp}>
+      <div
+        ref={wrapperRef}
+        className="relative min-w-0 flex-1"
+        onMouseUp={handleMouseUp}
+        onClick={handleSelectCommentAtPoint}
+      >
         <MarkdownPreview
           content={content}
           filePath={filePath}

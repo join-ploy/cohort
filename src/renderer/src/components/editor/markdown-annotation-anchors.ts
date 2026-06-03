@@ -1,4 +1,4 @@
-import type { ReviewAnchor } from '@/store/slices/markdown-review'
+import type { ReviewAnchor, ReviewComment } from '@/store/slices/markdown-review'
 
 type BodyOffsets = {
   text: string
@@ -119,6 +119,37 @@ export function findLineHintForQuote(content: string, quote: string): number | n
     consumed += collapsed[i].length + (i > 0 ? 1 : 0)
     if (consumed > idx) {
       return i + 1
+    }
+  }
+  return null
+}
+
+/**
+ * Hit-test a viewport point against the rendered ranges of each comment. Tests
+ * the actual painted rects (via the same `rangeFromAnchor` the highlighter uses)
+ * so a click reliably maps to the highlight under the cursor. Iterates in
+ * reverse so the most recently added comment wins where highlights overlap.
+ */
+export function commentIdAtPoint(
+  body: HTMLElement,
+  comments: ReviewComment[],
+  clientX: number,
+  clientY: number
+): string | null {
+  for (let i = comments.length - 1; i >= 0; i -= 1) {
+    const range = rangeFromAnchor(body, comments[i].anchor)
+    if (!range) {
+      continue
+    }
+    for (const rect of range.getClientRects()) {
+      if (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      ) {
+        return comments[i].id
+      }
     }
   }
   return null
