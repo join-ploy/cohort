@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { ReviewCommentCard } from './ReviewCommentCard'
 import type { DraftReview } from '@/store/slices/markdown-review'
@@ -24,6 +24,17 @@ export function ReviewCommentRail({
     draft.comments.filter((c) => c.body.trim().length > 0).length +
     (draft.overallNote.trim().length > 0 ? 1 : 0)
 
+  const overallNoteRef = useRef<HTMLTextAreaElement>(null)
+  const autoResizeOverallNote = useCallback(() => {
+    const ta = overallNoteRef.current
+    if (!ta) {
+      return
+    }
+    ta.style.height = 'auto'
+    ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`
+  }, [])
+  useEffect(autoResizeOverallNote, [draft.overallNote, autoResizeOverallNote])
+
   return (
     <div className="flex h-full w-72 flex-shrink-0 flex-col border-l border-border bg-editor-surface">
       <div className="border-b border-border p-2">
@@ -31,7 +42,8 @@ export function ReviewCommentRail({
           Overall
         </label>
         <textarea
-          className="w-full resize-y rounded border border-border bg-background p-1.5 text-xs outline-none focus:border-primary"
+          ref={overallNoteRef}
+          className="w-full resize-none overflow-y-auto rounded border border-border bg-background p-1.5 text-xs outline-none focus:border-primary"
           rows={3}
           placeholder="Overall feedback (optional)…"
           value={draft.overallNote}

@@ -215,6 +215,80 @@ describe('createEditorSlice editor view mode', () => {
 
     expect(store.getState().editorViewMode).toEqual({})
   })
+
+  it('opens a fresh markdown file in review mode by default', () => {
+    const store = createEditorStore()
+    store.getState().openFile({
+      filePath: '/repo/docs/README.md',
+      relativePath: 'docs/README.md',
+      worktreeId: 'wt-1',
+      language: 'markdown',
+      mode: 'edit'
+    })
+
+    expect(store.getState().editorViewMode).toEqual({ '/repo/docs/README.md': 'review' })
+  })
+
+  it('does not default non-markdown files to review mode', () => {
+    const store = createEditorStore()
+    store.getState().openFile({
+      filePath: '/repo/app.ts',
+      relativePath: 'app.ts',
+      worktreeId: 'wt-1',
+      language: 'typescript',
+      mode: 'edit'
+    })
+
+    expect(store.getState().editorViewMode).toEqual({})
+  })
+
+  it('does not default a new untitled markdown file to review mode', () => {
+    const store = createEditorStore()
+    store.getState().openFile({
+      filePath: '/repo/untitled.md',
+      relativePath: 'untitled.md',
+      worktreeId: 'wt-1',
+      language: 'markdown',
+      isUntitled: true,
+      mode: 'edit'
+    })
+
+    expect(store.getState().editorViewMode).toEqual({})
+  })
+
+  it('keeps Source for a line-reveal open (markdownViewMode forced first)', () => {
+    const store = createEditorStore()
+    // Why: link / search line-reveal sets Source before openFile; the review
+    // default must yield so Monaco mounts to perform the reveal.
+    store.getState().setMarkdownViewMode('/repo/docs/guide.md', 'source')
+    store.getState().openFile({
+      filePath: '/repo/docs/guide.md',
+      relativePath: 'docs/guide.md',
+      worktreeId: 'wt-1',
+      language: 'markdown',
+      mode: 'edit'
+    })
+
+    expect(store.getState().editorViewMode['/repo/docs/guide.md']).toBeUndefined()
+  })
+
+  it('does not re-default review mode when re-activating an existing markdown tab', () => {
+    const store = createEditorStore()
+    const file = {
+      filePath: '/repo/docs/README.md',
+      relativePath: 'docs/README.md',
+      worktreeId: 'wt-1',
+      language: 'markdown' as const,
+      mode: 'edit' as const
+    }
+    store.getState().openFile(file)
+    // User switches away from review (rich/source resets to 'edit', which clears the entry).
+    store.getState().setEditorViewMode('/repo/docs/README.md', 'edit')
+
+    store.getState().openFile(file)
+
+    expect(store.getState().editorViewMode).toEqual({})
+  })
 })
 
 describe('createEditorSlice openMarkdownPreview', () => {

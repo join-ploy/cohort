@@ -2,7 +2,7 @@ import React, { lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { MessageSquarePlus } from 'lucide-react'
 import { useAppStore } from '@/store'
-import type { DraftReview } from '@/store/slices/markdown-review'
+import type { DraftReview, ReviewAnchor } from '@/store/slices/markdown-review'
 import { ReviewCommentRail } from './ReviewCommentRail'
 import { SelectAgentPaneDialog } from './SelectAgentPaneDialog'
 import { useSubmitMarkdownReview } from './useSubmitMarkdownReview'
@@ -20,7 +20,7 @@ const MarkdownPreview = lazy(() => import('./MarkdownPreview'))
 // highlight effect's `draft.comments` dependency doesn't churn every render.
 const EMPTY_DRAFT: DraftReview = { overallNote: '', comments: [] }
 
-type PopoverState = { x: number; y: number } | null
+type PopoverState = { x: number; y: number; anchor: ReviewAnchor } | null
 
 export function MarkdownReviewLayer({
   content,
@@ -40,6 +40,10 @@ export function MarkdownReviewLayer({
   onOpenDocument?: (document: MarkdownDocument) => void | Promise<void>
 }): React.JSX.Element {
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  // Why: the live selection Range whose rect the popover sits beside. Held in a
+  // ref so scroll repositioning can read its rect without re-rendering.
+  const popoverRangeRef = useRef<Range | null>(null)
   const [popover, setPopover] = useState<PopoverState>(null)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
 
@@ -77,6 +81,36 @@ export function MarkdownReviewLayer({
     }
   }, [draft.comments, activeCommentId])
 
+  // Why: the popover sits in the wrapper's coordinate space and is fixed at mouseup,
+  // so scrolling the preview would leave it behind while the selected text moves.
+  // Repositioning via React state stutters (renders lag behind native scroll), so
+  // write the button's position directly from the selection's live rect instead —
+  // it then tracks the text smoothly, frame for frame. Capture-phase + passive so
+  // the nested preview scroller is caught without blocking the scroll.
+  useEffect(() => {
+    if (!popover) {
+      return
+    }
+    const reposition = (): void => {
+      const el = popoverRef.current
+      const wrapper = wrapperRef.current
+      const range = popoverRangeRef.current
+      if (!el || !wrapper || !range) {
+        return
+      }
+      const rect = range.getBoundingClientRect()
+      const wrapperRect = wrapper.getBoundingClientRect()
+      el.style.left = `${rect.left - wrapperRect.left}px`
+      el.style.top = `${rect.bottom - wrapperRect.top + 4}px`
+    }
+    window.addEventListener('scroll', reposition, { capture: true, passive: true })
+    window.addEventListener('resize', reposition)
+    return () => {
+      window.removeEventListener('scroll', reposition, { capture: true })
+      window.removeEventListener('resize', reposition)
+    }
+  }, [popover])
+
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection()
     const body = getBody()
@@ -89,18 +123,10 @@ export function MarkdownReviewLayer({
       setPopover(null)
       return
     }
-    const rect = range.getBoundingClientRect()
-    const wrapperRect = wrapperRef.current.getBoundingClientRect()
-    setPopover({ x: rect.left - wrapperRect.left, y: rect.bottom - wrapperRect.top })
-  }, [getBody])
-
-  const handleAddComment = useCallback(() => {
-    const selection = window.getSelection()
-    const body = getBody()
-    if (!selection || selection.rangeCount === 0 || !body) {
-      return
-    }
-    const range = selection.getRangeAt(0)
+    // Why: resolve the anchor now, while the selection is provably valid. The
+    // browser can drop the live selection between this mouseup and the user
+    // clicking "Add comment" (e.g. deleting a card shifts focus first), so
+    // re-reading it at click time silently failed to create the comment.
     const anchor = anchorFromRange(body, range, content, (quote) =>
       findLineHintForQuote(content, quote)
     )
@@ -108,11 +134,23 @@ export function MarkdownReviewLayer({
       setPopover(null)
       return
     }
-    const id = addReviewComment(filePath, anchor, '')
+    // Why: clone so the stored range survives selection.removeAllRanges() / a new
+    // selection — scroll repositioning reads its rect after the popover is shown.
+    popoverRangeRef.current = range.cloneRange()
+    const rect = range.getBoundingClientRect()
+    const wrapperRect = wrapperRef.current.getBoundingClientRect()
+    setPopover({ x: rect.left - wrapperRect.left, y: rect.bottom - wrapperRect.top, anchor })
+  }, [getBody, content])
+
+  const handleAddComment = useCallback(() => {
+    if (!popover) {
+      return
+    }
+    const id = addReviewComment(filePath, popover.anchor, '')
     setActiveCommentId(id)
     setPopover(null)
-    selection.removeAllRanges()
-  }, [addReviewComment, content, filePath, getBody])
+    window.getSelection()?.removeAllRanges()
+  }, [addReviewComment, filePath, popover])
 
   const handleSelectCommentAtPoint = useCallback(
     (event: React.MouseEvent) => {
@@ -150,13 +188,25 @@ export function MarkdownReviewLayer({
           onOpenDocument={onOpenDocument}
         />
         {popover && (
-          <div className="absolute z-10" style={{ left: popover.x, top: popover.y + 4 }}>
+          <div
+            ref={popoverRef}
+            className="absolute z-10"
+            style={{ left: popover.x, top: popover.y + 4 }}
+          >
             <Button
               type="button"
               size="sm"
-              // Why: preventDefault stops the click from collapsing the selection before handleAddComment reads it.
+              // Why: stopPropagation keeps the button's own mouseup/click from
+              // bubbling to the wrapper's handleMouseUp / handleSelectCommentAtPoint,
+              // which would re-read the (now possibly empty) selection and clear the
+              // popover before the click lands. preventDefault keeps focus/selection
+              // from shifting on mousedown.
               onMouseDown={(e) => e.preventDefault()}
-              onClick={handleAddComment}
+              onMouseUp={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleAddComment()
+              }}
             >
               <MessageSquarePlus size={12} />
               Add comment

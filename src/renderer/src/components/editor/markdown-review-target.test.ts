@@ -18,12 +18,22 @@ describe('resolveReviewTargets', () => {
     expect(targets).toEqual([{ tabId: 'tab-a', label: 'claude' }])
   })
 
-  it('prefers customTitle, then agent terminalTitle, then tab title', () => {
+  it('prefers customTitle, then the tab title, then agent terminalTitle', () => {
     const targets = resolveReviewTargets({
       tabs,
       agentStatusByPaneKey: { 'tab-b:1': { terminalTitle: 'codex' } }
     })
     expect(targets).toEqual([{ tabId: 'tab-b', label: 'My Shell' }])
+  })
+
+  it('labels by the tab title rather than the generic agent terminalTitle', () => {
+    const targets = resolveReviewTargets({
+      tabs: [
+        { id: 'tab-c', title: 'Fix login bug', customTitle: null, defaultTitle: 'Terminal 1' }
+      ],
+      agentStatusByPaneKey: { 'tab-c:1': { terminalTitle: 'Terminal 1' } }
+    })
+    expect(targets).toEqual([{ tabId: 'tab-c', label: 'Fix login bug' }])
   })
 
   it('ignores agent panes whose tab is not in the worktree', () => {
