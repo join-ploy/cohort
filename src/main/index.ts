@@ -63,6 +63,7 @@ import { AutomationService } from './automations/service'
 import { AutoTriggerEngine } from './automations/auto-trigger-engine'
 import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
+import { makeGithubPrSource } from './automations/trigger-sources/github-pr'
 import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
@@ -645,6 +646,7 @@ app.whenReady().then(async () => {
   // rebuilding the registry.
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
+  triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.
   registerTriggerSourceHandlers(triggerSourceRegistry)
