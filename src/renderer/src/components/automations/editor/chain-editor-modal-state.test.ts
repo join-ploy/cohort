@@ -182,6 +182,32 @@ describe('getAvailableVariablesAtStep — group namespace', () => {
   })
 })
 
+describe('getAvailableVariablesAtStep — github.pr overlay', () => {
+  it('overlays github.pr.* when an enabled github-pr auto-trigger exists', () => {
+    const draft = {
+      ...makeDraft([]),
+      autoTriggers: [
+        { id: 't', source: 'github-pr', enabled: true, enabledAt: 0, rules: [], repoIds: ['r1'] }
+      ]
+    } as ChainDraft
+    const out = getAvailableVariablesAtStep(draft, 0, [])
+    expect(
+      (out.trigger as Record<string, Record<string, Record<string, string>>>).github.pr.headRef
+    ).toBe('string')
+  })
+
+  it('does NOT overlay github.pr.* when the github-pr auto-trigger is disabled', () => {
+    const draft = {
+      ...makeDraft([]),
+      autoTriggers: [
+        { id: 't', source: 'github-pr', enabled: false, enabledAt: 0, rules: [], repoIds: [] }
+      ]
+    } as ChainDraft
+    const out = getAvailableVariablesAtStep(draft, 0, [])
+    expect((out.trigger as Record<string, unknown>).github).toBeUndefined()
+  })
+})
+
 describe('getAvailableVariablesAtStep — stepKinds', () => {
   it('maps each in-scope step id to its kind', () => {
     const draft = makeDraft([

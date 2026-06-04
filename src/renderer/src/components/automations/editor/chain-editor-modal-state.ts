@@ -1,5 +1,6 @@
 import type {
   Automation,
+  AutoTrigger,
   CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
@@ -26,6 +27,7 @@ import {
   type TemplateError
 } from '../../../lib/template-dry-run'
 import {
+  GITHUB_PR_TRIGGER_OVERLAY,
   getOutputSchemaForKind,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
@@ -88,10 +90,18 @@ export const LEGACY_AUTOMATION_FIELDS = [
 // `acceptsProjectSelection` does not contribute an overlay: the picked project
 // is materialized into `automation.projectId` at dispatch time so existing
 // `{{automation.projectId}}` templates resolve unchanged.
-export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
+export function buildTriggerSchema(
+  trigger: TriggerConfig,
+  autoTriggers: AutoTrigger[] = []
+): NestedSchema {
   const base: NestedSchema = { ...MANUAL_TRIGGER_SCHEMA }
   if (trigger.acceptsLinearTicket) {
     base.linear = LINEAR_TICKET_TRIGGER_OVERLAY.linear
+  }
+  // A configured + enabled auto-trigger publishes its payload shape at runtime,
+  // so surface its variables in the picker too.
+  if (autoTriggers.some((t) => t.enabled && t.source === 'github-pr')) {
+    base.github = GITHUB_PR_TRIGGER_OVERLAY.github
   }
   return base
 }
@@ -164,7 +174,7 @@ export function getAvailableVariablesAtStep(
 
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
-    trigger: buildTriggerSchema(draft.trigger),
+    trigger: buildTriggerSchema(draft.trigger, draft.autoTriggers ?? []),
     steps: stepsSchema,
     stepKinds,
     group: groupSchema
