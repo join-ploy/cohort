@@ -31,6 +31,18 @@ export type AutoTriggerEngineDeps = {
 
 type ActiveEntry = { automation: Automation; trigger: AutoTrigger }
 
+// Union of all watching triggers' repoIds; undefined when none scope by repo
+// (so a global source like linear-issue receives no repo filter).
+function unionRepoIds(group: ActiveEntry[]): string[] | undefined {
+  const set = new Set<string>()
+  for (const { trigger } of group) {
+    for (const id of trigger.repoIds ?? []) {
+      set.add(id)
+    }
+  }
+  return set.size > 0 ? Array.from(set) : undefined
+}
+
 export class AutoTriggerEngine {
   private readonly deps: AutoTriggerEngineDeps
   private timer: ReturnType<typeof setInterval> | null = null
@@ -108,7 +120,7 @@ export class AutoTriggerEngine {
             Math.max(trigger.enabledAt, this.deps.lastPoll(sourceId, this.deps.hostId))
           )
           const since = Math.min(...watermarks)
-          await this.pollSource(source, sourceId, group, since)
+          await this.pollSource(source, sourceId, group, since, unionRepoIds(group))
           this.deps.lastPollSet(sourceId, this.deps.hostId, this.deps.now())
         } catch (err) {
           this.reportError(`tick:source(${sourceId})`, err)
@@ -123,9 +135,10 @@ export class AutoTriggerEngine {
     source: TriggerSource,
     sourceId: TriggerSourceId,
     group: ActiveEntry[],
-    since: number
+    since: number,
+    repoIds: string[] | undefined
   ): Promise<void> {
-    for await (const event of source.poll({ since, hostId: this.deps.hostId })) {
+    for await (const event of source.poll({ since, hostId: this.deps.hostId, repoIds })) {
       try {
         // Belt-and-suspenders: skip events at or before the source-level
         // watermark in case the source's filter is sloppy.
@@ -134,6 +147,10 @@ export class AutoTriggerEngine {
         }
         for (const { automation, trigger } of group) {
           if (event.updatedAt < trigger.enabledAt) {
+            continue
+          }
+          // Watch-list guard: a repo-bound event only fires triggers watching it.
+          if (trigger.repoIds?.length && event.repoId && !trigger.repoIds.includes(event.repoId)) {
             continue
           }
           if (this.deps.dedupHas(automation.id, trigger.id, event.entityId)) {

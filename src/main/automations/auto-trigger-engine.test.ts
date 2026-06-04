@@ -3,6 +3,7 @@ import {
   makeAutomation,
   makeEngine,
   makeFakeSource,
+  makeRecordingSource,
   makeRule
 } from './auto-trigger-engine-test-fixtures'
 
@@ -198,5 +199,77 @@ describe('AutoTriggerEngine — dispatch, dedup, watermark, grouping', () => {
     })
     await engine.tick()
     expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'rl2', entityId: 'ORC-1' }])
+  })
+
+  it('passes the union of watching triggers repoIds into poll ctx', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 0,
+          repoIds: ['a'],
+          rules: [makeRule({ id: 'rl1', projectId: 'p1' })]
+        },
+        {
+          id: 'at2',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 0,
+          repoIds: ['b', 'c'],
+          rules: [makeRule({ id: 'rl2', projectId: 'p1' })]
+        }
+      ]
+    })
+    const source = makeRecordingSource([])
+    const { engine } = makeEngine({ source, automations: [automation] })
+    await engine.tick()
+    expect(source.polls).toHaveLength(1)
+    expect(new Set(source.polls[0].repoIds)).toEqual(new Set(['a', 'b', 'c']))
+  })
+
+  it('fires a trigger only for events whose repoId is in its repoIds', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 0,
+          repoIds: ['a'],
+          rules: [makeRule({ id: 'rl1', projectId: 'p1' })]
+        }
+      ]
+    })
+    const { engine, dispatched } = makeEngine({
+      source: makeFakeSource([
+        { entityId: 'ORC-1', updatedAt: 1000, payload: {}, fields: {}, repoId: 'a' },
+        { entityId: 'ORC-2', updatedAt: 1000, payload: {}, fields: {}, repoId: 'b' }
+      ]),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'rl1', entityId: 'ORC-1' }])
+  })
+
+  it('still fires triggers with no repoIds for any event', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 0,
+          rules: [makeRule({ id: 'rl1', projectId: 'p1' })]
+        }
+      ]
+    })
+    const { engine, dispatched } = makeEngine({
+      source: makeFakeSource([{ entityId: 'ORC-1', updatedAt: 1000, payload: {}, fields: {} }]),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'rl1', entityId: 'ORC-1' }])
   })
 })
