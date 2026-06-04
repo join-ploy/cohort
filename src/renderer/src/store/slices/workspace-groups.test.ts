@@ -15,7 +15,8 @@ describe('workspace-groups slice', () => {
         workspaceGroups: {
           list: vi.fn().mockResolvedValue([]),
           create: vi.fn(),
-          archive: vi.fn()
+          archive: vi.fn(),
+          restore: vi.fn()
         }
       }
     }
@@ -113,6 +114,38 @@ describe('workspace-groups slice', () => {
     // archiveCleanupError stamped by the main-process handler.
     expect(window.api.workspaceGroups.list).toHaveBeenCalled()
     expect(useAppStore.getState().workspaceGroups[0].archiveCleanupError).toBe('repo-b refused')
+  })
+
+  it('restoreGroup calls the IPC and upserts the returned (active) group', async () => {
+    const g = makeGroup('group:a', 'daring_tiger')
+    const archived = { ...g, isArchived: true, archivedAt: 1234 }
+    useAppStore.getState().setWorkspaceGroups([archived])
+    const restored = { ...g, isArchived: false, archivedAt: null }
+    ;(window.api.workspaceGroups.restore as ReturnType<typeof vi.fn>).mockResolvedValue(restored)
+
+    const result = await useAppStore.getState().restoreGroup('group:a')
+
+    expect(window.api.workspaceGroups.restore).toHaveBeenCalledWith({ groupId: 'group:a' })
+    expect(result).toEqual(restored)
+    expect(useAppStore.getState().workspaceGroups[0].isArchived).toBe(false)
+  })
+
+  it('restoreGroup rethrows and refreshes the list when the IPC rejects', async () => {
+    const archived = { ...makeGroup('group:a', 'daring_tiger'), isArchived: true, archivedAt: 1234 }
+    useAppStore.getState().setWorkspaceGroups([archived])
+    ;(window.api.workspaceGroups.restore as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('member repo-a: Branch "daring_tiger" no longer exists')
+    )
+    // Main flips the group active even on partial failure — the refresh reflects that.
+    const nowActive = { ...archived, isArchived: false, archivedAt: null }
+    ;(window.api.workspaceGroups.list as ReturnType<typeof vi.fn>).mockResolvedValue([nowActive])
+
+    await expect(useAppStore.getState().restoreGroup('group:a')).rejects.toThrowError(
+      /no longer exists/
+    )
+
+    expect(window.api.workspaceGroups.list).toHaveBeenCalled()
+    expect(useAppStore.getState().workspaceGroups[0].isArchived).toBe(false)
   })
 
   it('createGroup calls the IPC and upserts the result', async () => {

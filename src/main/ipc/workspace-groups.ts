@@ -17,6 +17,8 @@ import { memberWorktreePath, resolveGroupParentPath } from '../../shared/workspa
 import { validateGroupName } from '../../shared/workspace-group-namespace'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { runWorktreeRemoval } from '../worktree-removal/run-worktree-removal'
+import { addWorktreeForExistingBranch } from '../git/worktree'
+import { parseWorktreeId } from './worktree-logic'
 import {
   createLocalWorktree,
   createRemoteWorktree,
@@ -295,81 +297,126 @@ export function registerWorkspaceGroupHandlers(
       if (!existing) {
         throw new Error(`Workspace group not found: ${args.groupId}`)
       }
-      // Why: archive is idempotent. A second click (or a retry after a partial
-      // success in a previous run that the user manually cleaned up) shouldn't
-      // re-run removal on already-gone members.
+      // Why: archive is idempotent — a second click shouldn't re-flip members.
       if (existing.isArchived) {
         return existing
       }
 
-      // Why (K1): fan out per-member archive in parallel via the shared
-      // runWorktreeRemoval helper. We keep skipArchive=false so the user's
-      // archive hook still fires inside each member, and force=false so the
-      // hook can refuse on dirty state — matching today's single-worktree
-      // archive cleanup semantics from cleanup-service.ts.
-      const memberIds = existing.memberWorktreeIds
-      const settled = await Promise.allSettled(
-        memberIds.map((worktreeId) =>
-          runWorktreeRemoval(
-            { worktreeId, force: false, skipArchive: false },
-            { store, runtime, mainWindow }
-          )
-        )
-      )
-
-      const failures: { worktreeId: string; reason: unknown }[] = []
-      settled.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          failures.push({ worktreeId: memberIds[index], reason: result.reason })
-        }
-      })
-
-      if (failures.length > 0) {
-        // Why (K2): all-or-nothing on the group flag — failed members keep the
-        // group in the unarchived list so the user can retry. Concatenate
-        // per-member errors into the single archiveCleanupError string the
-        // schema already carries; ArchivedSection.tsx surfaces this verbatim
-        // in the tooltip but groups stay in the visible list when not archived.
-        const errorSummary = failures
-          .map((f) => {
-            const message = f.reason instanceof Error ? f.reason.message : String(f.reason)
-            return `${f.worktreeId}: ${message}`
-          })
-          .join('; ')
-        const updated: WorkspaceGroup = {
-          ...existing,
-          archiveCleanupError: errorSummary
-        }
-        store.setWorkspaceGroup(updated)
-        notifyWorkspaceGroupsChanged(mainWindow)
-        throw new Error(
-          `Failed to archive workspace group "${existing.displayName}": ` +
-            `${failures.length} of ${memberIds.length} member(s) failed — ${errorSummary}`
-        )
-      }
-
-      // Why: every member's runWorktreeRemoval has already removed the leaf
-      // directory and deleted its WorktreeMeta, so the parent folder is now
-      // an empty shell that nothing else owns. rmSync is best-effort: a stray
-      // .DS_Store left by Finder shouldn't block the archive flip.
-      try {
-        rmSync(existing.parentPath, { recursive: true, force: true })
-      } catch (cleanupError) {
-        console.warn(
-          `[workspace-groups] archive: failed to remove parent folder ${existing.parentPath}:`,
-          cleanupError
-        )
+      // Why: soft archive mirrors single-workspace archive (worktrees:archive)
+      // — flip each member's meta, leave the worktree dirs on disk, and run no
+      // archive hooks now. The shared cleanup-service hard-removes archived
+      // members once their per-member archivedAt passes the TTL, and restore
+      // within the window is a pure flag-flip (workspace-groups:restore).
+      const now = Date.now()
+      const memberRepoIds = new Set<string>()
+      for (const worktreeId of existing.memberWorktreeIds) {
+        store.setWorktreeMeta(worktreeId, {
+          isArchived: true,
+          archivedAt: now,
+          archiveCleanupError: null
+        })
+        memberRepoIds.add(parseWorktreeId(worktreeId).repoId)
       }
 
       const archived: WorkspaceGroup = {
         ...existing,
         isArchived: true,
-        archivedAt: Date.now(),
+        archivedAt: now,
         archiveCleanupError: null
       }
       store.setWorkspaceGroup(archived)
       notifyWorkspaceGroupsChanged(mainWindow)
+      for (const repoId of memberRepoIds) {
+        notifyWorktreesChanged(mainWindow, repoId)
+      }
       return archived
+    }
+  )
+
+  ipcMain.removeHandler('workspace-groups:restore')
+  ipcMain.handle(
+    'workspace-groups:restore',
+    async (_event, args: { groupId: string }): Promise<WorkspaceGroup> => {
+      const existing = store.getWorkspaceGroups().find((g) => g.id === args.groupId)
+      if (!existing) {
+        throw new Error(`Workspace group not found: ${args.groupId}`)
+      }
+      // Why: restore is idempotent — restoring an active group is a no-op.
+      if (!existing.isArchived) {
+        return existing
+      }
+
+      // Why: per member, recover the cheapest correct way. A member whose meta
+      // still exists was soft-archived (or already restored) → flag-flip. A
+      // member whose meta is gone was destroyed by the legacy destructive
+      // archive (or TTL cleanup) → recreate its worktree from the group's
+      // branch (which `git worktree remove` left intact). Recover what we can
+      // and report the rest; one failed member shouldn't strand the others.
+      const failures: { worktreeId: string; reason: string }[] = []
+      const touchedRepoIds = new Set<string>()
+      for (const worktreeId of existing.memberWorktreeIds) {
+        const { repoId, worktreePath } = parseWorktreeId(worktreeId)
+        touchedRepoIds.add(repoId)
+        if (store.getWorktreeMeta(worktreeId)) {
+          store.setWorktreeMeta(worktreeId, {
+            isArchived: false,
+            archivedAt: null,
+            archiveCleanupError: null
+          })
+          continue
+        }
+        const repo = store.getRepo(repoId)
+        if (!repo) {
+          failures.push({ worktreeId, reason: `Repo not found: ${repoId}` })
+          continue
+        }
+        if (repo.connectionId) {
+          // Recreate over SSH needs remote git plumbing (relay parity) we don't
+          // have yet; flag-flip restore still works for SSH soft-archived members.
+          failures.push({
+            worktreeId,
+            reason: 'Recreating a removed SSH group member is not supported yet.'
+          })
+          continue
+        }
+        try {
+          // `git worktree add` creates the leaf dir; ensure the shared parent
+          // exists (the legacy destructive archive rmSync'd it).
+          mkdirSync(existing.parentPath, { recursive: true })
+          await addWorktreeForExistingBranch(repo.path, worktreePath, existing.branchName)
+          store.setWorktreeMeta(worktreeId, {
+            workspaceName: existing.workspaceName,
+            groupId: existing.id,
+            branch: existing.branchName,
+            isArchived: false,
+            archivedAt: null,
+            archiveCleanupError: null
+          })
+        } catch (err) {
+          failures.push({ worktreeId, reason: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
+      const restored: WorkspaceGroup = {
+        ...existing,
+        isArchived: false,
+        archivedAt: null,
+        archiveCleanupError: null
+      }
+      store.setWorkspaceGroup(restored)
+      notifyWorkspaceGroupsChanged(mainWindow)
+      for (const repoId of touchedRepoIds) {
+        notifyWorktreesChanged(mainWindow, repoId)
+      }
+
+      if (failures.length > 0) {
+        const errorSummary = failures.map((f) => `${f.worktreeId}: ${f.reason}`).join('; ')
+        throw new Error(
+          `Restored workspace group "${existing.displayName}" with ` +
+            `${failures.length} of ${existing.memberWorktreeIds.length} member(s) failed — ${errorSummary}`
+        )
+      }
+      return restored
     }
   )
 

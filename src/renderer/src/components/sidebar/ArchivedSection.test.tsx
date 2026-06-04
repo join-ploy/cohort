@@ -11,6 +11,7 @@ type StoreState = {
   worktreesByRepo: Record<string, Worktree[]>
   workspaceGroups: WorkspaceGroup[]
   restoreWorktree: ReturnType<typeof vi.fn>
+  restoreGroup: ReturnType<typeof vi.fn>
   openModal: ReturnType<typeof vi.fn>
 }
 
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
       worktreesByRepo: {},
       workspaceGroups: [],
       restoreWorktree: vi.fn().mockResolvedValue(undefined),
+      restoreGroup: vi.fn().mockResolvedValue(undefined),
       openModal: vi.fn()
     } as StoreState
   }
@@ -116,6 +118,7 @@ describe('<ArchivedSection />', () => {
     setArchived([])
     mocks.state.workspaceGroups = []
     mocks.state.restoreWorktree.mockClear().mockResolvedValue(undefined)
+    mocks.state.restoreGroup.mockClear().mockResolvedValue(undefined)
     mocks.state.openModal.mockClear()
   })
 
@@ -202,6 +205,39 @@ describe('<ArchivedSection />', () => {
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
 
     expect(screen.getByTestId('archived-group-row')).toBeTruthy()
+    expect(screen.getByText('My Group')).toBeTruthy()
+  })
+
+  it('group Restore button calls restoreGroup with the group id', async () => {
+    mocks.state.workspaceGroups = [makeGroup({ id: 'group:1', displayName: 'My Group' })]
+
+    renderSection()
+
+    await userEvent.click(screen.getByRole('button', { name: /archived/i }))
+    await userEvent.click(screen.getByRole('button', { name: /restore/i }))
+
+    expect(mocks.state.restoreGroup).toHaveBeenCalledWith('group:1')
+  })
+
+  it('hides member worktrees of an archived group from the standalone list', async () => {
+    mocks.state.workspaceGroups = [
+      makeGroup({
+        id: 'group:1',
+        displayName: 'My Group',
+        memberWorktreeIds: ['repo1::/tmp/m1']
+      })
+    ]
+    // The member is itself soft-archived and carries the group's id.
+    setArchived([
+      makeWorktree({ id: 'repo1::/tmp/m1', displayName: 'Member 1', groupId: 'group:1' })
+    ])
+
+    renderSection()
+
+    await userEvent.click(screen.getByRole('button', { name: /archived/i }))
+
+    // The member is represented by the group row, not as a standalone row.
+    expect(screen.queryByText('Member 1')).toBeNull()
     expect(screen.getByText('My Group')).toBeTruthy()
   })
 })

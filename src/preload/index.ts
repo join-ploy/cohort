@@ -504,6 +504,8 @@ const api = {
       ipcRenderer.invoke('workspace-groups:create', args),
     archive: (args: { groupId: string }): Promise<WorkspaceGroup> =>
       ipcRenderer.invoke('workspace-groups:archive', args),
+    restore: (args: { groupId: string }): Promise<WorkspaceGroup> =>
+      ipcRenderer.invoke('workspace-groups:restore', args),
     update: (args: {
       groupId: string
       partial: { displayName?: string; comment?: string; isPinned?: boolean }
