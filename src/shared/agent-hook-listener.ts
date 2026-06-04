@@ -787,6 +787,17 @@ function extractToolFields(
   }
 }
 
+// Why: a Claude `Stop` carrying non-empty background_tasks/session_crons means
+// the turn paused waiting for that work (a monitor, a scheduled wakeup) to wake
+// it back up — it has not finished. Claude Code populates both arrays from
+// v2.1.145; absent (older versions / registry unreachable) reads as no pending
+// work. Recurring crons count too, by design.
+function hasPendingClaudeBackgroundWork(hookPayload: Record<string, unknown>): boolean {
+  const tasks = hookPayload['background_tasks']
+  const crons = hookPayload['session_crons']
+  return (Array.isArray(tasks) && tasks.length > 0) || (Array.isArray(crons) && crons.length > 0)
+}
+
 function normalizeClaudeEvent(
   state: HookListenerState,
   eventName: unknown,
@@ -794,6 +805,9 @@ function normalizeClaudeEvent(
   paneKey: string,
   hookPayload: Record<string, unknown>
 ): ParsedAgentStatusPayload | null {
+  const interrupted =
+    eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
+
   const stateName =
     eventName === 'UserPromptSubmit' ||
     eventName === 'PreToolUse' ||
@@ -803,7 +817,11 @@ function normalizeClaudeEvent(
       : eventName === 'PermissionRequest'
         ? 'waiting'
         : eventName === 'Stop'
-          ? 'done'
+          ? // An explicit interrupt (user cancelled) is `done` regardless of
+            // pending work; otherwise park as `waiting` while work is in flight.
+            !interrupted && hasPendingClaudeBackgroundWork(hookPayload)
+            ? 'waiting'
+            : 'done'
           : null
 
   if (!stateName) {
@@ -816,9 +834,6 @@ function normalizeClaudeEvent(
     extractToolFields('claude', eventName, hookPayload),
     { resetOnNewTurn: isNewTurnEvent('claude', eventName) }
   )
-
-  const interrupted =
-    eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
 
   return parseAgentStatusPayload(
     JSON.stringify({

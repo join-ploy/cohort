@@ -25,6 +25,7 @@ export type WorkspaceGroupsSlice = {
   removeWorkspaceGroup: (id: string) => void
   createGroup: (args: CreateWorkspaceGroupArgs) => Promise<CreateWorkspaceGroupResult>
   archiveGroup: (groupId: string) => Promise<WorkspaceGroup>
+  restoreGroup: (groupId: string) => Promise<WorkspaceGroup>
   updateWorkspaceGroup: (
     groupId: string,
     partial: UpdateWorkspaceGroupPartial
@@ -103,6 +104,30 @@ export const createWorkspaceGroupsSlice: StateCreator<AppState, [], [], Workspac
         next.delete(groupId)
         return { archivingGroupIds: next }
       })
+    }
+  },
+
+  // Why: restore is the inverse of archive. Main flag-flips members that still
+  // exist and recreates members whose worktrees were destroyed, then returns
+  // the now-active group — upsert it so the row leaves ArchivedSection. On
+  // partial failure (e.g. a member's branch is gone) main still flips the
+  // group active and throws a summary; refresh so the UI reflects the active
+  // state before we re-throw for the caller's error toast.
+  restoreGroup: async (groupId) => {
+    try {
+      const updated = await window.api.workspaceGroups.restore({ groupId })
+      set((s) => ({
+        workspaceGroups: s.workspaceGroups.map((g) => (g.id === updated.id ? updated : g))
+      }))
+      return updated
+    } catch (err) {
+      try {
+        const groups = await window.api.workspaceGroups.list()
+        set({ workspaceGroups: groups })
+      } catch (refreshErr) {
+        console.error('Failed to refresh workspace groups after restore error:', refreshErr)
+      }
+      throw err
     }
   },
 

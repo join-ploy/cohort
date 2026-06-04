@@ -119,6 +119,78 @@ describe('shared agent-hook-listener', () => {
     expect(event!.payload.prompt).toBe('')
   })
 
+  describe('Claude Stop with pending background work', () => {
+    const stopEvent = (payload: Record<string, unknown>) =>
+      normalizeHookPayload(
+        state,
+        'claude',
+        { paneKey: 'tab-1:0', payload: { hook_event_name: 'Stop', ...payload } },
+        'production'
+      )
+
+    it('reports `done` when both background arrays are absent', () => {
+      const event = stopEvent({ last_assistant_message: 'all set' })
+      expect(event!.payload.state).toBe('done')
+    })
+
+    it('reports `done` when both background arrays are present but empty', () => {
+      const event = stopEvent({ background_tasks: [], session_crons: [] })
+      expect(event!.payload.state).toBe('done')
+    })
+
+    it('reports `waiting` when a background task is still in flight', () => {
+      const event = stopEvent({
+        background_tasks: [{ id: 'task-1', type: 'monitor', status: 'running' }]
+      })
+      expect(event!.payload.state).toBe('waiting')
+    })
+
+    it('reports `waiting` when a one-shot session cron is scheduled', () => {
+      const event = stopEvent({
+        session_crons: [{ id: 'cron-1', schedule: '0 9 * * *', recurring: false }]
+      })
+      expect(event!.payload.state).toBe('waiting')
+    })
+
+    it('reports `waiting` even when the only pending item is a recurring cron', () => {
+      const event = stopEvent({
+        session_crons: [{ id: 'cron-1', schedule: '0 9 * * 1-5', recurring: true }]
+      })
+      expect(event!.payload.state).toBe('waiting')
+    })
+
+    it('forces `done` (interrupted) when the user cancelled, despite pending work', () => {
+      const event = stopEvent({
+        is_interrupt: true,
+        background_tasks: [{ id: 'task-1', type: 'monitor', status: 'running' }]
+      })
+      expect(event!.payload.state).toBe('done')
+      expect(event!.payload.interrupted).toBe(true)
+    })
+
+    it('parks on the monitor Stop, then completes on the later empty Stop', () => {
+      const claudeEvent = (payload: Record<string, unknown>) =>
+        normalizeHookPayload(state, 'claude', { paneKey: 'tab-1:0', payload }, 'production')
+      // Turn starts working, then a monitor parks it...
+      expect(
+        claudeEvent({ hook_event_name: 'UserPromptSubmit', prompt: 'go' })!.payload.state
+      ).toBe('working')
+      expect(
+        claudeEvent({
+          hook_event_name: 'Stop',
+          background_tasks: [{ id: 't1', type: 'monitor', status: 'running' }]
+        })!.payload.state
+      ).toBe('waiting')
+      // ...the monitor fires and the agent resumes, then finishes cleanly.
+      expect(claudeEvent({ hook_event_name: 'PreToolUse', tool_name: 'Read' })!.payload.state).toBe(
+        'working'
+      )
+      expect(claudeEvent({ hook_event_name: 'Stop', background_tasks: [] })!.payload.state).toBe(
+        'done'
+      )
+    })
+  })
+
   describe('writeEndpointFile', () => {
     let dir: string
     beforeEach(() => {

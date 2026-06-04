@@ -31,6 +31,7 @@ type ArchivedRow =
 export function ArchivedSection(): React.JSX.Element | null {
   const archived = useAppStore(useShallow(getArchivedWorktrees))
   const restoreWorktree = useAppStore((s) => s.restoreWorktree)
+  const restoreGroup = useAppStore((s) => s.restoreGroup)
   const openModal = useAppStore((s) => s.openModal)
   const workspaceGroups = useWorkspaceGroups()
   const [open, setOpen] = useState(false)
@@ -39,11 +40,17 @@ export function ArchivedSection(): React.JSX.Element | null {
   // is most likely to want to restore or delete — is at the top. Worktrees
   // and groups share the same ordering so they interleave by archive time.
   const sorted = useMemo<ArchivedRow[]>(() => {
-    const rows: ArchivedRow[] = archived.map((wt) => ({
-      kind: 'worktree' as const,
-      archivedAt: wt.archivedAt ?? 0,
-      worktree: wt
-    }))
+    // Why: a soft-archived group flips its members' meta too, so they'd
+    // otherwise show as standalone rows alongside the group row. Members of an
+    // archived group are represented by — and restored through — the group row.
+    const archivedGroupIds = new Set(workspaceGroups.filter((g) => g.isArchived).map((g) => g.id))
+    const rows: ArchivedRow[] = archived
+      .filter((wt) => !(wt.groupId && archivedGroupIds.has(wt.groupId)))
+      .map((wt) => ({
+        kind: 'worktree' as const,
+        archivedAt: wt.archivedAt ?? 0,
+        worktree: wt
+      }))
     for (const g of workspaceGroups) {
       if (g.isArchived) {
         rows.push({ kind: 'group', archivedAt: g.archivedAt ?? 0, group: g })
@@ -59,6 +66,16 @@ export function ArchivedSection(): React.JSX.Element | null {
   const handleRestore = (worktreeId: string): void => {
     restoreWorktree(worktreeId).catch((err: unknown) => {
       toast.error('Failed to restore worktree', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    })
+  }
+
+  const handleRestoreGroup = (groupId: string): void => {
+    // Why: restore recreates destroyed members via git, which can partially
+    // fail (a member's branch is gone); surface that summary as a toast.
+    restoreGroup(groupId).catch((err: unknown) => {
+      toast.error('Failed to restore workspace group', {
         description: err instanceof Error ? err.message : String(err)
       })
     })
@@ -132,6 +149,23 @@ export function ArchivedSection(): React.JSX.Element | null {
                     ) : (
                       <span className="text-[11px] text-muted-foreground">{days} days left</span>
                     )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="Restore"
+                          onClick={() => handleRestoreGroup(g.id)}
+                        >
+                          <RotateCcw />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>
+                        Restore
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 </li>
               )

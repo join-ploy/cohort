@@ -296,6 +296,27 @@ export async function addWorktree(
   }
 }
 
+/** Recreate a worktree that checks out an EXISTING branch (no `-b`). Used to
+ *  recover a group member whose working tree was `git worktree remove`d (the
+ *  destructive group-archive path / post-TTL cleanup) but whose branch still
+ *  exists — `addWorktree` can't be reused because it always creates a new
+ *  branch. Throws a clear message if the branch is gone, so the caller can
+ *  surface "can't recreate" per member instead of git's raw error. */
+export async function addWorktreeForExistingBranch(
+  repoPath: string,
+  worktreePath: string,
+  branch: string
+): Promise<void> {
+  try {
+    await gitExecFileAsync(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: repoPath
+    })
+  } catch {
+    throw new Error(`Branch "${branch}" no longer exists; cannot recreate worktree.`)
+  }
+  await gitExecFileAsync(['worktree', 'add', worktreePath, branch], { cwd: repoPath })
+}
+
 export async function addSparseWorktree(
   repoPath: string,
   worktreePath: string,
