@@ -84,6 +84,23 @@ export const LINEAR_TICKET_TRIGGER_OVERLAY = {
   }
 } as const
 
+// Nested overlay merged into the trigger schema when a github-pr auto-trigger
+// is configured, so steps can template against the PR that fired the run.
+export const GITHUB_PR_TRIGGER_OVERLAY = {
+  github: {
+    pr: {
+      number: 'number',
+      title: 'string',
+      url: 'string',
+      headRef: 'string',
+      baseRef: 'string',
+      author: 'string',
+      isCrossRepository: 'boolean',
+      repoId: 'string'
+    }
+  }
+} as const
+
 // Record<StepKind, …> makes this map exhaustive: adding a new StepKind
 // without extending the map is a compile error.
 const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
