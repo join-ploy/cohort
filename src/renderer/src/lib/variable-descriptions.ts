@@ -24,6 +24,15 @@ const BY_PATH: Record<string, string> = {
   'trigger.linear.issue.stateName': 'Current workflow state, e.g. In Progress',
   'trigger.linear.issue.priority': 'Priority level (0 none … 4 low)',
 
+  'trigger.github.pr.number': 'Pull request number',
+  'trigger.github.pr.title': 'Pull request title',
+  'trigger.github.pr.url': 'Link to the PR on GitHub',
+  'trigger.github.pr.headRef': "The PR's source (head) branch",
+  'trigger.github.pr.baseRef': "The PR's target (base) branch",
+  'trigger.github.pr.author': "GitHub login of the PR's author",
+  'trigger.github.pr.isCrossRepository': 'True when the PR comes from a fork',
+  'trigger.github.pr.repoId': 'ID of the repo the PR belongs to',
+
   'group.id': 'Handle of the created workspace group',
   'group.parentPath': 'Shared folder all group members live under'
 }

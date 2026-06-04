@@ -3,6 +3,7 @@ import { buildPaths, type PathEntry } from './available-variables-tree'
 import { describeVariable } from './variable-descriptions'
 import type { AvailableVariables } from './template-dry-run'
 import {
+  GITHUB_PR_TRIGGER_OVERLAY,
   getOutputSchemaForKind,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
@@ -33,7 +34,8 @@ function everyVariable(): AvailableVariables {
   }
   const trigger: NestedSchema = {
     ...MANUAL_TRIGGER_SCHEMA,
-    linear: LINEAR_TICKET_TRIGGER_OVERLAY.linear
+    linear: LINEAR_TICKET_TRIGGER_OVERLAY.linear,
+    github: GITHUB_PR_TRIGGER_OVERLAY.github
   }
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
