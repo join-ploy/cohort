@@ -317,6 +317,12 @@ export type CreateWorktreeConfig = {
   branchName: string // template
   displayName: string // template
   linkLinearIssue: boolean
+  // 'new-branch' (default, legacy) creates a fresh branch from baseBranch.
+  // 'pull-request' checks out an existing PR's branch via the Start-from-PR
+  // backend (fork-aware). Optional so persisted rows default to new-branch.
+  mode?: 'new-branch' | 'pull-request'
+  // PR number template (e.g. {{trigger.github.pr.number}}), used in PR mode.
+  pullRequestRef?: string
 }
 
 // Why (grouped-workspaces L3): parallel to CreateWorktreeConfig but addresses N
