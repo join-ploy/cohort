@@ -3,6 +3,7 @@ import type {
   OutputSchema,
   SchemaLeafType
 } from '../../../shared/automation-step-schemas'
+import type { StepKind } from '../../../shared/automations-types'
 
 export type AvailableVariables = {
   automation: OutputSchema
@@ -10,6 +11,11 @@ export type AvailableVariables = {
   // recursive shape; step outputs stay flat.
   trigger: NestedSchema
   steps: Record<string, OutputSchema>
+  // Maps each in-scope step id to its kind. UI-only: the picker keys a step
+  // output's description off its kind (a leaf like `outputTail` means something
+  // different for run-prompt vs run-command). Optional so validation and
+  // existing producers are unaffected.
+  stepKinds?: Record<string, StepKind>
   // Why: the dispatcher publishes a top-level `group.*` shape after a
   // `create-workspace-group` step succeeds (see
   // src/main/workspace-group-runtime.ts → buildGroupTemplateContext). When

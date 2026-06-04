@@ -1,4 +1,5 @@
 import type { NestedSchema, SchemaLeafType } from '../../../shared/automation-step-schemas'
+import type { StepKind } from '../../../shared/automations-types'
 import type { AvailableVariables } from './template-dry-run'
 
 // A single leaf in the variable tree, flattened to a dotted path.
@@ -8,6 +9,9 @@ import type { AvailableVariables } from './template-dry-run'
 export type PathEntry = {
   namespace: 'automation' | 'trigger' | 'steps' | 'group'
   stepId?: string
+  // The kind of the owning step, for `steps`-namespace entries only — lets the
+  // picker pick kind-specific descriptions. Undefined for other namespaces.
+  kind?: StepKind
   // Full dotted path, e.g. 'automation.projectId' or 'steps.cw1.worktreeId'.
   path: string
   leaf: string
@@ -28,10 +32,12 @@ export function buildPaths(available: AvailableVariables): PathEntry[] {
     walkNestedPaths(available.group, '', out, 'group')
   }
   for (const [stepId, schema] of Object.entries(available.steps)) {
+    const kind = available.stepKinds?.[stepId]
     for (const [key, type] of Object.entries(schema)) {
       out.push({
         namespace: 'steps',
         stepId,
+        kind,
         path: `steps.${stepId}.${key}`,
         leaf: key,
         type

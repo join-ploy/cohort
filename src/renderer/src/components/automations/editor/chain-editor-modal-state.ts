@@ -140,6 +140,9 @@ export function getAvailableVariablesAtStep(
   repos: Repo[] = []
 ): AvailableVariables {
   const stepsSchema: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  // Why: the picker keys a step output's description off the step's kind, so we
+  // carry the id→kind map alongside the schemas.
+  const stepKinds: Record<string, StepKind> = {}
   let groupSchema: NestedSchema | undefined = undefined
 
   const { topIndex } = findStepPosition(draft.steps, stepIndex)
@@ -149,6 +152,7 @@ export function getAvailableVariablesAtStep(
     const members = Array.isArray(item) ? item : [item]
     for (const s of members) {
       stepsSchema[s.id] = getOutputSchemaForKind(s.kind)
+      stepKinds[s.id] = s.kind
       // Why: any earlier create-workspace-group step injects the top-level
       // `group.*` namespace. If multiple exist (rare), the latest wins —
       // mirrors runtime, where each step's contextPatch overwrites `group`.
@@ -162,6 +166,7 @@ export function getAvailableVariablesAtStep(
     automation: { projectId: 'string', workspaceId: 'string' },
     trigger: buildTriggerSchema(draft.trigger),
     steps: stepsSchema,
+    stepKinds,
     group: groupSchema
   }
 }

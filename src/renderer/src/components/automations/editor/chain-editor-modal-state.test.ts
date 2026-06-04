@@ -182,6 +182,51 @@ describe('getAvailableVariablesAtStep — group namespace', () => {
   })
 })
 
+describe('getAvailableVariablesAtStep — stepKinds', () => {
+  it('maps each in-scope step id to its kind', () => {
+    const draft = makeDraft([
+      {
+        id: 'cw',
+        kind: 'create-worktree',
+        config: { baseBranch: 'main', branchName: 'x', displayName: '', linkLinearIssue: false },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      },
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    const out = getAvailableVariablesAtStep(draft, draft.steps.length, [])
+    expect(out.stepKinds).toEqual({ cw: 'create-worktree', rp: 'run-prompt' })
+  })
+
+  it('only includes kinds for steps in scope (excludes the current and later steps)', () => {
+    const draft = makeDraft([
+      {
+        id: 'cw',
+        kind: 'create-worktree',
+        config: { baseBranch: 'main', branchName: 'x', displayName: '', linkLinearIssue: false },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      },
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    // At step index 1 (the run-prompt), only the earlier create-worktree is in scope.
+    const out = getAvailableVariablesAtStep(draft, 1, [])
+    expect(out.stepKinds).toEqual({ cw: 'create-worktree' })
+  })
+})
+
 describe('computeAllErrors — step ids', () => {
   it('rejects duplicate ids inside a parallel group', () => {
     const step: Step = {

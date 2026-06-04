@@ -43,6 +43,22 @@ describe('AvailableVariablesPanel', () => {
     expect(markup).toMatch(/firedAt.*number/)
   })
 
+  it('renders a description under each non-step variable', () => {
+    const markup = renderToStaticMarkup(<AvailableVariablesPanel available={SCHEMA} />)
+    expect(markup).toContain('ID of the project this automation runs in')
+    expect(markup).toContain('Email of the person who triggered the run')
+  })
+
+  it('renders kind-specific descriptions for step outputs', () => {
+    const schema: AvailableVariables = {
+      ...SCHEMA,
+      steps: { cw1: { worktreeId: 'string' } },
+      stepKinds: { cw1: 'create-worktree' }
+    }
+    const markup = renderToStaticMarkup(<AvailableVariablesPanel available={schema} />)
+    expect(markup).toContain('ID of the newly created worktree')
+  })
+
   it('renders a Group section with member paths when the group namespace is present', () => {
     const schema: AvailableVariables = {
       automation: {},
