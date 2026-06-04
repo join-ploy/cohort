@@ -9,6 +9,7 @@ import type {
   AutomationRunStatus,
   AutomationRunTrigger,
   AutoTrigger,
+  GithubPrPayload,
   LinearIssuePayload,
   Rule,
   RunNowPayload,
@@ -626,6 +627,16 @@ export class AutomationService {
         projectId: rule.projectId,
         linear: { issue: linearPayload }
       }
+    } else if (trigger.source === 'github-pr') {
+      const prPayload = (event.payload as { pr?: GithubPrPayload }).pr
+      if (!prPayload) {
+        throw new Error(
+          `dispatchAutoRun: github-pr event missing payload.pr (entityId=${event.entityId})`
+        )
+      }
+      // The PR's own repo is the run target — not rule.projectId (rules are pure
+      // filters for github-pr; the watch-list/event determines the repo).
+      runPayload = { projectId: event.repoId, github: { pr: prPayload } }
     } else {
       runPayload = { projectId: rule.projectId }
     }
@@ -646,6 +657,9 @@ export class AutomationService {
     const triggerContext: Record<string, unknown> = {}
     if (payload?.linear) {
       triggerContext.linear = payload.linear
+    }
+    if (payload?.github) {
+      triggerContext.github = payload.github
     }
     if (payload?.projectId) {
       // Why: validate the picked project up-front so the run fails fast with a
