@@ -28,6 +28,13 @@ describe('triggerLabel — auto-trigger awareness', () => {
     expect(triggerLabel(baseTrigger, triggers)).toBe('Manual + Linear auto')
   })
 
+  it('includes a "GitHub PR" label for one enabled github-pr trigger', () => {
+    const triggers: AutoTrigger[] = [
+      { id: 'at1', source: 'github-pr', enabled: true, enabledAt: 0, rules: [] }
+    ]
+    expect(triggerLabel(baseTrigger, triggers)).toContain('GitHub PR')
+  })
+
   it('returns "Manual + N auto triggers" with multiple enabled triggers', () => {
     const triggers: AutoTrigger[] = [
       { id: 'at1', source: 'linear-issue', enabled: true, enabledAt: 0, rules: [] },
