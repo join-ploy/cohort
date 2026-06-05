@@ -3,6 +3,9 @@ import type { ConditionOp, TriggerSourceId } from '../../../shared/automations-t
 export type PollCtx = {
   since: number
   hostId: string
+  // Union of the watching triggers' repoIds; set by the engine for
+  // source-scoped sources like github-pr, ignored by linear-issue.
+  repoIds?: string[]
 }
 
 export type FieldDescriptor = {
@@ -21,6 +24,9 @@ export type CandidateEvent = {
   updatedAt: number
   payload: Record<string, unknown>
   fields: Record<string, unknown>
+  // Owning repo for repo-bound entities; drives the engine's watch-list guard
+  // and becomes the run's projectId.
+  repoId?: string
 }
 
 export type TriggerSource = {

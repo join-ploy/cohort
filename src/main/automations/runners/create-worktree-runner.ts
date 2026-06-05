@@ -14,6 +14,17 @@ export type CreateWorktreeDeps = {
      *  to the AutomationRun that produced it. */
     createdByAutomationRunId?: string
   }) => Promise<{ worktreeId: string; path: string; branch: string }>
+  /** Checks out an existing PR into a managed worktree (fork-aware). headRefName
+   *  and isCrossRepository are best-effort hints from the trigger payload; the
+   *  backend's resolvePrBaseCore re-derives them from the GitHub API if absent. */
+  createWorktreeFromPr: (input: {
+    repoId: string
+    prNumber: number
+    headRefName?: string
+    isCrossRepository?: boolean
+    displayName: string
+    createdByAutomationRunId?: string
+  }) => Promise<{ worktreeId: string; path: string; branch: string }>
   now: () => number
 }
 
@@ -33,8 +44,7 @@ export class CreateWorktreeRunner implements StepRunner {
 
   async tick(ctx: StepRunnerCtx): Promise<StepRunnerResult> {
     const config = ctx.step.config as CreateWorktreeConfig
-    let runTrackers = this.trackers.get(ctx.runId)
-    const existing = runTrackers?.get(ctx.step.id)
+    const existing = this.trackers.get(ctx.runId)?.get(ctx.step.id)
     if (existing) {
       // Why: re-tick after success is a defensive no-op — chain executor
       //      shouldn't drive a succeeded step, but if it does, return the
@@ -45,6 +55,26 @@ export class CreateWorktreeRunner implements StepRunner {
         output: existing,
         contextPatch: { steps: { [ctx.step.id]: existing } }
       }
+    }
+
+    // Why: repoId is resolved BEFORE template resolution on purpose — both
+    // new-branch and pull-request modes share this guard, so don't reorder it
+    // after the per-mode template resolution.
+    const repoId =
+      ctx.context.automation && typeof ctx.context.automation === 'object'
+        ? (((ctx.context.automation as Record<string, unknown>).projectId as string | undefined) ??
+          '')
+        : ''
+    if (!repoId) {
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: 'CreateWorktreeRunner: context.automation.projectId is missing.'
+      }
+    }
+
+    if (config.mode === 'pull-request') {
+      return this.tickPullRequest(ctx, config, repoId)
     }
 
     let baseBranch: string
@@ -61,19 +91,6 @@ export class CreateWorktreeRunner implements StepRunner {
       throw e
     }
 
-    const repoId =
-      ctx.context.automation && typeof ctx.context.automation === 'object'
-        ? (((ctx.context.automation as Record<string, unknown>).projectId as string | undefined) ??
-          '')
-        : ''
-    if (!repoId) {
-      return {
-        outcome: 'failed',
-        status: 'failed',
-        error: 'CreateWorktreeRunner: context.automation.projectId is missing.'
-      }
-    }
-
     const linkedIssue = config.linkLinearIssue ? extractLinearIssue(ctx.context) : null
 
     try {
@@ -85,27 +102,84 @@ export class CreateWorktreeRunner implements StepRunner {
         linkedIssue,
         createdByAutomationRunId: ctx.runId
       })
-      const tracker: Tracker = {
+      return this.storeTracker(ctx, {
         worktreeId: result.worktreeId,
         path: result.path,
         branch: result.branch
-      }
-      if (!runTrackers) {
-        runTrackers = new Map()
-        this.trackers.set(ctx.runId, runTrackers)
-      }
-      runTrackers.set(ctx.step.id, tracker)
-      return {
-        outcome: 'done',
-        status: 'succeeded',
-        output: tracker,
-        contextPatch: { steps: { [ctx.step.id]: tracker } }
-      }
+      })
     } catch (e) {
       // Why: createWorktree errors are typically deterministic (bad base
       //      branch, conflict, permission). Fail-fast rather than retry.
       const message = e instanceof Error ? e.message : String(e)
       return { outcome: 'failed', status: 'failed', error: message }
+    }
+  }
+
+  private async tickPullRequest(
+    ctx: StepRunnerCtx,
+    config: CreateWorktreeConfig,
+    repoId: string
+  ): Promise<StepRunnerResult> {
+    let displayName: string
+    let pullRequestRefRaw: string
+    try {
+      displayName = resolveTemplate(config.displayName, ctx.context)
+      // Why: empty template short-circuits resolveTemplate to '', so the
+      //      positive-integer check below catches a missing pullRequestRef.
+      pullRequestRefRaw = resolveTemplate(config.pullRequestRef ?? '', ctx.context)
+    } catch (e) {
+      if (e instanceof TemplateResolutionError) {
+        return { outcome: 'failed', status: 'failed', error: e.message }
+      }
+      throw e
+    }
+
+    const trimmed = pullRequestRefRaw.trim()
+    // Why: only accept a bare positive integer — Number() would coerce '7abc'
+    //      to NaN but also accept '7.0'/'0x7'; an explicit /^\d+$/ is stricter.
+    const prNumber = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      return {
+        outcome: 'failed',
+        status: 'failed',
+        error: `CreateWorktreeRunner: pull-request mode requires a positive integer PR number, got ${JSON.stringify(pullRequestRefRaw)}.`
+      }
+    }
+
+    const prHints = extractGithubPr(ctx.context)
+
+    try {
+      const result = await this.deps.createWorktreeFromPr({
+        repoId,
+        prNumber,
+        headRefName: prHints?.headRef,
+        isCrossRepository: prHints?.isCrossRepository,
+        displayName,
+        createdByAutomationRunId: ctx.runId
+      })
+      return this.storeTracker(ctx, {
+        worktreeId: result.worktreeId,
+        path: result.path,
+        branch: result.branch
+      })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { outcome: 'failed', status: 'failed', error: message }
+    }
+  }
+
+  private storeTracker(ctx: StepRunnerCtx, tracker: Tracker): StepRunnerResult {
+    let runTrackers = this.trackers.get(ctx.runId)
+    if (!runTrackers) {
+      runTrackers = new Map()
+      this.trackers.set(ctx.runId, runTrackers)
+    }
+    runTrackers.set(ctx.step.id, tracker)
+    return {
+      outcome: 'done',
+      status: 'succeeded',
+      output: tracker,
+      contextPatch: { steps: { [ctx.step.id]: tracker } }
     }
   }
 
@@ -145,4 +219,29 @@ function extractLinearIssue(
     return null
   }
   return { provider: 'linear', id }
+}
+
+// Best-effort hints from a github-pr trigger payload. Returns null on any
+// missing/malformed level so PR mode can still proceed (the backend re-derives
+// these from the GitHub API when absent).
+function extractGithubPr(
+  context: Record<string, unknown>
+): { headRef?: string; isCrossRepository?: boolean } | null {
+  const trigger = context.trigger
+  if (!trigger || typeof trigger !== 'object') {
+    return null
+  }
+  const github = (trigger as Record<string, unknown>).github
+  if (!github || typeof github !== 'object') {
+    return null
+  }
+  const pr = (github as Record<string, unknown>).pr
+  if (!pr || typeof pr !== 'object') {
+    return null
+  }
+  const prRecord = pr as Record<string, unknown>
+  const headRef = typeof prRecord.headRef === 'string' ? prRecord.headRef : undefined
+  const isCrossRepository =
+    typeof prRecord.isCrossRepository === 'boolean' ? prRecord.isCrossRepository : undefined
+  return { headRef, isCrossRepository }
 }

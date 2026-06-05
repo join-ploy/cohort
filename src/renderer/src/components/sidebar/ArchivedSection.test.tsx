@@ -128,7 +128,9 @@ describe('<ArchivedSection />', () => {
   })
 
   it('lists archived worktrees with days remaining', async () => {
-    const archivedAt = Date.now() - 3 * 24 * 60 * 60 * 1000
+    // Just-archived → the full TTL window remains. Derive the expectation from
+    // ARCHIVE_TTL_MS so it tracks the retention window.
+    const archivedAt = Date.now()
     setArchived([makeWorktree({ id: 'wt-a', displayName: 'My WT', archivedAt })])
 
     renderSection()
@@ -138,7 +140,8 @@ describe('<ArchivedSection />', () => {
     await userEvent.click(screen.getByRole('button', { name: /archived/i }))
 
     expect(screen.getByText('My WT')).toBeTruthy()
-    expect(screen.getByText(/27 days left/i)).toBeTruthy()
+    const expectedDays = Math.ceil(ARCHIVE_TTL_MS / (24 * 60 * 60 * 1000))
+    expect(screen.getByText(new RegExp(`${expectedDays} days left`, 'i'))).toBeTruthy()
   })
 
   it('Restore button calls restoreWorktree with the worktree id', async () => {

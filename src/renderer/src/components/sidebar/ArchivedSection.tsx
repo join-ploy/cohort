@@ -98,7 +98,11 @@ export function ArchivedSection(): React.JSX.Element | null {
         />
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden">
-        <ul className="flex flex-col gap-px pb-1">
+        {/* Why: this section is pinned below the worktree scroll viewport (see
+            sidebar/index.tsx), so a long archived list would be clipped by the
+            sidebar's overflow-hidden with no way to scroll. Cap the height and
+            give the list its own scroll. */}
+        <ul className="flex max-h-[40vh] flex-col gap-px overflow-y-auto pb-1 scrollbar-sleek">
           {sorted.map((row) => {
             if (row.kind === 'group') {
               const g = row.group

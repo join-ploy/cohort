@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
 import { buildPaths, type PathEntry } from '../../../lib/available-variables-tree'
+import { describeVariable } from '../../../lib/variable-descriptions'
 
 export type VariablePickerPopoverProps = {
   open: boolean
@@ -157,8 +158,9 @@ function renderRow(
   onSelect: (p: string) => void,
   onClose: () => void
 ): React.JSX.Element {
-  const base = 'w-full flex items-center justify-between px-2 py-1 text-xs font-mono text-left'
+  const base = 'w-full flex flex-col items-stretch gap-0.5 px-2 py-1 text-left'
   const stateClasses = highlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/40'
+  const description = describeVariable(entry)
   return (
     <button
       key={entry.path}
@@ -171,8 +173,12 @@ function renderRow(
       }}
       className={`${base} ${stateClasses}`}
     >
-      <span>{entry.path}</span>
-      <span className="text-muted-foreground text-[10px]">{entry.type}</span>
+      <span className="flex items-center justify-between text-xs font-mono">
+        <span>{entry.path}</span>
+        <span className="text-muted-foreground text-[10px]">{entry.type}</span>
+      </span>
+      {/* Prose, so sans not mono — mono is reserved for the literal path. */}
+      {description && <span className="text-[11px] text-muted-foreground">{description}</span>}
     </button>
   )
 }

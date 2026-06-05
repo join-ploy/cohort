@@ -9,6 +9,7 @@ import type {
   AutomationRunStatus,
   AutomationRunTrigger,
   AutoTrigger,
+  GithubPrPayload,
   LinearIssuePayload,
   Rule,
   RunNowPayload,
@@ -109,6 +110,11 @@ export type AutomationServiceOpts = {
    *  Omitting it makes the runner throw a clear error if a chain tries to
    *  invoke it (unit tests that never exercise `create-worktree` can skip it). */
   createWorktree?: CreateWorktreeDeps['createWorktree']
+  /** Bridge from a pull-request-mode `create-worktree` step to the Start-from-PR
+   *  (fork-aware) checkout flow. Wired in src/main/index.ts. Omitting it makes
+   *  the runner throw if a chain hits a PR-mode step — same shape as
+   *  `createWorktree` above. */
+  createWorktreeFromPr?: CreateWorktreeDeps['createWorktreeFromPr']
   /** Bridge from the chain executor's `create-workspace-group` step to the
    *  workspace-groups:create flow. Wired in src/main/index.ts. Omitting it
    *  makes the runner throw if a chain ever tries to invoke it — same shape
@@ -359,8 +365,19 @@ export class AutomationService {
           'AutomationService: createWorktree dep not wired (cannot run create-worktree steps).'
         )
       })
+    // Why: same fail-loud default as createWorktree — a chain that hits a
+    // pull-request-mode create-worktree step without the dep wired surfaces a
+    // clear error instead of a confusing TypeError mid-tick.
+    const createWorktreeFromPrDep: CreateWorktreeDeps['createWorktreeFromPr'] =
+      opts.createWorktreeFromPr ??
+      (() => {
+        throw new Error(
+          'AutomationService: createWorktreeFromPr dep not wired (cannot run pull-request create-worktree steps).'
+        )
+      })
     this.createWorktreeRunner = new CreateWorktreeRunner({
       createWorktree: createWorktreeDep,
+      createWorktreeFromPr: createWorktreeFromPrDep,
       now: () => Date.now()
     })
 
@@ -626,6 +643,16 @@ export class AutomationService {
         projectId: rule.projectId,
         linear: { issue: linearPayload }
       }
+    } else if (trigger.source === 'github-pr') {
+      const prPayload = (event.payload as { pr?: GithubPrPayload }).pr
+      if (!prPayload) {
+        throw new Error(
+          `dispatchAutoRun: github-pr event missing payload.pr (entityId=${event.entityId})`
+        )
+      }
+      // The PR's own repo is the run target — not rule.projectId (rules are pure
+      // filters for github-pr; the watch-list/event determines the repo).
+      runPayload = { projectId: event.repoId, github: { pr: prPayload } }
     } else {
       runPayload = { projectId: rule.projectId }
     }
@@ -646,6 +673,9 @@ export class AutomationService {
     const triggerContext: Record<string, unknown> = {}
     if (payload?.linear) {
       triggerContext.linear = payload.linear
+    }
+    if (payload?.github) {
+      triggerContext.github = payload.github
     }
     if (payload?.projectId) {
       // Why: validate the picked project up-front so the run fails fast with a

@@ -7,6 +7,7 @@ import {
   removeCondition,
   removeRule,
   reorderRule,
+  setRepoIds,
   toggleEnabled,
   updateCondition,
   updateRule
@@ -15,6 +16,7 @@ import type {
   AutoTrigger,
   SerializableFieldDescriptor
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
 
 const mkTrigger = (overrides: Partial<AutoTrigger> = {}): AutoTrigger => ({
   id: 'at1',
@@ -38,6 +40,11 @@ const fieldCatalog: SerializableFieldDescriptor[] = [
     ops: ['is', 'is-not', 'is-any-of'],
     hasFetchOptions: true
   }
+]
+
+const repos: Repo[] = [
+  { id: 'r1', path: '/a', displayName: 'orca-repo', badgeColor: '#111111', addedAt: 0 },
+  { id: 'r2', path: '/b', displayName: 'mobile-app', badgeColor: '#222222', addedAt: 0 }
 ]
 
 const noopLoadOptions = async (): Promise<{ value: string; label: string }[]> => []
@@ -215,6 +222,182 @@ describe('AutoTriggerCard rendering', () => {
   })
 })
 
+describe('AutoTriggerCard — github-pr watch-list', () => {
+  it('renders a repo multi-select for a github-pr trigger', () => {
+    const trig = mkTrigger({ source: 'github-pr', repoIds: ['r1'] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    // The watch-list section label + the combobox trigger button.
+    expect(html).toContain('Watch repositories')
+    expect(html).toMatch(/role="combobox"/)
+    // The selected repo's name renders in the combobox trigger label.
+    expect(html).toContain('orca-repo')
+  })
+
+  it('does not render the per-rule project picker for github-pr', () => {
+    const trig = mkTrigger({
+      source: 'github-pr',
+      repoIds: ['r1'],
+      rules: [{ id: 'rl1', projectId: '', conditions: [] }]
+    })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    // The per-rule project <select> carries aria-label="Project"; absent for
+    // github-pr because the repo comes from the watch-list/event.
+    expect(html).not.toMatch(/aria-label="Project"/)
+    expect(html).not.toContain('Select project')
+  })
+
+  it('still renders the per-rule project picker for a linear-issue trigger', () => {
+    const trig = mkTrigger({
+      source: 'linear-issue',
+      rules: [{ id: 'rl1', projectId: '', conditions: [] }]
+    })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toMatch(/aria-label="Project"/)
+    expect(html).toContain('Select project')
+    // No watch-list for linear triggers.
+    expect(html).not.toContain('Watch repositories')
+  })
+
+  it('shows the empty watch-list hint for a github-pr trigger with no repoIds', () => {
+    const trig = mkTrigger({ source: 'github-pr', repoIds: [] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Select at least one repository to watch')
+  })
+
+  it('shows the empty watch-list hint when repoIds is undefined', () => {
+    const trig = mkTrigger({ source: 'github-pr' })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Select at least one repository to watch')
+  })
+
+  it('hides the empty watch-list hint once a repo is selected', () => {
+    const trig = mkTrigger({ source: 'github-pr', repoIds: ['r1'] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).not.toContain('Select at least one repository to watch')
+  })
+
+  it('never shows the empty watch-list hint for a linear-issue trigger', () => {
+    const trig = mkTrigger({ source: 'linear-issue' })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).not.toContain('Select at least one repository to watch')
+  })
+})
+
+describe('AutoTriggerCard — dedup footer wording', () => {
+  it('uses "PRs" in the dedup footer for a github-pr trigger', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger({ source: 'github-pr', repoIds: ['r1'] })}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Fired for ')
+    expect(html).toContain('PRs')
+    // The PR footer must not fall back to issue wording.
+    expect(html).not.toContain('issue')
+  })
+
+  it('uses "issues" in the dedup footer for a linear-issue trigger', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger({ source: 'linear-issue' })}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Fired for ')
+    expect(html).toContain('issues')
+    expect(html).not.toContain('PRs')
+  })
+})
+
 describe('AutoTriggerCard helpers', () => {
   it('addRule appends a new rule with empty conditions', () => {
     const result = addRule(mkTrigger())
@@ -255,6 +438,15 @@ describe('AutoTriggerCard helpers', () => {
     expect(reorderRule(trig, 0, -1).rules.map((r) => r.id)).toEqual(['rl1'])
     expect(reorderRule(trig, 0, 5).rules.map((r) => r.id)).toEqual(['rl1'])
     expect(reorderRule(trig, 0, 0).rules.map((r) => r.id)).toEqual(['rl1'])
+  })
+
+  it('setRepoIds returns a new trigger with the given repoIds', () => {
+    const trig = mkTrigger({ source: 'github-pr' })
+    const result = setRepoIds(trig, ['r1', 'r2'])
+    expect(result).not.toBe(trig)
+    expect(result.repoIds).toEqual(['r1', 'r2'])
+    // Original is untouched (pure helper).
+    expect(trig.repoIds).toBeUndefined()
   })
 
   it('toggleEnabled flips the boolean', () => {

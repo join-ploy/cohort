@@ -1,5 +1,6 @@
 import type {
   Automation,
+  AutoTrigger,
   CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
@@ -26,6 +27,7 @@ import {
   type TemplateError
 } from '../../../lib/template-dry-run'
 import {
+  GITHUB_PR_TRIGGER_OVERLAY,
   getOutputSchemaForKind,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
@@ -88,10 +90,18 @@ export const LEGACY_AUTOMATION_FIELDS = [
 // `acceptsProjectSelection` does not contribute an overlay: the picked project
 // is materialized into `automation.projectId` at dispatch time so existing
 // `{{automation.projectId}}` templates resolve unchanged.
-export function buildTriggerSchema(trigger: TriggerConfig): NestedSchema {
+export function buildTriggerSchema(
+  trigger: TriggerConfig,
+  autoTriggers: AutoTrigger[] = []
+): NestedSchema {
   const base: NestedSchema = { ...MANUAL_TRIGGER_SCHEMA }
   if (trigger.acceptsLinearTicket) {
     base.linear = LINEAR_TICKET_TRIGGER_OVERLAY.linear
+  }
+  // A configured + enabled auto-trigger publishes its payload shape at runtime,
+  // so surface its variables in the picker too.
+  if (autoTriggers.some((t) => t.enabled && t.source === 'github-pr')) {
+    base.github = GITHUB_PR_TRIGGER_OVERLAY.github
   }
   return base
 }
@@ -140,6 +150,9 @@ export function getAvailableVariablesAtStep(
   repos: Repo[] = []
 ): AvailableVariables {
   const stepsSchema: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  // Why: the picker keys a step output's description off the step's kind, so we
+  // carry the id→kind map alongside the schemas.
+  const stepKinds: Record<string, StepKind> = {}
   let groupSchema: NestedSchema | undefined = undefined
 
   const { topIndex } = findStepPosition(draft.steps, stepIndex)
@@ -149,6 +162,7 @@ export function getAvailableVariablesAtStep(
     const members = Array.isArray(item) ? item : [item]
     for (const s of members) {
       stepsSchema[s.id] = getOutputSchemaForKind(s.kind)
+      stepKinds[s.id] = s.kind
       // Why: any earlier create-workspace-group step injects the top-level
       // `group.*` namespace. If multiple exist (rare), the latest wins —
       // mirrors runtime, where each step's contextPatch overwrites `group`.
@@ -160,8 +174,9 @@ export function getAvailableVariablesAtStep(
 
   return {
     automation: { projectId: 'string', workspaceId: 'string' },
-    trigger: buildTriggerSchema(draft.trigger),
+    trigger: buildTriggerSchema(draft.trigger, draft.autoTriggers ?? []),
     steps: stepsSchema,
+    stepKinds,
     group: groupSchema
   }
 }

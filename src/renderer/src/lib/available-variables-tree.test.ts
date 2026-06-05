@@ -110,4 +110,31 @@ describe('buildPaths', () => {
     const paths = buildPaths(schema)
     expect(paths.filter((p) => p.namespace === 'group')).toEqual([])
   })
+
+  it('stamps the step kind on steps-namespace entries from stepKinds', () => {
+    const schema: AvailableVariables = {
+      automation: {},
+      trigger: {},
+      steps: {
+        rp1: { outputTail: 'string' },
+        rc1: { outputTail: 'string' }
+      },
+      stepKinds: { rp1: 'run-prompt', rc1: 'run-command' }
+    }
+    const paths = buildPaths(schema)
+    expect(paths.find((p) => p.path === 'steps.rp1.outputTail')?.kind).toBe('run-prompt')
+    expect(paths.find((p) => p.path === 'steps.rc1.outputTail')?.kind).toBe('run-command')
+  })
+
+  it('leaves kind undefined for non-step namespaces', () => {
+    const schema: AvailableVariables = {
+      automation: { projectId: 'string' },
+      trigger: { firedAt: 'number' },
+      steps: {}
+    }
+    const paths = buildPaths(schema)
+    for (const entry of paths) {
+      expect(entry.kind).toBeUndefined()
+    }
+  })
 })

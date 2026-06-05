@@ -63,6 +63,7 @@ import { AutomationService } from './automations/service'
 import { AutoTriggerEngine } from './automations/auto-trigger-engine'
 import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
+import { makeGithubPrSource } from './automations/trigger-sources/github-pr'
 import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
@@ -77,6 +78,8 @@ import {
 } from './ipc/workspace-groups'
 import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
+import { resolvePrBaseCore } from './git/resolve-pr-base'
+import { createLocalWorktree } from './ipc/worktree-remote'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -645,6 +648,7 @@ app.whenReady().then(async () => {
   // rebuilding the registry.
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
+  triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.
   registerTriggerSourceHandlers(triggerSourceRegistry)
@@ -806,6 +810,56 @@ app.whenReady().then(async () => {
           linkedLinearIssue: input.linkedIssue.id
         })
       }
+      return {
+        worktreeId: result.worktree.id,
+        path: result.worktree.path,
+        branch: result.worktree.branch
+      }
+    },
+    createWorktreeFromPr: async (input) => {
+      if (!mainWindow) {
+        throw new Error('createWorktreeFromPr: no mainWindow available.')
+      }
+      const repo = storeRef.getRepo(input.repoId)
+      if (!repo) {
+        throw new Error(`createWorktreeFromPr: repo not found: ${input.repoId}`)
+      }
+      const resolved = await resolvePrBaseCore({
+        repo,
+        prNumber: input.prNumber,
+        headRefName: input.headRefName,
+        isCrossRepository: input.isCrossRepository
+      })
+      // Why: surface resolve failures as a thrown Error so the runner's
+      // try/catch fails the create-worktree step with the underlying message.
+      if ('error' in resolved) {
+        throw new Error(resolved.error)
+      }
+      const slug = generateUniqueWorkspaceName(
+        collectTakenWorkspaceNamesForRepo(input.repoId, storeRef.getAllWorktreeMeta())
+      )
+      const trimmedDisplay = input.displayName.trim()
+      const result = await createLocalWorktree(
+        {
+          repoId: input.repoId,
+          name: trimmedDisplay || slug,
+          workspaceName: slug,
+          ...(trimmedDisplay ? { displayName: trimmedDisplay } : {}),
+          baseBranch: resolved.baseBranch,
+          linkedPR: input.prNumber,
+          ...(resolved.pushTarget ? { pushTarget: resolved.pushTarget } : {}),
+          ...(input.createdByAutomationRunId
+            ? { createdByAutomationRunId: input.createdByAutomationRunId }
+            : {}),
+          // Why: WorkspaceSource has no 'automation' member; 'unknown' is the
+          // neutral fallback for non-user-initiated creates.
+          telemetrySource: 'unknown'
+        },
+        repo,
+        storeRef,
+        mainWindow,
+        runtimeRef
+      )
       return {
         worktreeId: result.worktree.id,
         path: result.worktree.path,

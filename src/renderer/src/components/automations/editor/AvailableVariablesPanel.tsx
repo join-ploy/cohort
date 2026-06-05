@@ -2,6 +2,7 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
 import { buildPaths, type PathEntry } from '../../../lib/available-variables-tree'
+import { describeVariable } from '../../../lib/variable-descriptions'
 
 export type AvailableVariablesPanelProps = {
   available: AvailableVariables
@@ -85,10 +86,15 @@ function groupByStepId(entries: PathEntry[]): Record<string, PathEntry[]> {
 }
 
 function renderRow(entry: PathEntry): React.JSX.Element {
+  const description = describeVariable(entry)
   return (
-    <div key={entry.path} className="flex items-center justify-between px-2 py-0.5 font-mono">
-      <span>{entry.path}</span>
-      <span className="text-muted-foreground text-[10px]">{entry.type}</span>
+    <div key={entry.path} className="flex flex-col gap-0.5 px-2 py-0.5">
+      <div className="flex items-center justify-between font-mono">
+        <span>{entry.path}</span>
+        <span className="text-muted-foreground text-[10px]">{entry.type}</span>
+      </div>
+      {/* Prose, so sans not mono — mono is reserved for the literal path. */}
+      {description && <span className="text-[11px] text-muted-foreground">{description}</span>}
     </div>
   )
 }

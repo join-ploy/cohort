@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { History, Plus, Trash2, Zap } from 'lucide-react'
+import { GitPullRequest, History, Plus, Trash2, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type {
@@ -11,6 +11,8 @@ import type {
   SerializableFieldDescriptor,
   TriggerSourceId
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
+import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
@@ -24,6 +26,9 @@ export type AutoTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker. */
   projects: { id: string; displayName: string }[]
+  /** Repo catalog for the github-pr watch-list combobox. Optional so legacy /
+   *  linear-only call sites stay unchanged; defaults to an empty list. */
+  repos?: Repo[]
   /** Catalog of fields the trigger's source can match on. Empty array is safe —
    *  the card still renders the rule skeleton, conditions just can't be added. */
   fieldCatalog: SerializableFieldDescriptor[]
@@ -42,7 +47,8 @@ const SOURCE_META: Record<
   TriggerSourceId,
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
-  'linear-issue': { label: 'Linear issue', icon: Zap }
+  'linear-issue': { label: 'Linear issue', icon: Zap },
+  'github-pr': { label: 'GitHub PR', icon: GitPullRequest }
 }
 
 // Pure helpers — exported so they can be unit-tested without rendering. The
@@ -86,6 +92,10 @@ export function updateRule(
     ...trigger,
     rules: trigger.rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r))
   }
+}
+
+export function setRepoIds(trigger: AutoTrigger, repoIds: string[]): AutoTrigger {
+  return { ...trigger, repoIds }
 }
 
 function defaultConditionValue(op: ConditionOp): Condition['value'] {
@@ -153,10 +163,16 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
     onRemove,
     automationId,
     projects,
+    repos = [],
     fieldCatalog,
     loadOptions,
     chainProvidesProject = false
   } = props
+
+  // Why: github-pr scopes polling to a repo watch-list and the matched repo
+  // comes from the PR event, so the per-rule project picker is hidden.
+  const isGithubPr = trigger.source === 'github-pr'
+  const selectedRepoIds = React.useMemo(() => new Set(trigger.repoIds ?? []), [trigger.repoIds])
 
   const onToggle = (): void => {
     onChange(toggleEnabled(trigger))
@@ -188,6 +204,11 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
   const ruleCount = trigger.rules.length
   const meta = SOURCE_META[trigger.source] ?? { label: trigger.source, icon: Zap }
   const SourceIcon = meta.icon
+
+  // Why: dedup is keyed per-entity and the entity differs by source — PRs for
+  // github-pr, issues for linear — so the footer noun follows the source.
+  const entityNoun = isGithubPr ? 'PR' : 'issue'
+  const entityNounPlural = isGithubPr ? 'PRs' : 'issues'
 
   return (
     <div
@@ -229,6 +250,35 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
       </div>
 
       <div className="space-y-3 px-4 py-3">
+        {isGithubPr ? (
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">
+              Watch repositories
+            </label>
+            <RepoMultiCombobox
+              repos={repos}
+              selected={selectedRepoIds}
+              onChange={(next) => onChange(setRepoIds(trigger, Array.from(next)))}
+              onSelectAll={() =>
+                onChange(
+                  setRepoIds(
+                    trigger,
+                    repos.map((r) => r.id)
+                  )
+                )
+              }
+              triggerClassName="h-8 text-xs"
+            />
+            {selectedRepoIds.size === 0 ? (
+              // Why: an empty watch-list polls nothing, so warn rather than let
+              // the trigger silently never fire.
+              <p className="text-[11px] text-muted-foreground">
+                Select at least one repository to watch — an empty list watches nothing.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {trigger.rules.length === 0 ? (
           <div className="rounded-md border border-dashed border-border bg-background p-4 text-center">
             <p className="text-xs text-muted-foreground">
@@ -247,6 +297,7 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
                 fieldCatalog={fieldCatalog}
                 loadOptions={loadOptions}
                 chainProvidesProject={chainProvidesProject}
+                hideProjectPicker={isGithubPr}
                 onProjectChange={(projectId) =>
                   onChange(updateRule(trigger, rule.id, { projectId }))
                 }
@@ -272,13 +323,13 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
       <div className="relative flex items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
         <span className="text-xs text-muted-foreground">
           Fired for <span className="font-medium text-foreground">{dedupEntries.length}</span>{' '}
-          {dedupEntries.length === 1 ? 'issue' : 'issues'}
+          {dedupEntries.length === 1 ? entityNoun : entityNounPlural}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="xs"
-          aria-label="View fired issues"
+          aria-label={`View fired ${entityNounPlural}`}
           disabled={!hasAutomationId}
           onClick={() => setDedupOpen(true)}
         >

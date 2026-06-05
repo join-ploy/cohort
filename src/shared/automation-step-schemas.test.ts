@@ -1,6 +1,7 @@
 import { describe, it, expect, expectTypeOf } from 'vitest'
 import {
   getOutputSchemaForKind,
+  GITHUB_PR_TRIGGER_OVERLAY,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
   CREATE_WORKTREE_OUTPUT_SCHEMA,
@@ -78,5 +79,13 @@ describe('automation step schemas', () => {
     expect(getOutputSchemaForKind('run-prompt')).toBe(RUN_PROMPT_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('run-command')).toBe(RUN_COMMAND_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('update-linear-issue')).toBe(UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA)
+  })
+})
+
+describe('GITHUB_PR_TRIGGER_OVERLAY', () => {
+  it('exposes pr leaves as scalar schema types', () => {
+    expect(GITHUB_PR_TRIGGER_OVERLAY.github.pr.number).toBe('number')
+    expect(GITHUB_PR_TRIGGER_OVERLAY.github.pr.headRef).toBe('string')
+    expect(GITHUB_PR_TRIGGER_OVERLAY.github.pr.isCrossRepository).toBe('boolean')
   })
 })

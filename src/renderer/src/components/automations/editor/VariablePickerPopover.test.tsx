@@ -72,6 +72,40 @@ describe('VariablePickerPopover', () => {
     expect(markup).toMatch(/firedAt.*number/)
   })
 
+  it('renders a description under each non-step variable', () => {
+    const markup = renderToStaticMarkup(
+      <VariablePickerPopover
+        open={true}
+        anchor={FAKE_ANCHOR}
+        available={SCHEMA}
+        query=""
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(markup).toContain('ID of the project this automation runs in')
+    expect(markup).toContain('Email of the person who triggered the run')
+  })
+
+  it('renders kind-specific descriptions for step outputs', () => {
+    const schema: AvailableVariables = {
+      ...SCHEMA,
+      steps: { cw1: { worktreeId: 'string' } },
+      stepKinds: { cw1: 'create-worktree' }
+    }
+    const markup = renderToStaticMarkup(
+      <VariablePickerPopover
+        open={true}
+        anchor={FAKE_ANCHOR}
+        available={schema}
+        query=""
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(markup).toContain('ID of the newly created worktree')
+  })
+
   it('groups variables by namespace (Automation, Trigger, Steps)', () => {
     const markup = renderToStaticMarkup(
       <VariablePickerPopover

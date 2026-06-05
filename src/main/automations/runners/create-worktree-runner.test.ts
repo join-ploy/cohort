@@ -35,6 +35,10 @@ const baseCtx = (overrides: Partial<StepRunnerCtx> = {}): StepRunnerCtx => ({
   ...overrides
 })
 
+// PR-mode dep stub for new-branch tests that never exercise it.
+const stubCreateWorktreeFromPr = () =>
+  vi.fn().mockResolvedValue({ worktreeId: 'wt-pr', path: '/p/pr', branch: 'pr-branch' })
+
 describe('CreateWorktreeRunner', () => {
   it('resolves templates and calls createWorktree on the first tick', async () => {
     const createWorktree = vi.fn().mockResolvedValue({
@@ -42,7 +46,11 @@ describe('CreateWorktreeRunner', () => {
       path: '/p/wt-1',
       branch: 'feature/x'
     })
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 100 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 100
+    })
     const result = await runner.tick(baseCtx())
     expect(createWorktree).toHaveBeenCalledWith({
       repoId: 'repo-1',
@@ -68,7 +76,11 @@ describe('CreateWorktreeRunner', () => {
       path: '/p',
       branch: 'feature/abc'
     })
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const step: Step = {
       ...baseStep,
       config: {
@@ -103,7 +115,11 @@ describe('CreateWorktreeRunner', () => {
       path: '/p',
       branch: 'b'
     })
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const step: Step = { ...baseStep, config: { ...baseConfig, linkLinearIssue: true } }
     await runner.tick(
       baseCtx({
@@ -127,7 +143,11 @@ describe('CreateWorktreeRunner', () => {
       path: '/p',
       branch: 'b'
     })
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const step: Step = { ...baseStep, config: { ...baseConfig, linkLinearIssue: true } }
     // No trigger.linear in context — non-Linear triggers can still opt-in via the flag.
     await runner.tick(
@@ -145,7 +165,11 @@ describe('CreateWorktreeRunner', () => {
 
   it('fails fast on TemplateResolutionError', async () => {
     const createWorktree = vi.fn()
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const step: Step = {
       ...baseStep,
       config: { ...baseConfig, baseBranch: '{{missing.path}}' }
@@ -159,7 +183,11 @@ describe('CreateWorktreeRunner', () => {
 
   it('fails when createWorktree rejects (deterministic failure)', async () => {
     const createWorktree = vi.fn().mockRejectedValue(new Error('git failure'))
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const result = await runner.tick(baseCtx())
     expect(result.outcome).toBe('failed')
     expect(result.status).toBe('failed')
@@ -172,7 +200,11 @@ describe('CreateWorktreeRunner', () => {
       path: '/p',
       branch: 'b'
     })
-    const runner = new CreateWorktreeRunner({ createWorktree, now: () => 0 })
+    const runner = new CreateWorktreeRunner({
+      createWorktree,
+      createWorktreeFromPr: stubCreateWorktreeFromPr(),
+      now: () => 0
+    })
     const result1 = await runner.tick(baseCtx())
     expect(result1.outcome).toBe('done')
     // In practice the chain executor never re-ticks a succeeded step, but the
@@ -180,5 +212,120 @@ describe('CreateWorktreeRunner', () => {
     const result2 = await runner.tick(baseCtx())
     expect(result2.outcome).toBe('done')
     expect(createWorktree).toHaveBeenCalledTimes(1)
+  })
+
+  it('pull-request mode resolves the PR number and calls createWorktreeFromPr', async () => {
+    const createWorktree = vi.fn(() => {
+      throw new Error('createWorktree must not be called in PR mode')
+    })
+    const createWorktreeFromPr = vi.fn().mockResolvedValue({
+      worktreeId: 'w',
+      path: '/p',
+      branch: 'fix-7'
+    })
+    const runner = new CreateWorktreeRunner({ createWorktree, createWorktreeFromPr, now: () => 0 })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        mode: 'pull-request',
+        pullRequestRef: '{{trigger.github.pr.number}}',
+        baseBranch: '',
+        branchName: '',
+        displayName: '{{trigger.github.pr.title}}',
+        linkLinearIssue: false
+      }
+    }
+    const result = await runner.tick(
+      baseCtx({
+        step,
+        context: {
+          automation: { projectId: 'r1' },
+          trigger: {
+            github: { pr: { number: 7, headRef: 'fix-7', isCrossRepository: false, title: 'Fix' } }
+          }
+        }
+      })
+    )
+    expect(result.status).toBe('succeeded')
+    expect(createWorktree).not.toHaveBeenCalled()
+    expect(createWorktreeFromPr).toHaveBeenCalledTimes(1)
+    expect(createWorktreeFromPr).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoId: 'r1',
+        prNumber: 7,
+        headRefName: 'fix-7',
+        isCrossRepository: false,
+        displayName: 'Fix'
+      })
+    )
+    const tracker = { worktreeId: 'w', path: '/p', branch: 'fix-7' }
+    expect(result.output).toEqual(tracker)
+    expect(result.contextPatch).toEqual({ steps: { cw1: tracker } })
+  })
+
+  it('pull-request mode fails when pullRequestRef is missing/blank', async () => {
+    const createWorktree = vi.fn()
+    const createWorktreeFromPr = vi.fn()
+    const runner = new CreateWorktreeRunner({ createWorktree, createWorktreeFromPr, now: () => 0 })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        mode: 'pull-request',
+        baseBranch: '',
+        branchName: '',
+        displayName: 'X',
+        linkLinearIssue: false
+      }
+    }
+    const result = await runner.tick(
+      baseCtx({ step, context: { automation: { projectId: 'r1' } } })
+    )
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toBeTruthy()
+    expect(createWorktreeFromPr).not.toHaveBeenCalled()
+  })
+
+  it('pull-request mode fails when the resolved PR number is not a positive integer', async () => {
+    const createWorktree = vi.fn()
+    const createWorktreeFromPr = vi.fn()
+    const runner = new CreateWorktreeRunner({ createWorktree, createWorktreeFromPr, now: () => 0 })
+    const step: Step = {
+      ...baseStep,
+      config: {
+        mode: 'pull-request',
+        pullRequestRef: '{{trigger.ref}}',
+        baseBranch: '',
+        branchName: '',
+        displayName: 'X',
+        linkLinearIssue: false
+      }
+    }
+    const result = await runner.tick(
+      baseCtx({
+        step,
+        context: { automation: { projectId: 'r1' }, trigger: { ref: 'abc' } }
+      })
+    )
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toBeTruthy()
+    expect(createWorktreeFromPr).not.toHaveBeenCalled()
+  })
+
+  it('new-branch mode still calls createWorktree (regression)', async () => {
+    const createWorktree = vi.fn().mockResolvedValue({
+      worktreeId: 'wt-nb',
+      path: '/p/nb',
+      branch: 'feature/x'
+    })
+    const createWorktreeFromPr = vi.fn(() => {
+      throw new Error('createWorktreeFromPr must not be called in new-branch mode')
+    })
+    const runner = new CreateWorktreeRunner({ createWorktree, createWorktreeFromPr, now: () => 0 })
+    const result = await runner.tick(baseCtx())
+    expect(result.status).toBe('succeeded')
+    expect(createWorktree).toHaveBeenCalledTimes(1)
+    expect(createWorktreeFromPr).not.toHaveBeenCalled()
   })
 })

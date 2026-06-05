@@ -157,6 +157,7 @@ export type AutomationDispatchRequest = {
 // `{{trigger.linear.issue.title}}` and `{{trigger.worktreeBranch}}` etc.
 export type RunNowPayload = {
   linear?: { issue: LinearIssuePayload }
+  github?: { pr: GithubPrPayload }
   // Operator-picked project at manual-run time. When set, takes precedence
   // over the automation's stored projectId for that run.
   projectId?: string
@@ -186,7 +187,7 @@ export type TriggerConfig = {
 
 // Auto-trigger source identifiers. Each source has its own poller wiring;
 // extra sources will be added here as they come online.
-export type TriggerSourceId = 'linear-issue'
+export type TriggerSourceId = 'linear-issue' | 'github-pr'
 
 // Renderer-facing projection of a FieldDescriptor. The main-process descriptor
 // carries `fetchOptions: (ctx) => Promise<...>`, which cannot cross the IPC
@@ -238,6 +239,9 @@ export type AutoTrigger = {
   enabled: boolean
   enabledAt: number
   rules: Rule[]
+  // Watch-list used by source-scoped triggers (github-pr) to bound polling to
+  // specific repos; unused by linear-issue.
+  repoIds?: string[]
 }
 
 // Persisted dedup record so a given (automation, autoTrigger, entity) only
@@ -293,11 +297,32 @@ export type LinearIssuePayload = {
   priority: number
 }
 
+// Snapshot of the GitHub PR that fired a github-pr auto-trigger. Materialized
+// into run.context.trigger.github.pr so steps can template against the fields.
+export type GithubPrPayload = {
+  number: number
+  title: string
+  url: string
+  headRef: string
+  baseRef: string
+  author: string
+  // True when the head lives on a fork — drives refs/pull/<N>/head checkout.
+  isCrossRepository: boolean
+  // The watched repo the PR belongs to; becomes the run's automation.projectId.
+  repoId: string
+}
+
 export type CreateWorktreeConfig = {
   baseBranch: string // template
   branchName: string // template
   displayName: string // template
   linkLinearIssue: boolean
+  // 'new-branch' (default, legacy) creates a fresh branch from baseBranch.
+  // 'pull-request' checks out an existing PR's branch via the Start-from-PR
+  // backend (fork-aware). Optional so persisted rows default to new-branch.
+  mode?: 'new-branch' | 'pull-request'
+  // PR number template (e.g. {{trigger.github.pr.number}}), used in PR mode.
+  pullRequestRef?: string
 }
 
 // Why (grouped-workspaces L3): parallel to CreateWorktreeConfig but addresses N

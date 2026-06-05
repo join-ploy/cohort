@@ -446,6 +446,69 @@ describe('AutomationService.dispatchAutoRun', () => {
 
     expect(store.listAutomationRuns(automation.id)).toHaveLength(0)
   })
+
+  it('github-pr: sets projectId from event.repoId and injects trigger.github.pr', async () => {
+    const store = await createStore()
+    // The PR's own repo (r1, from event.repoId) is the run target. rule.projectId
+    // is some OTHER repo to prove the github-pr path ignores it.
+    store.addRepo(makeRepo({ id: 'r1' }))
+    store.addRepo(makeRepo({ id: 'other', path: '/other' }))
+    const automation = store.createAutomation({
+      name: 'Auto chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'other',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [makeChainStep()]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    const prTrigger: AutoTrigger = {
+      id: 'at1',
+      source: 'github-pr',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      repoIds: ['r1']
+    }
+    const rule: Rule = { id: 'rl1', projectId: 'other', conditions: [] }
+    await service.dispatchAutoRun({
+      automation: stored,
+      trigger: prTrigger,
+      rule,
+      event: {
+        entityId: 'r1#7',
+        updatedAt: 100,
+        fields: {},
+        repoId: 'r1',
+        payload: {
+          pr: {
+            number: 7,
+            title: 'T',
+            url: 'u',
+            headRef: 'h',
+            baseRef: 'b',
+            author: 'a',
+            isCrossRepository: false,
+            repoId: 'r1'
+          }
+        }
+      }
+    })
+
+    const runs = store.listAutomationRuns(automation.id)
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    const automationCtx = run.context?.automation as { projectId: string }
+    expect(automationCtx.projectId).toBe('r1')
+    const trigCtx = run.context?.trigger as { github?: { pr: { number: number } } }
+    expect(trigCtx.github?.pr.number).toBe(7)
+  })
 })
 
 describe('AutomationService.restartRun', () => {
@@ -695,9 +758,7 @@ describe('AutomationService retry persisted-pane cleanup', () => {
 
     const closeCalls = send.mock.calls.filter((c) => c[0] === 'automations:closePromptPane')
     const closedPaneKeys = closeCalls.map((c) => (c[1] as { paneKey: string }).paneKey)
-    expect(closedPaneKeys).toEqual(
-      expect.arrayContaining(['tab-A:pane-1', 'tab-B:pane-1'])
-    )
+    expect(closedPaneKeys).toEqual(expect.arrayContaining(['tab-A:pane-1', 'tab-B:pane-1']))
     expect(closedPaneKeys).not.toContain('tab-UPSTREAM:pane-1')
   })
 

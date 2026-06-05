@@ -2,7 +2,7 @@ import { AutoTriggerEngine } from './auto-trigger-engine'
 import type { AutoTriggerEngineDeps } from './auto-trigger-engine'
 import { TriggerSourceRegistry } from './trigger-sources/registry'
 import type { Automation, AutoTrigger, Rule, Step } from '../../shared/automations-types'
-import type { CandidateEvent, TriggerSource } from './trigger-sources/types'
+import type { CandidateEvent, PollCtx, TriggerSource } from './trigger-sources/types'
 
 export type DispatchedRecord = { automationId: string; ruleId: string; entityId: string }
 
@@ -69,6 +69,26 @@ export function makeFakeSource(events: CandidateEvent[]): TriggerSource {
     displayName: 'L',
     fieldCatalog: [],
     async *poll() {
+      for (const e of events) {
+        yield e
+      }
+    }
+  }
+}
+
+// Like makeFakeSource but records the ctx each poll() call received, so tests
+// can assert what the engine passed in (e.g. the repoIds union).
+export function makeRecordingSource(events: CandidateEvent[]): TriggerSource & {
+  polls: PollCtx[]
+} {
+  const polls: PollCtx[] = []
+  return {
+    id: 'linear-issue',
+    displayName: 'L',
+    fieldCatalog: [],
+    polls,
+    async *poll(ctx: PollCtx) {
+      polls.push(ctx)
       for (const e of events) {
         yield e
       }
