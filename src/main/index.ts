@@ -1,4 +1,5 @@
 import { grantDirAcl } from './win32-utils'
+import { rm } from 'fs/promises'
 import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
 import devIcon from '../../resources/icon-dev.png?asset'
@@ -74,6 +75,7 @@ import { createCleanupService, type CleanupService } from './archive/cleanup-ser
 import { runWorktreeRemoval } from './worktree-removal/run-worktree-removal'
 import {
   createWorkspaceGroup as createWorkspaceGroupFlow,
+  notifyWorkspaceGroupsChanged,
   repoFolderName
 } from './ipc/workspace-groups'
 import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
@@ -625,6 +627,37 @@ app.whenReady().then(async () => {
         { worktreeId, force: false, skipArchive: true },
         { store: storeRef, runtime: runtimeRef, mainWindow: window }
       )
+    },
+    runGroupRemoval: async (groupId) => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) {
+        return
+      }
+      const group = storeRef.getWorkspaceGroups().find((g) => g.id === groupId)
+      if (!group) {
+        return
+      }
+      // Why: clean members were already dropped by the worktree cleanup loop
+      // (they carry their own archived meta). A member still present here is
+      // dirty — runWorktreeRemoval (force:false) throws, which bubbles up so the
+      // group stays archived (with archiveCleanupError) and retries next tick.
+      // skipArchive=true: never auto-run the repo's archive hook unsupervised.
+      for (const memberWorktreeId of group.memberWorktreeIds) {
+        if (!storeRef.getWorktreeMeta(memberWorktreeId)) {
+          continue
+        }
+        await runWorktreeRemoval(
+          { worktreeId: memberWorktreeId, force: false, skipArchive: true },
+          { store: storeRef, runtime: runtimeRef, mainWindow: window }
+        )
+      }
+      // Why: members' leaf dirs are gone, so the shared group folder is now
+      // empty — drop it with the record. force:true no-ops if it never existed.
+      if (group.parentPath) {
+        await rm(group.parentPath, { recursive: true, force: true })
+      }
+      storeRef.removeWorkspaceGroup(groupId)
+      notifyWorkspaceGroupsChanged(window)
     },
     ...(archiveTtlOverride !== undefined ? { ttlMs: archiveTtlOverride } : {})
   })
