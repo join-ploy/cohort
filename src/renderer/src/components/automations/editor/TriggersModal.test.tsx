@@ -13,7 +13,6 @@ describe('TriggersModal', () => {
         automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
-        availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
         onSave={() => {}}
         onCancel={() => {}}
       />
@@ -28,7 +27,6 @@ describe('TriggersModal', () => {
         automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
-        availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
         onSave={() => {}}
         onCancel={() => {}}
       />
@@ -44,7 +42,6 @@ describe('TriggersModal', () => {
         automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
-        availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
         onSave={() => {}}
         onCancel={() => {}}
       />
@@ -65,7 +62,6 @@ describe('TriggersModal', () => {
         autoTriggers={[
           { id: 'at1', source: 'linear-issue', enabled: true, enabledAt: 0, rules: [] }
         ]}
-        availableSources={[{ id: 'linear-issue', label: 'Linear issue' }]}
         onSave={() => {}}
         onCancel={() => {}}
       />
@@ -81,7 +77,6 @@ describe('TriggersModal', () => {
         automationId=""
         trigger={baseTrigger}
         autoTriggers={[]}
-        availableSources={[]}
         onSave={() => {}}
         onCancel={() => {}}
       />

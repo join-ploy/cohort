@@ -34,8 +34,7 @@ import type {
   StepConfig,
   StepKind,
   StepOrGroup,
-  TriggerConfig,
-  TriggerSourceId
+  TriggerConfig
 } from '../../../../../shared/automations-types'
 import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import {
@@ -67,12 +66,6 @@ import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
 import { RunNowConfirmModal } from './RunNowConfirmModal'
 import { TriggerPill } from './TriggerPill'
 import { TriggersModal } from './TriggersModal'
-
-// Why: Phase 13 will replace this with an IPC call to the source registry.
-// For now ChainEditorModal hardcodes the only registered source.
-const AVAILABLE_TRIGGER_SOURCES: { id: TriggerSourceId; label: string }[] = [
-  { id: 'linear-issue', label: 'Linear issue' }
-]
 
 const STEP_CARD_WIDTH_CLASS = 'w-[min(calc(100vw-5rem),40rem)]'
 
@@ -435,7 +428,6 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         automationId={props.automation?.id ?? ''}
         trigger={draft.trigger}
         autoTriggers={draft.autoTriggers}
-        availableSources={AVAILABLE_TRIGGER_SOURCES}
         chainProvidesProject={chainHasStep(draft, 'create-workspace-group')}
         onSave={(next) => {
           updateDraft({ trigger: next.trigger, autoTriggers: next.autoTriggers })

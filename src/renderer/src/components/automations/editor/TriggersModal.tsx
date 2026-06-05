@@ -20,9 +20,6 @@ export type TriggersModalProps = {
   automationId: string
   trigger: TriggerConfig
   autoTriggers: AutoTrigger[]
-  /** Registered source ids the user can add. Phase 13 will wire this to the
-   *  source-registry IPC. For now ChainEditorModal hardcodes the list. */
-  availableSources: { id: TriggerSourceId; label: string }[]
   /** When true, the chain supplies its own project context (via a
    *  create-workspace-group step), so per-rule project selects can read as
    *  "Inferred from group" and stay optional. */
@@ -237,7 +234,10 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                     role="menu"
                     className="absolute right-0 top-full z-40 mt-1 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
                   >
-                    {props.availableSources.map((s) => (
+                    {/* Why: drive the menu off the fetched source registry so
+                        every registered source (linear-issue, github-pr, and
+                        any future source) is offered without a hardcoded list. */}
+                    {sources.map((s) => (
                       <button
                         key={s.id}
                         role="menuitem"
@@ -249,7 +249,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                       >
                         <Zap className="size-3.5 text-muted-foreground" />
-                        {s.label}
+                        {s.displayName}
                       </button>
                     ))}
                   </div>
