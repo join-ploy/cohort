@@ -576,6 +576,8 @@ describe('registerPtyHandlers', () => {
             env: Record<string, string>
             sessionId?: string
             shellOverride?: string
+            command?: string
+            terminalWindowsPowerShellImplementation?: 'auto' | 'powershell.exe' | 'pwsh.exe'
           }) => ({
             id: options.sessionId ?? 'daemon-pty'
           })
@@ -760,7 +762,73 @@ describe('registerPtyHandlers', () => {
         expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBeUndefined()
       })
 
-      it('relays the persisted Unix default shell on the runtime controller (agent/CLI) spawn path', async () => {
+      it('does not relay the persisted Unix default shell for an agent command spawn', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+          terminalUnixShell: '/opt/homebrew/bin/fish'
+        })) as never)
+
+        await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24, env: {}, command: 'claude' })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBeUndefined()
+      })
+
+      it('forwards the PowerShell implementation for an explicit override on a command spawn (win32)', async () => {
+        const originalPlatform = process.platform
+        Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+        try {
+          const daemonSpawn = setupDaemonAdapter()
+          handlers.clear()
+          registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+            terminalWindowsShell: 'powershell.exe',
+            terminalWindowsPowerShellImplementation: 'powershell.exe'
+          })) as never)
+
+          await handlers.get('pty:spawn')!(null, {
+            cols: 80,
+            rows: 24,
+            env: {},
+            command: 'claude',
+            shellOverride: 'powershell.exe'
+          })
+
+          const spawnOpts = daemonSpawn.mock.calls.at(-1)![0]
+          expect(spawnOpts.shellOverride).toBe('powershell.exe')
+          expect(spawnOpts.terminalWindowsPowerShellImplementation).toBe('powershell.exe')
+        } finally {
+          Object.defineProperty(process, 'platform', {
+            configurable: true,
+            value: originalPlatform
+          })
+        }
+      })
+
+      it('omits the PowerShell implementation for a command spawn with no override (win32)', async () => {
+        const originalPlatform = process.platform
+        Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+        try {
+          const daemonSpawn = setupDaemonAdapter()
+          handlers.clear()
+          registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({
+            terminalWindowsShell: 'powershell.exe',
+            terminalWindowsPowerShellImplementation: 'powershell.exe'
+          })) as never)
+
+          await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24, env: {}, command: 'claude' })
+
+          const spawnOpts = daemonSpawn.mock.calls.at(-1)![0]
+          expect(spawnOpts.shellOverride).toBeUndefined()
+          expect(spawnOpts.terminalWindowsPowerShellImplementation).toBeUndefined()
+        } finally {
+          Object.defineProperty(process, 'platform', {
+            configurable: true,
+            value: originalPlatform
+          })
+        }
+      })
+
+      it('does not relay the persisted Unix default shell for runtime command (agent/CLI) spawns', async () => {
         const daemonSpawn = setupDaemonAdapter()
         const runtime = { setPtyController: vi.fn(), onPtyExit: vi.fn() }
         handlers.clear()
@@ -772,6 +840,28 @@ describe('registerPtyHandlers', () => {
             cols: number
             rows: number
             env?: Record<string, string>
+            command?: string
+          }) => Promise<{ id: string }>
+        }
+
+        await controller.spawn({ cols: 80, rows: 24, env: {}, command: 'claude' })
+
+        expect(daemonSpawn.mock.calls.at(-1)![0].shellOverride).toBeUndefined()
+      })
+
+      it('still relays the persisted Unix default shell for a command-less runtime terminal', async () => {
+        const daemonSpawn = setupDaemonAdapter()
+        const runtime = { setPtyController: vi.fn(), onPtyExit: vi.fn() }
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, runtime as never, undefined, (() => ({
+          terminalUnixShell: '/opt/homebrew/bin/fish'
+        })) as never)
+        const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+          spawn: (opts: {
+            cols: number
+            rows: number
+            env?: Record<string, string>
+            command?: string
           }) => Promise<{ id: string }>
         }
 
