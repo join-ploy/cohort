@@ -4,7 +4,12 @@ import { getWorktreeMapFromState } from '@/store/selectors'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
 import { runSleepWorktrees } from './sleep-worktree-flow'
+import { ARCHIVE_TTL_MS } from '../../../../shared/archive-constants'
 import type { Worktree } from '../../../../shared/types'
+
+// Why: derive the toast's countdown from the shared TTL so it never drifts from
+// the cleanup service / Archived view when the retention window changes.
+const ARCHIVE_TTL_DAYS = Math.round(ARCHIVE_TTL_MS / (24 * 60 * 60 * 1000))
 
 // Why: a failed delete almost always means the worktree still has changes
 // that need attention. The "View" affordance surfaces those changes directly
@@ -85,7 +90,7 @@ export function runWorktreeDeleteWithToast(worktreeId: string, worktreeName: str
  * Soft-delete entrypoint shared by the sidebar context menu and the resource
  * popover. The archive flow has no confirm step — instead the user gets a
  * 10-second undo window in the toast itself. The real removal runs from the
- * main-process cleanup service once the 30-day TTL elapses.
+ * main-process cleanup service once the archive TTL elapses.
  *
  * Why this is a module helper rather than a store action: the toast/undo UX
  * is intrinsically UI-shaped and depends on sonner; keeping it in the
@@ -112,22 +117,25 @@ export function runWorktreeArchive(worktreeId: string): void {
   runSleepWorktrees([worktreeId])
     .then(() => useAppStore.getState().archiveWorktree(worktreeId))
     .then(() => {
-      toast.info(`Archived '${displayName}' — will be deleted in 30 days`, {
-        duration: 10000,
-        action: {
-          label: 'Undo',
-          onClick: () => {
-            useAppStore
-              .getState()
-              .restoreWorktree(worktreeId)
-              .catch((err: unknown) => {
-                toast.error('Failed to restore worktree', {
-                  description: err instanceof Error ? err.message : String(err)
+      toast.info(
+        `Archived '${displayName}' — will be deleted in ${ARCHIVE_TTL_DAYS} day${ARCHIVE_TTL_DAYS === 1 ? '' : 's'}`,
+        {
+          duration: 10000,
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              useAppStore
+                .getState()
+                .restoreWorktree(worktreeId)
+                .catch((err: unknown) => {
+                  toast.error('Failed to restore worktree', {
+                    description: err instanceof Error ? err.message : String(err)
+                  })
                 })
-              })
+            }
           }
         }
-      })
+      )
     })
     .catch((err: unknown) => {
       toast.error('Failed to archive worktree', {

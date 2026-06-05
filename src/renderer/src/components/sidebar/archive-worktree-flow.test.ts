@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ARCHIVE_TTL_MS } from '../../../../shared/archive-constants'
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -94,8 +95,9 @@ describe('runWorktreeArchive', () => {
     await flushMicrotasks()
 
     expect(mocks.state.archiveWorktree).toHaveBeenCalledWith('wt-1')
+    const expectedDays = Math.round(ARCHIVE_TTL_MS / (24 * 60 * 60 * 1000))
     expect(toast.info).toHaveBeenCalledWith(
-      "Archived 'My Worktree' — will be deleted in 30 days",
+      `Archived 'My Worktree' — will be deleted in ${expectedDays} day${expectedDays === 1 ? '' : 's'}`,
       expect.objectContaining({
         duration: 10000,
         action: expect.objectContaining({ label: 'Undo' })
