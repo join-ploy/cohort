@@ -290,6 +290,112 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
     // No watch-list for linear triggers.
     expect(html).not.toContain('Watch repositories')
   })
+
+  it('shows the empty watch-list hint for a github-pr trigger with no repoIds', () => {
+    const trig = mkTrigger({ source: 'github-pr', repoIds: [] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Select at least one repository to watch')
+  })
+
+  it('shows the empty watch-list hint when repoIds is undefined', () => {
+    const trig = mkTrigger({ source: 'github-pr' })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Select at least one repository to watch')
+  })
+
+  it('hides the empty watch-list hint once a repo is selected', () => {
+    const trig = mkTrigger({ source: 'github-pr', repoIds: ['r1'] })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).not.toContain('Select at least one repository to watch')
+  })
+
+  it('never shows the empty watch-list hint for a linear-issue trigger', () => {
+    const trig = mkTrigger({ source: 'linear-issue' })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).not.toContain('Select at least one repository to watch')
+  })
+})
+
+describe('AutoTriggerCard — dedup footer wording', () => {
+  it('uses "PRs" in the dedup footer for a github-pr trigger', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger({ source: 'github-pr', repoIds: ['r1'] })}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        repos={repos}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Fired for ')
+    expect(html).toContain('PRs')
+    // The PR footer must not fall back to issue wording.
+    expect(html).not.toContain('issue')
+  })
+
+  it('uses "issues" in the dedup footer for a linear-issue trigger', () => {
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={mkTrigger({ source: 'linear-issue' })}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    expect(html).toContain('Fired for ')
+    expect(html).toContain('issues')
+    expect(html).not.toContain('PRs')
+  })
 })
 
 describe('AutoTriggerCard helpers', () => {

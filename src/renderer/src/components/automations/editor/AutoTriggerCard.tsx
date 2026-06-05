@@ -205,6 +205,11 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
   const meta = SOURCE_META[trigger.source] ?? { label: trigger.source, icon: Zap }
   const SourceIcon = meta.icon
 
+  // Why: dedup is keyed per-entity and the entity differs by source — PRs for
+  // github-pr, issues for linear — so the footer noun follows the source.
+  const entityNoun = isGithubPr ? 'PR' : 'issue'
+  const entityNounPlural = isGithubPr ? 'PRs' : 'issues'
+
   return (
     <div
       aria-label={`auto trigger ${trigger.id}`}
@@ -264,6 +269,13 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
               }
               triggerClassName="h-8 text-xs"
             />
+            {selectedRepoIds.size === 0 ? (
+              // Why: an empty watch-list polls nothing, so warn rather than let
+              // the trigger silently never fire.
+              <p className="text-[11px] text-muted-foreground">
+                Select at least one repository to watch — an empty list watches nothing.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -311,13 +323,13 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
       <div className="relative flex items-center justify-between border-t border-border bg-muted/20 px-4 py-2.5">
         <span className="text-xs text-muted-foreground">
           Fired for <span className="font-medium text-foreground">{dedupEntries.length}</span>{' '}
-          {dedupEntries.length === 1 ? 'issue' : 'issues'}
+          {dedupEntries.length === 1 ? entityNoun : entityNounPlural}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="xs"
-          aria-label="View fired issues"
+          aria-label={`View fired ${entityNounPlural}`}
           disabled={!hasAutomationId}
           onClick={() => setDedupOpen(true)}
         >

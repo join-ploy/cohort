@@ -57,6 +57,9 @@ export class CreateWorktreeRunner implements StepRunner {
       }
     }
 
+    // Why: repoId is resolved BEFORE template resolution on purpose — both
+    // new-branch and pull-request modes share this guard, so don't reorder it
+    // after the per-mode template resolution.
     const repoId =
       ctx.context.automation && typeof ctx.context.automation === 'object'
         ? (((ctx.context.automation as Record<string, unknown>).projectId as string | undefined) ??
