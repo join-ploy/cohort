@@ -6,6 +6,10 @@ export type CleanupServiceDeps = {
   // Why: injected so tests can avoid the real worktree-removal pipeline; the
   // production wiring passes a thunk that calls runWorktreeRemoval.
   runRemoval: (worktreeId: string) => Promise<void>
+  // Why: archived workspace-group RECORDS aren't worktree meta, so they need
+  // their own teardown (remove members + group folder + record). Without this,
+  // archived groups linger in the Archived view forever past their TTL.
+  runGroupRemoval: (groupId: string) => Promise<void>
   intervalMs?: number
   ttlMs?: number
   now?: () => number
@@ -47,6 +51,38 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         // Why: stay archived and keep archivedAt set so the next tick still
         // considers this worktree past TTL and retries on its own.
         deps.store.setWorktreeMeta(id, { archiveCleanupError: message })
+      }
+    }
+
+    // Why: workspace-group records are pruned separately from worktree meta.
+    // Run AFTER the worktree loop so a group's member worktrees (which carry
+    // their own archived meta) are already removed by the time the group
+    // teardown runs — leaving the group folder empty and the record safe to drop.
+    const groupCandidates: string[] = []
+    for (const group of deps.store.getWorkspaceGroups()) {
+      if (!group.isArchived) {
+        continue
+      }
+      if (typeof group.archivedAt !== 'number') {
+        continue
+      }
+      if (group.archivedAt > threshold) {
+        continue
+      }
+      groupCandidates.push(group.id)
+    }
+    for (const id of groupCandidates) {
+      try {
+        await deps.runGroupRemoval(id)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        // Why: keep the group archived (mirrors the worktree path) so the next
+        // tick retries; surface the reason on the record for the Archived view's
+        // "Cleanup blocked" badge.
+        const group = deps.store.getWorkspaceGroups().find((g) => g.id === id)
+        if (group) {
+          deps.store.setWorkspaceGroup({ ...group, archiveCleanupError: message })
+        }
       }
     }
   }

@@ -4,6 +4,28 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { ARCHIVE_TTL_MS } from '../../shared/archive-constants'
 import type { Store } from '../persistence'
+import type { WorkspaceGroup } from '../../shared/types'
+
+function makeGroup(id: string, isArchived: boolean, archivedAt: number | null): WorkspaceGroup {
+  return {
+    id,
+    workspaceName: id.replace('group:', ''),
+    displayName: id,
+    parentPath: `/tmp/${id}`,
+    memberWorktreeIds: [],
+    branchName: 'feat',
+    isArchived,
+    archivedAt,
+    isPinned: false,
+    sortOrder: 0,
+    lastActivityAt: 0,
+    isUnread: false,
+    comment: '',
+    createdAt: 0,
+    linkedIssue: null,
+    linkedLinearIssue: null
+  }
+}
 
 // Why: persistence.ts reads electron.app.getPath() at module load. Mirror the
 // pattern from persistence.test.ts so the Store can be constructed in tests
@@ -70,6 +92,7 @@ describe('archive cleanup service', () => {
     const removed: string[] = []
     const service = createCleanupService({
       store,
+      runGroupRemoval: async () => {},
       runRemoval: async (id) => {
         removed.push(id)
       }
@@ -92,6 +115,7 @@ describe('archive cleanup service', () => {
 
     const service = createCleanupService({
       store,
+      runGroupRemoval: async () => {},
       runRemoval: async () => {
         throw new Error('worktree has uncommitted changes')
       }
@@ -118,6 +142,7 @@ describe('archive cleanup service', () => {
     let calls = 0
     const service = createCleanupService({
       store,
+      runGroupRemoval: async () => {},
       runRemoval: async (toRemove) => {
         calls++
         if (calls === 1) {
@@ -147,6 +172,7 @@ describe('archive cleanup service', () => {
 
     const service = createCleanupService({
       store,
+      runGroupRemoval: async () => {},
       runRemoval: async (toRemove) => {
         store.removeWorktreeMeta(toRemove)
       }
@@ -154,5 +180,49 @@ describe('archive cleanup service', () => {
 
     await service.runOnce()
     expect(store.getWorktreeMeta(id)).toBeUndefined()
+  })
+
+  it('selects only archived workspace groups past the TTL', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorkspaceGroup(makeGroup('group:old', true, now - ARCHIVE_TTL_MS - 1000))
+    store.setWorkspaceGroup(makeGroup('group:young', true, now))
+    store.setWorkspaceGroup(makeGroup('group:live', false, null))
+
+    const removedGroups: string[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async () => {},
+      runGroupRemoval: async (id) => {
+        removedGroups.push(id)
+      }
+    })
+
+    await service.runOnce()
+
+    expect(removedGroups).toEqual(['group:old'])
+  })
+
+  it('records archiveCleanupError and leaves the group archived when group removal throws', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const archivedAt = Date.now() - ARCHIVE_TTL_MS - 1000
+    store.setWorkspaceGroup(makeGroup('group:blocked', true, archivedAt))
+
+    const service = createCleanupService({
+      store,
+      runRemoval: async () => {},
+      runGroupRemoval: async () => {
+        throw new Error('member has uncommitted changes')
+      }
+    })
+
+    await service.runOnce()
+
+    const group = store.getWorkspaceGroups().find((g) => g.id === 'group:blocked')
+    expect(group?.isArchived).toBe(true)
+    expect(group?.archivedAt).toBe(archivedAt)
+    expect(group?.archiveCleanupError).toContain('uncommitted changes')
   })
 })

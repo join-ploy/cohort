@@ -40,7 +40,7 @@ export function repoFolderName(repo: Repo): string {
 // but the renderer's handler only refetches that repo's worktrees — not the
 // workspaceGroups slice. Without this signal, an automation-created group
 // stays invisible until the next app restart re-hydrates from disk.
-function notifyWorkspaceGroupsChanged(mainWindow: BrowserWindow): void {
+export function notifyWorkspaceGroupsChanged(mainWindow: BrowserWindow): void {
   if (!mainWindow.isDestroyed()) {
     mainWindow.webContents.send('workspaceGroups:changed')
   }
