@@ -28,6 +28,9 @@ export type AutoTriggerRuleRowProps = {
    *  optional and the empty placeholder reads "Inferred from group" instead
    *  of "Select project". */
   chainProvidesProject?: boolean
+  /** When true, hide the per-rule project picker entirely. Used by github-pr,
+   *  where the target repo comes from the watch-list/PR event, not per-rule. */
+  hideProjectPicker?: boolean
 }
 
 // Why: a single rule inside an AutoTriggerCard. Extracted into its own file
@@ -47,7 +50,8 @@ export function AutoTriggerRuleRow(props: AutoTriggerRuleRowProps): React.JSX.El
     onAddCondition,
     onRemoveCondition,
     onUpdateCondition,
-    chainProvidesProject = false
+    chainProvidesProject = false,
+    hideProjectPicker = false
   } = props
   const isFirst = index === 0
   const isLast = index === total - 1
@@ -64,25 +68,27 @@ export function AutoTriggerRuleRow(props: AutoTriggerRuleRowProps): React.JSX.El
             {index + 1}
           </span>
           <span className="text-xs text-muted-foreground">Rule</span>
-          <div className="relative inline-flex">
-            <select
-              aria-label="Project"
-              value={rule.projectId}
-              onChange={(e) => onProjectChange(e.target.value)}
-              className={cn(
-                'appearance-none rounded-md border border-input bg-background px-2 py-1 pr-7 text-xs transition-colors hover:bg-accent',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-              )}
-            >
-              <option value="">{placeholderLabel}</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-          </div>
+          {hideProjectPicker ? null : (
+            <div className="relative inline-flex">
+              <select
+                aria-label="Project"
+                value={rule.projectId}
+                onChange={(e) => onProjectChange(e.target.value)}
+                className={cn(
+                  'appearance-none rounded-md border border-input bg-background px-2 py-1 pr-7 text-xs transition-colors hover:bg-accent',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+                )}
+              >
+                <option value="">{placeholderLabel}</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button

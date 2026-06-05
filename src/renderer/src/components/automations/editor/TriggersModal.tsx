@@ -276,6 +276,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                       }
                       onRemove={() => removeTrigger(t.id)}
                       projects={projects}
+                      repos={repos}
                       fieldCatalog={fieldCatalogBySource.get(t.source) ?? []}
                       loadOptions={loadOptionsFor(t.source)}
                       chainProvidesProject={props.chainProvidesProject}

@@ -11,6 +11,8 @@ import type {
   SerializableFieldDescriptor,
   TriggerSourceId
 } from '../../../../../shared/automations-types'
+import type { Repo } from '../../../../../shared/types'
+import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
@@ -24,6 +26,9 @@ export type AutoTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker. */
   projects: { id: string; displayName: string }[]
+  /** Repo catalog for the github-pr watch-list combobox. Optional so legacy /
+   *  linear-only call sites stay unchanged; defaults to an empty list. */
+  repos?: Repo[]
   /** Catalog of fields the trigger's source can match on. Empty array is safe —
    *  the card still renders the rule skeleton, conditions just can't be added. */
   fieldCatalog: SerializableFieldDescriptor[]
@@ -87,6 +92,10 @@ export function updateRule(
     ...trigger,
     rules: trigger.rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r))
   }
+}
+
+export function setRepoIds(trigger: AutoTrigger, repoIds: string[]): AutoTrigger {
+  return { ...trigger, repoIds }
 }
 
 function defaultConditionValue(op: ConditionOp): Condition['value'] {
@@ -154,10 +163,16 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
     onRemove,
     automationId,
     projects,
+    repos = [],
     fieldCatalog,
     loadOptions,
     chainProvidesProject = false
   } = props
+
+  // Why: github-pr scopes polling to a repo watch-list and the matched repo
+  // comes from the PR event, so the per-rule project picker is hidden.
+  const isGithubPr = trigger.source === 'github-pr'
+  const selectedRepoIds = React.useMemo(() => new Set(trigger.repoIds ?? []), [trigger.repoIds])
 
   const onToggle = (): void => {
     onChange(toggleEnabled(trigger))
@@ -230,6 +245,28 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
       </div>
 
       <div className="space-y-3 px-4 py-3">
+        {isGithubPr ? (
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">
+              Watch repositories
+            </label>
+            <RepoMultiCombobox
+              repos={repos}
+              selected={selectedRepoIds}
+              onChange={(next) => onChange(setRepoIds(trigger, Array.from(next)))}
+              onSelectAll={() =>
+                onChange(
+                  setRepoIds(
+                    trigger,
+                    repos.map((r) => r.id)
+                  )
+                )
+              }
+              triggerClassName="h-8 text-xs"
+            />
+          </div>
+        ) : null}
+
         {trigger.rules.length === 0 ? (
           <div className="rounded-md border border-dashed border-border bg-background p-4 text-center">
             <p className="text-xs text-muted-foreground">
@@ -248,6 +285,7 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
                 fieldCatalog={fieldCatalog}
                 loadOptions={loadOptions}
                 chainProvidesProject={chainProvidesProject}
+                hideProjectPicker={isGithubPr}
                 onProjectChange={(projectId) =>
                   onChange(updateRule(trigger, rule.id, { projectId }))
                 }
