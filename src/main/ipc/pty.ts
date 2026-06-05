@@ -893,11 +893,12 @@ export function registerPtyHandlers(
         spawnOptions.sessionId = sessionId
         ptySizes.set(sessionId, { cols: args.cols, rows: args.rows })
       }
-      // Why: agent/CLI-driven terminals must honour the persisted default shell
-      // too. On the daemon path resolvePtyShellPath(env) otherwise ignores it
-      // (COMSPEC on Windows, $SHELL on macOS/Linux); this mirrors the pty:spawn
-      // IPC handler so both spawn routes select the same shell.
-      if (!args.connectionId) {
+      // Why: the persisted default shell applies only to bare interactive
+      // terminals. Runtime spawns are almost always agent/CLI commands, which
+      // must keep the system default shell (resolvePtyShellPath: COMSPEC/$SHELL)
+      // — a custom login shell routinely breaks their command injection. Only a
+      // command-less runtime terminal honours the setting, mirroring pty:spawn.
+      if (!args.connectionId && args.command === undefined) {
         if (process.platform === 'win32') {
           spawnOptions.shellOverride = getSettings?.()?.terminalWindowsShell
           spawnOptions.terminalWindowsPowerShellImplementation = getSettings
@@ -1270,16 +1271,17 @@ export function registerPtyHandlers(
       if (effectiveSessionId !== undefined) {
         spawnOptions.sessionId = effectiveSessionId
       }
-      // Why: fall back to the persisted default-shell setting when the renderer
-      // didn't send a per-tab override. Without this, the daemon path ignores
-      // the user's "Default Shell" preference entirely — it just calls
-      // resolvePtyShellPath(env), which reads COMSPEC/PowerShell on Windows and
-      // $SHELL (the login shell) on macOS/Linux. The LocalPtyProvider consults
-      // getWindowsShell()/getUnixShell(); this mirrors both on the daemon path
-      // so e.g. a fish or WSL default actually applies when pressing Ctrl+T.
+      // Why: the persisted default-shell setting applies only to bare
+      // interactive terminals (no command). Agents (claude/codex), run/setup
+      // scripts, and CLI-launched commands all carry a command and must keep the
+      // system default shell — a custom login shell (fish, nushell, …) routinely
+      // breaks their non-interactive command injection. A per-tab shellOverride
+      // still wins regardless. Without the fallback the daemon path would ignore
+      // the preference entirely (resolvePtyShellPath reads COMSPEC/$SHELL); this
+      // mirrors the LocalPtyProvider getWindowsShell()/getUnixShell() hooks.
       const effectiveShellOverride =
         args.shellOverride ??
-        (!args.connectionId
+        (!args.connectionId && args.command === undefined
           ? process.platform === 'win32'
             ? getSettings?.()?.terminalWindowsShell
             : getSettings?.()?.terminalUnixShell || undefined
@@ -1293,11 +1295,19 @@ export function registerPtyHandlers(
         // for those early bytes; otherwise they default to 80x24 and wrap TUIs.
         ptySizes.set(effectiveSessionId, { cols: args.cols, rows: args.rows })
       }
-      if (process.platform === 'win32' && !args.connectionId) {
+      if (
+        process.platform === 'win32' &&
+        !args.connectionId &&
+        effectiveShellOverride !== undefined
+      ) {
         // Why: the renderer only models PowerShell as one shell family. Thread
         // the persisted implementation choice through spawnOptions so both the
         // in-process and daemon-backed PTY paths can resolve the same effective
-        // executable without inventing a fourth top-level shell.
+        // executable without inventing a fourth top-level shell. Gate on the
+        // override actually being sent (explicit per-tab shell OR the bare-terminal
+        // config fallback) — not on command-less: an explicit powershell.exe
+        // override on a command spawn still needs the impl, else the daemon
+        // resolves undefined as 'auto' and silently upgrades to pwsh.exe.
         spawnOptions.terminalWindowsPowerShellImplementation = getSettings
           ? (getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')
           : undefined

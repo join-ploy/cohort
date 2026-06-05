@@ -180,7 +180,10 @@ export class LocalPtyProvider implements IPtyProvider {
       // changing the user's setting. It takes priority over the setting.
       const shellFamily =
         args.shellOverride ||
-        this.opts.getWindowsShell?.() ||
+        // Why: the persisted default shell applies only to bare terminals;
+        // command spawns (agents like claude/codex, run/setup scripts) fall
+        // through to COMSPEC so a custom shell can't break command injection.
+        (args.command === undefined ? this.opts.getWindowsShell?.() : undefined) ||
         process.env.COMSPEC ||
         'powershell.exe'
       const normalizedShellFamily = pathWin32.basename(shellFamily).toLowerCase()
@@ -216,7 +219,14 @@ export class LocalPtyProvider implements IPtyProvider {
       effectiveCwd = resolved.effectiveCwd
       validationCwd = resolved.validationCwd
     } else {
-      shellPath = this.opts.getUnixShell?.() || args.env?.SHELL || process.env.SHELL || '/bin/zsh'
+      // Why: the persisted default shell applies only to bare terminals; command
+      // spawns (agents like claude/codex, run/setup scripts) fall through to
+      // $SHELL so a custom login shell can't break command injection.
+      shellPath =
+        (args.command === undefined ? this.opts.getUnixShell?.() : undefined) ||
+        args.env?.SHELL ||
+        process.env.SHELL ||
+        '/bin/zsh'
       shellArgs = ['-l']
       effectiveCwd = cwd
       validationCwd = cwd
