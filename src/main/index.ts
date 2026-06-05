@@ -78,6 +78,8 @@ import {
 } from './ipc/workspace-groups'
 import { collectTakenWorkspaceNamesForRepo } from './ipc/worktree-logic'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
+import { resolvePrBaseCore } from './git/resolve-pr-base'
+import { createLocalWorktree } from './ipc/worktree-remote'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -808,6 +810,56 @@ app.whenReady().then(async () => {
           linkedLinearIssue: input.linkedIssue.id
         })
       }
+      return {
+        worktreeId: result.worktree.id,
+        path: result.worktree.path,
+        branch: result.worktree.branch
+      }
+    },
+    createWorktreeFromPr: async (input) => {
+      if (!mainWindow) {
+        throw new Error('createWorktreeFromPr: no mainWindow available.')
+      }
+      const repo = storeRef.getRepo(input.repoId)
+      if (!repo) {
+        throw new Error(`createWorktreeFromPr: repo not found: ${input.repoId}`)
+      }
+      const resolved = await resolvePrBaseCore({
+        repo,
+        prNumber: input.prNumber,
+        headRefName: input.headRefName,
+        isCrossRepository: input.isCrossRepository
+      })
+      // Why: surface resolve failures as a thrown Error so the runner's
+      // try/catch fails the create-worktree step with the underlying message.
+      if ('error' in resolved) {
+        throw new Error(resolved.error)
+      }
+      const slug = generateUniqueWorkspaceName(
+        collectTakenWorkspaceNamesForRepo(input.repoId, storeRef.getAllWorktreeMeta())
+      )
+      const trimmedDisplay = input.displayName.trim()
+      const result = await createLocalWorktree(
+        {
+          repoId: input.repoId,
+          name: trimmedDisplay || slug,
+          workspaceName: slug,
+          ...(trimmedDisplay ? { displayName: trimmedDisplay } : {}),
+          baseBranch: resolved.baseBranch,
+          linkedPR: input.prNumber,
+          ...(resolved.pushTarget ? { pushTarget: resolved.pushTarget } : {}),
+          ...(input.createdByAutomationRunId
+            ? { createdByAutomationRunId: input.createdByAutomationRunId }
+            : {}),
+          // Why: WorkspaceSource has no 'automation' member; 'unknown' is the
+          // neutral fallback for non-user-initiated creates.
+          telemetrySource: 'unknown'
+        },
+        repo,
+        storeRef,
+        mainWindow,
+        runtimeRef
+      )
       return {
         worktreeId: result.worktree.id,
         path: result.worktree.path,
