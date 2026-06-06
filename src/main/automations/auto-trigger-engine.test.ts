@@ -44,6 +44,33 @@ describe('AutoTriggerEngine — dispatch, dedup, watermark, grouping', () => {
     expect(dedup.has('a1|at1|ORC-1')).toBe(true)
   })
 
+  it('does not dispatch for a paused automation even if the trigger is enabled', async () => {
+    // "Pause" sets automation.enabled=false but leaves autoTriggers[].enabled true.
+    // The engine must honor the automation-level pause, like the rrule scheduler does.
+    const automation = makeAutomation({
+      enabled: false,
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'linear-issue',
+          enabled: true,
+          enabledAt: 0,
+          rules: [makeRule({ id: 'rl1', projectId: 'p1', field: 'a', value: 1 })]
+        }
+      ]
+    })
+    const { engine, dispatched, dedup } = makeEngine({
+      source: makeFakeSource([
+        { entityId: 'ORC-1', updatedAt: 1000, payload: {}, fields: { a: 1 } }
+      ]),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    // No dedup burn either — resuming must let the issue fire.
+    expect(dedup.has('a1|at1|ORC-1')).toBe(false)
+  })
+
   it('skips dedup-hit events on subsequent ticks', async () => {
     const automation = makeAutomation({
       autoTriggers: [

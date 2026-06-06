@@ -85,10 +85,11 @@ export class AutoTriggerEngine {
       const automations = this.deps.listAutomations()
       const active: ActiveEntry[] = []
       for (const a of automations) {
-        // Why: auto-triggers require chain-shape automations (dispatchRun only
-        // supports those). Skip legacy automations entirely so we don't write
-        // dedup rows for runs we can't actually dispatch.
-        if (!a.trigger || !a.steps || a.steps.length === 0) {
+        // Why: honor the automation-level pause (enabled=false) — like the rrule
+        // scheduler does — so a paused automation's auto-triggers stop firing.
+        // Also require chain-shape automations (dispatchRun only supports those)
+        // so we don't write dedup rows for runs we can't actually dispatch.
+        if (!a.enabled || !a.trigger || !a.steps || a.steps.length === 0) {
           continue
         }
         for (const t of a.autoTriggers ?? []) {
