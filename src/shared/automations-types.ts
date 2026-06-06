@@ -279,7 +279,10 @@ export type HttpRequestConfig = {
   bodySecret?: boolean
 }
 
-export type MappedFieldType = 'string' | 'number' | 'boolean' | 'date' | 'null' | 'unknown'
+// `json` covers the whole-item output and any array value — both are exposed as
+// a single JSON-string output rather than flattened, since array shapes aren't
+// consistent across responses.
+export type MappedFieldType = 'string' | 'number' | 'boolean' | 'date' | 'null' | 'unknown' | 'json'
 
 // One discovered leaf from the Test sample. `path` is the dot-path into an item
 // (e.g. 'author.name', 'labels[0].name'); `variableName` is the flat key the

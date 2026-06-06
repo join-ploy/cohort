@@ -11,11 +11,12 @@ const NUMBER_OPS: ConditionOp[] = ['eq', 'gte', 'lte', 'is-any-of']
 const STRING_OPS: ConditionOp[] = ['is', 'is-not', 'is-any-of', 'is-none-of']
 
 // Build the condition editor catalog from the Test-derived fields. Disabled
-// fields are excluded; numbers get numeric ops, everything else string equality.
+// fields and json outputs (whole-item / arrays — not sensible filter targets) are
+// excluded; numbers get numeric ops, everything else string equality.
 // `hasFetchOptions` is always false — HTTP fields have no option lookups.
 export function httpFieldsToCatalog(fields: MappedField[]): SerializableFieldDescriptor[] {
   return fields
-    .filter((f) => f.enabled)
+    .filter((f) => f.enabled && f.type !== 'json')
     .map((f) => ({
       field: f.variableName,
       label: f.path,

@@ -97,14 +97,31 @@ export function defaultVariableName(path: string): string {
 
 const MAX_FLATTEN_DEPTH = 6 // Why: bound pathological deeply-nested payloads.
 
+// The whole-item output's reserved variable name (path '' resolves to the item).
+export const WHOLE_ITEM_VARIABLE = 'item'
+
 export function flattenItem(item: unknown): MappedField[] {
-  const out: MappedField[] = []
+  // Why: always expose the full item (path '') as one JSON output, so a step can
+  // use the whole payload when per-field mapping isn't enough.
+  const out: MappedField[] = [
+    { path: '', variableName: WHOLE_ITEM_VARIABLE, enabled: true, type: 'json', sampleValue: item }
+  ]
   const visit = (node: unknown, path: string, depth: number): void => {
     if (depth > MAX_FLATTEN_DEPTH) {
       return
     }
     if (Array.isArray(node)) {
-      node.forEach((el, i) => visit(el, `${path}[${i}]`, depth + 1))
+      // Why: array shapes vary across responses, so expose the whole array as one
+      // JSON output rather than indexing into elements that may not recur.
+      if (path !== '') {
+        out.push({
+          path,
+          variableName: defaultVariableName(path),
+          enabled: true,
+          type: 'json',
+          sampleValue: node
+        })
+      }
       return
     }
     if (node && typeof node === 'object') {
@@ -143,9 +160,14 @@ export function buildDedupKey(item: unknown, dedupeFields: string[]): string {
 export function mapItemToVariables(item: unknown, fields: MappedField[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const f of fields) {
-    if (f.enabled) {
-      out[f.variableName] = getByPath(item, f.path)
+    if (!f.enabled) {
+      continue
     }
+    const value = getByPath(item, f.path)
+    // Why: objects/arrays (the whole-item + array outputs) must be JSON strings so
+    // they survive template resolution, which rejects raw object/array values.
+    out[f.variableName] =
+      value !== null && typeof value === 'object' ? JSON.stringify(value) : value
   }
   return out
 }

@@ -262,7 +262,9 @@ describe('HttpEndpointTriggerCard interactions', () => {
     expect(onChange).toHaveBeenCalledTimes(1)
     const next = onChange.mock.calls[0][0] as AutoTrigger
     expect(next.http?.itemsPath).toBe('data')
-    // flattenItem(items[0]) discovered the leaf fields.
-    expect(next.http?.fields.map((f) => f.path).sort()).toEqual(['id', 'name'])
+    // flattenItem(items[0]) discovers the leaf fields plus the whole-item output
+    // (path '').
+    expect(next.http?.fields.map((f) => f.path).sort()).toEqual(['', 'id', 'name'])
+    expect(next.http?.fields.find((f) => f.path === '')?.variableName).toBe('item')
   })
 })

@@ -274,7 +274,9 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
   }
 
   const request = http.request
-  const enabledFields = http.fields.filter((f) => f.enabled)
+  // Why: the whole-item + array outputs (json) are usable as variables but not as
+  // dedupe keys, date gates, or picker labels — those need scalar leaf fields.
+  const scalarFields = http.fields.filter((f) => f.enabled && f.type !== 'json')
 
   const onTest = async (): Promise<void> => {
     setTesting(true)
@@ -451,7 +453,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-medium text-muted-foreground">Body (optional)</span>
+              <p className="text-[11px] font-medium text-muted-foreground">Body (optional)</p>
               <Button
                 type="button"
                 variant={request.bodySecret ? 'secondary' : 'ghost'}
@@ -513,7 +515,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
 
           {sampleBody !== undefined ? (
             <div className="space-y-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">Items</span>
+              <p className="text-[11px] font-medium text-muted-foreground">Items</p>
               <SelectShell ariaLabel="Items path" value={itemsToken} onChange={onItemsSelect}>
                 <option value="whole">Whole response is a single item</option>
                 {arrayCandidates.map((c) => (
@@ -573,7 +575,9 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         className="size-4 cursor-pointer rounded border-input"
                       />
                       <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-mono text-xs">{field.path}</span>
+                        <span className="truncate font-mono text-xs">
+                          {field.path === '' ? '(whole item)' : field.path}
+                        </span>
                         <span className="truncate text-[11px] text-muted-foreground">
                           {formatSample(field.sampleValue)}
                         </span>
@@ -601,16 +605,14 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <SectionHeading>Poll settings</SectionHeading>
 
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  Dedupe by fields
-                </span>
-                {enabledFields.length === 0 ? (
+                <p className="text-[11px] font-medium text-muted-foreground">Dedupe by fields</p>
+                {scalarFields.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
                     Map at least one field to pick dedupe keys.
                   </p>
                 ) : (
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                    {enabledFields.map((field) => (
+                    {scalarFields.map((field) => (
                       <label
                         key={field.path}
                         className="flex cursor-pointer select-none items-center gap-2"
@@ -630,7 +632,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               </div>
 
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">Date gate</span>
+                <p className="text-[11px] font-medium text-muted-foreground">Date gate</p>
                 <div>
                   <SelectShell
                     ariaLabel="Date gate field"
@@ -638,7 +640,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                     onChange={(v) => onChange(setDateGateField(trigger, v === '' ? null : v))}
                   >
                     <option value="">— None —</option>
-                    {enabledFields.map((field) => (
+                    {scalarFields.map((field) => (
                       <option key={field.path} value={field.path}>
                         {field.path}
                       </option>
@@ -655,7 +657,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               </div>
 
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">Poll interval</span>
+                <p className="text-[11px] font-medium text-muted-foreground">Poll interval</p>
                 <div>
                   <SelectShell
                     ariaLabel="Poll interval"
@@ -683,7 +685,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
             <div className="space-y-3">
               <SectionHeading>Manual run picker</SectionHeading>
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">Label field</span>
+                <p className="text-[11px] font-medium text-muted-foreground">Label field</p>
                 <div>
                   <SelectShell
                     ariaLabel="Label field"
@@ -691,7 +693,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                     onChange={(v) => onChange(setLabelField(trigger, v === '' ? undefined : v))}
                   >
                     <option value="">— None —</option>
-                    {enabledFields.map((field) => (
+                    {scalarFields.map((field) => (
                       <option key={field.path} value={field.path}>
                         {field.path}
                       </option>
@@ -700,9 +702,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                 </div>
               </div>
               <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  Subtitle field
-                </span>
+                <p className="text-[11px] font-medium text-muted-foreground">Subtitle field</p>
                 <div>
                   <SelectShell
                     ariaLabel="Subtitle field"
@@ -710,7 +710,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                     onChange={(v) => onChange(setSubtitleField(trigger, v === '' ? undefined : v))}
                   >
                     <option value="">— None —</option>
-                    {enabledFields.map((field) => (
+                    {scalarFields.map((field) => (
                       <option key={field.path} value={field.path}>
                         {field.path}
                       </option>

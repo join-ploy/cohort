@@ -81,18 +81,29 @@ describe('inferFieldType', () => {
 })
 
 describe('flattenItem', () => {
-  it('flattens nested objects and arrays into dot/bracket paths', () => {
+  it('flattens nested objects but exposes arrays as a single whole-array output', () => {
     const item = { id: 7, author: { name: 'Ada' }, labels: [{ name: 'bug' }] }
-    const fields = flattenItem(item)
-    const byPath = Object.fromEntries(fields.map((f) => [f.path, f]))
+    const byPath = Object.fromEntries(flattenItem(item).map((f) => [f.path, f]))
     expect(byPath['id'].type).toBe('number')
-    expect(byPath['author.name'].sampleValue).toBe('Ada')
-    expect(byPath['labels[0].name'].type).toBe('string')
+    expect(byPath['author.name'].sampleValue).toBe('Ada') // objects still flatten
+    // The array is one output (the whole array), not labels[0].name etc. — array
+    // shapes aren't consistent across responses.
+    expect(byPath['labels'].type).toBe('json')
+    expect(byPath['labels'].sampleValue).toEqual([{ name: 'bug' }])
+    expect(byPath['labels[0].name']).toBeUndefined()
+  })
+  it('always emits a whole-item output at path "" named item', () => {
+    const item = { id: 7 }
+    const whole = flattenItem(item).find((f) => f.path === '')
+    expect(whole?.variableName).toBe('item')
+    expect(whole?.type).toBe('json')
+    expect(whole?.sampleValue).toEqual(item)
+    expect(whole?.enabled).toBe(true)
   })
   it('defaults every field enabled with a sanitized variable name', () => {
-    const [f] = flattenItem({ 'author.name': 'x' })
-    expect(f.enabled).toBe(true)
-    expect(f.variableName).toBe(defaultVariableName('author.name'))
+    const f = flattenItem({ 'author.name': 'x' }).find((x) => x.path === 'author.name')
+    expect(f?.enabled).toBe(true)
+    expect(f?.variableName).toBe(defaultVariableName('author.name'))
   })
 })
 
@@ -130,6 +141,23 @@ describe('mapItemToVariables', () => {
       { path: 'x', variableName: 'x', enabled: false, type: 'string' as const, sampleValue: '' }
     ]
     expect(mapItemToVariables({ id: 9, x: 'no' }, fields)).toEqual({ id: 9 })
+  })
+  it('serializes object/array values to JSON so templates can consume them', () => {
+    const fields = [
+      { path: '', variableName: 'item', enabled: true, type: 'json' as const, sampleValue: null },
+      {
+        path: 'labels',
+        variableName: 'labels',
+        enabled: true,
+        type: 'json' as const,
+        sampleValue: null
+      }
+    ]
+    const item = { id: 1, labels: ['a', 'b'] }
+    expect(mapItemToVariables(item, fields)).toEqual({
+      item: JSON.stringify(item),
+      labels: JSON.stringify(['a', 'b'])
+    })
   })
 })
 

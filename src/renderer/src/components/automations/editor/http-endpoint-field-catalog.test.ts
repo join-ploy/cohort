@@ -43,6 +43,15 @@ describe('httpFieldsToCatalog', () => {
     expect(cat[0].ops).toEqual(['is', 'is-not', 'is-any-of', 'is-none-of'])
   })
 
+  it('excludes json outputs (whole-item / arrays) — not sensible condition targets', () => {
+    const cat = httpFieldsToCatalog([
+      field({ path: '', variableName: 'item', type: 'json', sampleValue: {} }),
+      field({ path: 'labels', variableName: 'labels', type: 'json', sampleValue: [] }),
+      field({ path: 'id', variableName: 'id', type: 'number', sampleValue: 1 })
+    ])
+    expect(cat.map((d) => d.field)).toEqual(['id'])
+  })
+
   it('returns an empty catalog when no fields are enabled', () => {
     expect(httpFieldsToCatalog([field({ enabled: false })])).toEqual([])
   })
