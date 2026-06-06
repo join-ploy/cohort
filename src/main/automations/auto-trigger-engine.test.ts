@@ -524,4 +524,63 @@ describe('AutoTriggerEngine — per-trigger http polling', () => {
     expect(errors).toHaveLength(1)
     expect(errors[0].where).toMatch(/http/)
   })
+
+  it('keeps the clock stamped after a failing poll so the next within-interval tick skips', async () => {
+    const errors: { where: string }[] = []
+    // Non-2xx makes the source throw; the per-trigger catch should log it and
+    // the clock (stamped before the poll) must rate-limit the next tick.
+    const execute = vi.fn(async () => ({ status: 503, durationMs: 1, body: 'down' }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg({ intervalMs: 1000 }),
+          rules: []
+        }
+      ]
+    })
+    const { engine, dispatched, httpLastPollMap } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation],
+      now: 1_000_000,
+      onError: (where) => {
+        errors.push({ where })
+      }
+    })
+    await engine.tick() // polls, source throws, clock stamped to 1_000_000
+    await engine.tick() // within interval → skipped, no second poll
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(dispatched).toEqual([])
+    expect(httpLastPollMap.get('at1')).toBe(1_000_000)
+    expect(errors.some((e) => /http/.test(e.where))).toBe(true)
+  })
+
+  it('reports the per-trigger clock + interval for http triggers in getPollStatus', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg({ intervalMs: 30_000 }),
+          rules: []
+        }
+      ]
+    })
+    const { engine } = makeEngine({
+      source: makeHttpEndpointSource({ execute: vi.fn(), now: () => 5000 }),
+      automations: [automation],
+      httpLastPollMap: new Map([['at1', 777_000]])
+    })
+    expect(engine.getPollStatus().get('http-endpoint')).toEqual({
+      lastPollAt: 777_000,
+      intervalMs: 30_000
+    })
+  })
 })

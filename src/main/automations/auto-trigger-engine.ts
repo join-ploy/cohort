@@ -207,8 +207,9 @@ export class AutoTriggerEngine {
     if (nowMs - this.deps.httpLastPoll(trigger.id) < intervalMs) {
       return
     }
-    // Why: stamp the clock BEFORE polling so a slow request can't double-fire on
-    // the next overlapping tick.
+    // Why: stamp the clock BEFORE polling so a FAILING endpoint still honors its
+    // interval — the clock advances even when poll() throws, so a broken endpoint
+    // isn't re-hit every tick. (Duplicate dispatch is guarded by dedup, not this.)
     this.deps.httpLastPollSet(trigger.id, nowMs)
 
     const source = this.deps.registry.get('http-endpoint')
@@ -259,7 +260,18 @@ export class AutoTriggerEngine {
         continue
       }
       for (const t of a.autoTriggers ?? []) {
-        if (t.enabled && !result.has(t.source)) {
+        if (!t.enabled || result.has(t.source)) {
+          continue
+        }
+        if (t.source === 'http-endpoint') {
+          // Why: http triggers keep their own per-trigger clock + interval; the
+          // source-keyed status reports the first such trigger (per-trigger
+          // status is a follow-up). Reading lastPoll() here would always be 0.
+          result.set(t.source, {
+            lastPollAt: this.deps.httpLastPoll(t.id),
+            intervalMs: t.http?.intervalMs ?? this.intervalMs
+          })
+        } else {
           result.set(t.source, {
             lastPollAt: this.deps.lastPoll(t.source, this.deps.hostId),
             intervalMs: this.intervalMs
