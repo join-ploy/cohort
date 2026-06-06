@@ -34,6 +34,25 @@ describe('sealHttpKeyValues', () => {
     const [out] = sealHttpKeyValues([{ key: 'X', value: 'plain' }], [])
     expect(out).toEqual({ key: 'X', value: 'plain' })
   })
+  it('pairs duplicate-key masked secrets positionally, not first-key-wins', () => {
+    const dup = (value: string) => ({ key: 'p', value, secret: true as const })
+    const existing = [dup('A'), dup('B')]
+    const out = sealHttpKeyValues([dup(HTTP_SECRET_MASK), dup(HTTP_SECRET_MASK)], existing)
+    expect(out.map((kv) => kv.value)).toEqual(['A', 'B'])
+  })
+  it('preserves a renamed secret by position (no data loss)', () => {
+    const existing = [{ key: 'Authorizaton', value: 'CIPHER', secret: true as const }]
+    const incoming = [{ key: 'Authorization', value: HTTP_SECRET_MASK, secret: true as const }]
+    const [out] = sealHttpKeyValues(incoming, existing)
+    expect(out.value).toBe('CIPHER')
+  })
+  it('warns and clears a masked secret with no prior ciphertext at its index', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const [out] = sealHttpKeyValues([secret(HTTP_SECRET_MASK)], [])
+    expect(out.value).toBe('')
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })
 
 describe('maskHttpKeyValues', () => {
@@ -51,6 +70,18 @@ describe('decryptHttpRequest', () => {
       query: []
     })
     expect(req.headers[0].value).toBe('CIPHER') // identity decryption in test
+  })
+  it('decrypts a secret query param and a secret body', () => {
+    const req = decryptHttpRequest({
+      method: 'POST',
+      url: 'https://x',
+      headers: [],
+      query: [{ key: 'token', value: 'QCIPHER', secret: true }],
+      body: 'BCIPHER',
+      bodySecret: true
+    })
+    expect(req.query[0].value).toBe('QCIPHER') // identity decryption in test
+    expect(req.body).toBe('BCIPHER')
   })
 })
 
@@ -139,6 +170,13 @@ describe('sealAutoTriggers / maskAutoTriggers', () => {
 
     const resealed = sealAutoTriggers(masked, sealed)
     expect(resealed?.[0].http?.request.body).toBe('{"token":"abc"}')
+  })
+
+  it('does not mutate the input http trigger', () => {
+    const trigger = httpTrigger('t1', httpConfig())
+    sealAutoTriggers([trigger], [])
+    maskAutoTriggers([trigger])
+    expect(trigger.http?.request.headers[0].value).toBe('Bearer abc')
   })
 
   it('leaves a non-secret body untouched through mask + seal', () => {

@@ -12,15 +12,24 @@ export function sealHttpKeyValues(
   incoming: HttpKeyValue[],
   existing: HttpKeyValue[]
 ): HttpKeyValue[] {
-  return incoming.map((kv) => {
+  return incoming.map((kv, i) => {
     if (!kv.secret) {
       return kv
     }
-    if (kv.value === HTTP_SECRET_MASK) {
-      const prior = existing.find((e) => e.key === kv.key && e.secret)
-      return { ...kv, value: prior?.value ?? '' }
+    if (kv.value !== HTTP_SECRET_MASK) {
+      return { ...kv, value: encryptSecret(kv.value) }
     }
-    return { ...kv, value: encryptSecret(kv.value) }
+    // Why: the editor edits these arrays in place, so position — not key — is the
+    // stable correlator across a load→edit→save round-trip. Key-matching mis-pairs
+    // legal duplicate keys and wipes a secret whose key was renamed.
+    const prior = existing[i]
+    if (prior?.secret) {
+      return { ...kv, value: prior.value }
+    }
+    console.warn(
+      `[http-endpoint-secrets] masked secret had no prior ciphertext at index ${i} (key "${kv.key}") — clearing.`
+    )
+    return { ...kv, value: '' }
   })
 }
 
@@ -73,6 +82,12 @@ function sealBody(req: HttpRequestConfig, prior?: HttpRequestConfig): string | u
     return req.body
   }
   if (req.body === HTTP_SECRET_MASK) {
+    // Why: a single body has no index; warn rather than silently wipe the secret on loss.
+    if (prior?.body === undefined) {
+      console.warn(
+        '[http-endpoint-secrets] masked request body had no prior ciphertext — clearing.'
+      )
+    }
     return prior?.body
   }
   return encryptSecret(req.body)
