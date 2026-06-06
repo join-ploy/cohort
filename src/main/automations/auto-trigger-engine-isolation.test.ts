@@ -97,6 +97,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       },
       lastPoll: () => 0,
       lastPollSet: () => undefined,
+      httpLastPoll: () => 0,
+      httpLastPollSet: () => undefined,
       hostId: 'h',
       now: () => 5000,
       onError: (where) => {
@@ -149,6 +151,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       dedupInsert: () => {},
       lastPoll: () => 0,
       lastPollSet: () => undefined,
+      httpLastPoll: () => 0,
+      httpLastPollSet: () => undefined,
       hostId: 'h',
       now: () => 5000,
       onError: (where) => {
@@ -223,6 +227,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       lastPollSet: (s, h, v) => {
         lastPollMap.set(`${s}|${h}`, v)
       },
+      httpLastPoll: () => 0,
+      httpLastPollSet: () => undefined,
       hostId: 'h1',
       now: () => 5000,
       onError: (where) => {

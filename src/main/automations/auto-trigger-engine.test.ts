@@ -6,6 +6,19 @@ import {
   makeRecordingSource,
   makeRule
 } from './auto-trigger-engine-test-fixtures'
+import { AutoTriggerEngine } from './auto-trigger-engine'
+import { TriggerSourceRegistry } from './trigger-sources/registry'
+import { makeHttpEndpointSource } from './trigger-sources/http-endpoint'
+import type { HttpEndpointConfig } from '../../shared/automations-types'
+
+const httpCfg = (over: Partial<HttpEndpointConfig> = {}): HttpEndpointConfig => ({
+  request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+  itemsPath: 'data',
+  fields: [{ path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 0 }],
+  dedupeFields: ['id'],
+  dateGateField: null,
+  ...over
+})
 
 describe('AutoTriggerEngine — dispatch, dedup, watermark, grouping', () => {
   it('dispatches first matching rule for a new event', async () => {
@@ -271,5 +284,244 @@ describe('AutoTriggerEngine — dispatch, dedup, watermark, grouping', () => {
     })
     await engine.tick()
     expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'rl1', entityId: 'ORC-1' }])
+  })
+})
+
+describe('AutoTriggerEngine — per-trigger http polling', () => {
+  it('polls a polling-enabled http-endpoint trigger once per item (empty rules = implicit match)', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }, { id: 2 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg(),
+          rules: []
+        }
+      ]
+    })
+    const { engine, dispatched } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(execute).toHaveBeenCalledTimes(1)
+    // Empty rules => one implicit match per item, targeting automation.projectId.
+    // Dedup key is the JSON-encoded positional values from buildDedupKey.
+    expect(dispatched).toEqual([
+      { automationId: 'a1', ruleId: 'implicit', entityId: '[1]' },
+      { automationId: 'a1', ruleId: 'implicit', entityId: '[2]' }
+    ])
+  })
+
+  it('honors configured rules on an http trigger (firstMatch picks the rule projectId)', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 7 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg(),
+          rules: [makeRule({ id: 'rl1', projectId: 'p9', field: 'id', value: 7 })]
+        }
+      ]
+    })
+    const { engine, dispatched } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'rl1', entityId: '[7]' }])
+  })
+
+  it('skips dedup-hit http items on subsequent ticks', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg(),
+          rules: []
+        }
+      ]
+    })
+    const dedup = new Set<string>(['a1|at1|[1]'])
+    const { engine, dispatched } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation],
+      dedup
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+  })
+
+  it('does not poll a manual-only http trigger (pollingEnabled=false)', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: false,
+          http: httpCfg(),
+          rules: []
+        }
+      ]
+    })
+    const { engine, dispatched } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation]
+    })
+    await engine.tick()
+    expect(execute).not.toHaveBeenCalled()
+    expect(dispatched).toEqual([])
+  })
+
+  it('skips an http trigger still inside its intervalMs', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg({ intervalMs: 300_000 }),
+          rules: []
+        }
+      ]
+    })
+    const { engine, dispatched, httpLastPollMap } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation],
+      now: 1_000_000,
+      // Polled 1s ago — well inside the 5-minute interval, so this tick must skip.
+      httpLastPollMap: new Map([['at1', 999_000]])
+    })
+    await engine.tick()
+    expect(execute).not.toHaveBeenCalled()
+    expect(dispatched).toEqual([])
+    // Clock not re-stamped because we never polled.
+    expect(httpLastPollMap.get('at1')).toBe(999_000)
+  })
+
+  it('stamps the per-trigger clock before polling and dispatches when the interval has elapsed', async () => {
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg({ intervalMs: 1000 }),
+          rules: []
+        }
+      ]
+    })
+    const { engine, dispatched, httpLastPollMap } = makeEngine({
+      source: makeHttpEndpointSource({ execute, now: () => 5000 }),
+      automations: [automation],
+      now: 1_000_000,
+      httpLastPollMap: new Map([['at1', 990_000]])
+    })
+    await engine.tick()
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(dispatched).toEqual([{ automationId: 'a1', ruleId: 'implicit', entityId: '[1]' }])
+    expect(httpLastPollMap.get('at1')).toBe(1_000_000)
+  })
+
+  it('isolates a per-event error so other http items still dispatch', async () => {
+    const errors: { where: string }[] = []
+    const execute = vi.fn(async () => ({
+      status: 200,
+      durationMs: 1,
+      body: { data: [{ id: 1 }, { id: 2 }] }
+    }))
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          pollingEnabled: true,
+          http: httpCfg(),
+          rules: []
+        }
+      ]
+    })
+    const dispatched: string[] = []
+    let throwOnFirst = true
+    const dedup = new Set<string>()
+    const registry = new TriggerSourceRegistry()
+    registry.register(makeHttpEndpointSource({ execute, now: () => 5000 }))
+    const engine = new AutoTriggerEngine({
+      registry,
+      listAutomations: () => [automation],
+      dispatchAutoRun: ({ event }) => {
+        if (throwOnFirst) {
+          throwOnFirst = false
+          throw new Error('boom')
+        }
+        dispatched.push(event.entityId)
+      },
+      dedupHas: (a, t, e) => dedup.has(`${a}|${t}|${e}`),
+      dedupInsert: (a, t, _s, e) => {
+        dedup.add(`${a}|${t}|${e}`)
+      },
+      lastPoll: () => 0,
+      lastPollSet: () => undefined,
+      httpLastPoll: () => 0,
+      httpLastPollSet: () => undefined,
+      hostId: 'h1',
+      now: () => 5000,
+      onError: (where) => {
+        errors.push({ where })
+      }
+    })
+    await engine.tick()
+    // First item threw inside dispatch; the second item still dispatched.
+    expect(dispatched).toEqual(['[2]'])
+    expect(errors).toHaveLength(1)
+    expect(errors[0].where).toMatch(/http/)
   })
 })

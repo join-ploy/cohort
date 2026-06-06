@@ -158,6 +158,8 @@ async function setup(opts: SetupOpts): Promise<Harness> {
       }),
     lastPoll: () => 0,
     lastPollSet: () => undefined,
+    httpLastPoll: () => 0,
+    httpLastPollSet: () => undefined,
     hostId: 'test',
     now: () => Date.now()
   })
