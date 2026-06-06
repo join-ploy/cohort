@@ -46,4 +46,51 @@ describe('executeHttpEndpointRequest', () => {
       )
     ).rejects.toThrow(/scheme/i)
   })
+
+  it('throws when the streamed body exceeds maxBytes', async () => {
+    const big = (async () => new Response('x'.repeat(100))) as unknown as typeof fetch
+    await expect(
+      executeHttpEndpointRequest(base, { fetchImpl: big, maxBytes: 10 })
+    ).rejects.toThrow(/exceeded/)
+  })
+
+  it('surfaces an aborted request as a timeout error', async () => {
+    // Why: this fetch settles only when the abort signal fires, simulating a hang.
+    const hang = ((_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () =>
+          reject(new DOMException('Aborted', 'AbortError'))
+        )
+      })) as unknown as typeof fetch
+    await expect(
+      executeHttpEndpointRequest(base, { fetchImpl: hang, timeoutMs: 10 })
+    ).rejects.toThrow(/timed out/i)
+  })
+
+  it('computes durationMs from the injected clock', async () => {
+    const stamps = [1000, 1500]
+    let i = 0
+    const now = (): number => stamps[i++] ?? 1500
+    const res = await executeHttpEndpointRequest(base, { fetchImpl: fakeFetch([]), now })
+    expect(res.durationMs).toBe(500)
+  })
+
+  it('attaches the body for non-GET requests', async () => {
+    let seenBody: unknown
+    const spy = ((_url: string, init: RequestInit) => {
+      seenBody = init.body
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch
+    await executeHttpEndpointRequest(
+      { ...base, method: 'POST', body: '{"x":1}' },
+      { fetchImpl: spy }
+    )
+    expect(seenBody).toBe('{"x":1}')
+  })
+
+  it('returns a non-JSON body unchanged', async () => {
+    const text = (async () => new Response('plain text, not json')) as unknown as typeof fetch
+    const res = await executeHttpEndpointRequest(base, { fetchImpl: text })
+    expect(res.body).toBe('plain text, not json')
+  })
 })
