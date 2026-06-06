@@ -27,7 +27,7 @@ export function detectArrayPaths(body: unknown): ArrayCandidate[] {
 
 export function resolveItems(body: unknown, itemsPath: string | null): unknown[] {
   if (itemsPath === null) {
-    return body === undefined ? [] : [body]
+    return body == null ? [] : [body]
   }
   const at = itemsPath === '' ? body : getByPath(body, itemsPath)
   return Array.isArray(at) ? at : []
@@ -56,11 +56,17 @@ export function getByPath(root: unknown, path: string): unknown {
 // milliseconds. ~ Sat 2001-09-09 in seconds / 1973 in ms — safely splits the two.
 const EPOCH_MS_THRESHOLD = 100_000_000_000
 
+// Why: only treat ISO-8601-ish strings as dates so version/id strings like
+// "1.2.3", "2026", or "5" — which Date.parse would happily accept — don't get
+// mislabeled date or produce a nonsensical gate. Matches the design's stated
+// contract: ISO 8601 + numeric epoch.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/
+
 export function parseDateValue(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value < EPOCH_MS_THRESHOLD ? Math.round(value * 1000) : Math.round(value)
   }
-  if (typeof value === 'string') {
+  if (typeof value === 'string' && ISO_DATE_RE.test(value)) {
     const t = Date.parse(value)
     return Number.isNaN(t) ? null : t
   }
@@ -122,16 +128,16 @@ export function flattenItem(item: unknown): MappedField[] {
   return out
 }
 
-const KEY_SEP = ' '
-
 export function buildDedupKey(item: unknown, dedupeFields: string[]): string {
-  const parts = dedupeFields
-    .map((f) => getByPath(item, f))
-    .filter((v) => v !== undefined && v !== null)
-  if (parts.length === 0) {
+  const values = dedupeFields.map((f) => getByPath(item, f))
+  const allMissing = values.every((v) => v === undefined || v === null)
+  if (dedupeFields.length === 0 || allMissing) {
     return `hash:${stableHash(item)}` // Why: keep dedup working even when chosen fields are absent.
   }
-  return parts.map((v) => String(v)).join(KEY_SEP)
+  // Why: JSON-encode the positional values so a field value containing a
+  // separator can't alias two distinct items into the same dedup key (which
+  // would silently drop a trigger).
+  return JSON.stringify(values)
 }
 
 export function mapItemToVariables(item: unknown, fields: MappedField[]): Record<string, unknown> {

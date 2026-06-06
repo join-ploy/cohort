@@ -49,10 +49,19 @@ describe('parseDateValue', () => {
     expect(parseDateValue(1_700_000_000)).toBe(1_700_000_000_000)
     expect(parseDateValue(1_700_000_000_000)).toBe(1_700_000_000_000)
   })
+  it('parses ISO date-only strings', () => {
+    expect(parseDateValue('2026-06-06')).toBe(Date.parse('2026-06-06'))
+  })
   it('returns null for unparseable values', () => {
     expect(parseDateValue('not a date')).toBeNull()
     expect(parseDateValue(null)).toBeNull()
     expect(parseDateValue({})).toBeNull()
+  })
+  it('rejects non-ISO numeric-ish strings Date.parse would otherwise accept', () => {
+    // Version strings, bare years, and short ids must not be read as dates.
+    expect(parseDateValue('5')).toBeNull()
+    expect(parseDateValue('2026')).toBeNull()
+    expect(parseDateValue('1.2.3')).toBeNull()
   })
 })
 
@@ -63,6 +72,11 @@ describe('inferFieldType', () => {
     expect(inferFieldType(42)).toBe('number')
     expect(inferFieldType(true)).toBe('boolean')
     expect(inferFieldType(null)).toBe('null')
+  })
+  it('does not mislabel version/id/year strings as dates', () => {
+    expect(inferFieldType('1.2.3')).toBe('string')
+    expect(inferFieldType('2026')).toBe('string')
+    expect(inferFieldType('5')).toBe('string')
   })
 })
 
@@ -89,8 +103,17 @@ describe('defaultVariableName', () => {
 })
 
 describe('buildDedupKey', () => {
-  it('joins the chosen field values', () => {
-    expect(buildDedupKey({ id: 7, k: 'a' }, ['id', 'k'])).toBe('7 a')
+  it('encodes the chosen field values positionally and deterministically', () => {
+    expect(buildDedupKey({ id: 7, k: 'a' }, ['id', 'k'])).toBe(JSON.stringify([7, 'a']))
+    expect(buildDedupKey({ id: 7, k: 'a' }, ['id', 'k'])).toBe(
+      buildDedupKey({ id: 7, k: 'a' }, ['id', 'k'])
+    )
+  })
+  it('does not alias distinct items whose values contain the separator', () => {
+    // Pre-fix these both joined to '1 2 3'; positional JSON keeps them distinct.
+    const a = buildDedupKey({ a: '1 2', b: '3' }, ['a', 'b'])
+    const b = buildDedupKey({ a: '1', b: '2 3' }, ['a', 'b'])
+    expect(a).not.toBe(b)
   })
   it('falls back to a stable hash of the whole item when no fields resolve', () => {
     const a = buildDedupKey({ x: 1 }, [])
