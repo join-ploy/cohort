@@ -2,6 +2,8 @@
 // Pure, IO-free mapping between an HTTP response and trigger variables.
 // Shared by the renderer Test preview and the main-process poller.
 
+import type { MappedFieldType } from './automations-types'
+
 export type ArrayCandidate = { path: string; length: number }
 
 // Walk the body collecting every array, keyed by dot-path (''=top level),
@@ -48,4 +50,35 @@ export function getByPath(root: unknown, path: string): unknown {
     cur = (cur as Record<string, unknown>)[seg]
   }
   return cur
+}
+
+// Heuristic epoch boundary: values below this are treated as seconds, above as
+// milliseconds. ~ Sat 2001-09-09 in seconds / 1973 in ms — safely splits the two.
+const EPOCH_MS_THRESHOLD = 100_000_000_000
+
+export function parseDateValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < EPOCH_MS_THRESHOLD ? Math.round(value * 1000) : Math.round(value)
+  }
+  if (typeof value === 'string') {
+    const t = Date.parse(value)
+    return Number.isNaN(t) ? null : t
+  }
+  return null
+}
+
+export function inferFieldType(value: unknown): MappedFieldType {
+  if (value === null) {
+    return 'null'
+  }
+  if (typeof value === 'number') {
+    return 'number'
+  }
+  if (typeof value === 'boolean') {
+    return 'boolean'
+  }
+  if (typeof value === 'string') {
+    return parseDateValue(value) !== null ? 'date' : 'string'
+  }
+  return 'unknown'
 }

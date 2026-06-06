@@ -1,6 +1,11 @@
 // src/shared/http-endpoint-mapping.test.ts
 import { describe, it, expect } from 'vitest'
-import { detectArrayPaths, resolveItems } from './http-endpoint-mapping'
+import {
+  detectArrayPaths,
+  resolveItems,
+  parseDateValue,
+  inferFieldType
+} from './http-endpoint-mapping'
 
 describe('detectArrayPaths', () => {
   it('finds a top-level array', () => {
@@ -28,5 +33,30 @@ describe('resolveItems', () => {
   it('returns [] when the path is missing or not an array', () => {
     expect(resolveItems({ data: 5 }, 'data')).toEqual([])
     expect(resolveItems({}, 'nope')).toEqual([])
+  })
+})
+
+describe('parseDateValue', () => {
+  it('parses ISO 8601', () => {
+    expect(parseDateValue('2026-06-06T10:00:00Z')).toBe(Date.parse('2026-06-06T10:00:00Z'))
+  })
+  it('parses epoch seconds and milliseconds', () => {
+    expect(parseDateValue(1_700_000_000)).toBe(1_700_000_000_000)
+    expect(parseDateValue(1_700_000_000_000)).toBe(1_700_000_000_000)
+  })
+  it('returns null for unparseable values', () => {
+    expect(parseDateValue('not a date')).toBeNull()
+    expect(parseDateValue(null)).toBeNull()
+    expect(parseDateValue({})).toBeNull()
+  })
+})
+
+describe('inferFieldType', () => {
+  it('classifies primitives and dates', () => {
+    expect(inferFieldType('2026-06-06T10:00:00Z')).toBe('date')
+    expect(inferFieldType('hello')).toBe('string')
+    expect(inferFieldType(42)).toBe('number')
+    expect(inferFieldType(true)).toBe('boolean')
+    expect(inferFieldType(null)).toBe('null')
   })
 })
