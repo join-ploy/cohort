@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 
 import { runTest, runFetchItems, resolveDraftRequest } from './http-endpoint'
 import { registerAutomationHandlers } from './automations'
+import { maskAutoTriggers } from '../automations/http-endpoint-secrets'
 import type { Store } from '../persistence'
 import type { AutomationService } from '../automations/service'
 import {
@@ -299,6 +300,45 @@ describe('runFetchItems', () => {
     ])
   })
 
+  it('never leaks request secrets into the returned items (items are response-derived only)', async () => {
+    const savedWithSecret = automation({
+      autoTriggers: [
+        httpTrigger({
+          labelField: 'title',
+          subtitleField: 'author',
+          dedupeFields: ['id'],
+          request: {
+            method: 'GET',
+            url: 'https://api.test/items',
+            headers: [{ key: 'Authorization', value: 'Bearer header-leak-secret', secret: true }],
+            query: [{ key: 'token', value: 'query-leak-secret', secret: true }]
+          }
+        })
+      ]
+    })
+    const body = { data: [{ id: 7, title: 'First', author: 'Ada' }] }
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body }
+    })
+    const items = await runFetchItems(
+      { store: fakeStore([savedWithSecret]), execute },
+      { automationId: 'a1', autoTriggerId: 't1' }
+    )
+    // The executor DOES receive the decrypted secret (it makes the request)...
+    expect(seen?.headers[0].value).toBe('Bearer header-leak-secret')
+    expect(seen?.query[0].value).toBe('query-leak-secret')
+    // ...but the items handed back to the renderer must carry ONLY response-mapped
+    // fields, never the request headers/query secrets.
+    const serialized = JSON.stringify(items)
+    expect(serialized).not.toContain('header-leak-secret')
+    expect(serialized).not.toContain('query-leak-secret')
+    for (const item of items) {
+      expect(Object.keys(item).sort()).toEqual(['key', 'label', 'subtitle', 'vars'])
+    }
+  })
+
   it('throws on a non-2xx response', async () => {
     const execute = vi.fn(
       async (): Promise<HttpEndpointResponse> => ({ status: 503, durationMs: 1, body: 'down' })
@@ -454,5 +494,34 @@ describe('automations IPC secret masking', () => {
       ]
     }) as Automation
     expect(returned.autoTriggers![0].http!.request.headers[0].value).toBe(HTTP_SECRET_MASK)
+  })
+})
+
+// --- secret-leak guard: every carrier is masked on the way to the renderer ---
+
+describe('maskAutoTriggers secret-leak guard (all three carriers)', () => {
+  it('masks header AND query AND body secrets so none of the three leak', () => {
+    const sealed: AutoTrigger[] = [
+      httpTrigger({
+        request: {
+          method: 'POST',
+          url: 'https://api.test/items',
+          headers: [{ key: 'Authorization', value: 'header-leak-secret', secret: true }],
+          query: [{ key: 'token', value: 'query-leak-secret', secret: true }],
+          body: 'body-leak-secret',
+          bodySecret: true
+        }
+      })
+    ]
+    const masked = maskAutoTriggers(sealed)!
+    const req = masked[0].http!.request
+    expect(req.headers[0].value).toBe(HTTP_SECRET_MASK)
+    expect(req.query[0].value).toBe(HTTP_SECRET_MASK)
+    expect(req.body).toBe(HTTP_SECRET_MASK)
+    // No carrier's plaintext survives serialization to the renderer.
+    const serialized = JSON.stringify(masked)
+    expect(serialized).not.toContain('header-leak-secret')
+    expect(serialized).not.toContain('query-leak-secret')
+    expect(serialized).not.toContain('body-leak-secret')
   })
 })
