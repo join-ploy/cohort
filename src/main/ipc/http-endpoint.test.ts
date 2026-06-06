@@ -104,7 +104,7 @@ describe('resolveDraftRequest', () => {
     expect(resolved.headers[1].value).toBe('keep')
   })
 
-  it('encrypts a freshly typed secret (not the mask)', () => {
+  it('passes a freshly typed secret (not the mask) through unchanged', () => {
     const draft: HttpRequestConfig = {
       method: 'GET',
       url: 'https://api.test/items',
@@ -112,8 +112,8 @@ describe('resolveDraftRequest', () => {
       query: []
     }
     const resolved = resolveDraftRequest(fakeStore([]), draft)
-    // Why: no saved trigger + non-mask value → the draft value passes through
-    // (identity encrypt/decrypt under disabled safeStorage).
+    // Why: a non-mask value is freshly typed plaintext — it must pass through
+    // untouched (never run through decryptSecret).
     expect(resolved.headers[0].value).toBe('Bearer typed')
   })
 })
@@ -177,6 +177,42 @@ describe('runTest', () => {
       }
     )
     expect(seen?.headers[0].value).toBe('CIPHER')
+  })
+
+  it('resolves a same-named masked header and query positionally (no cross-match)', async () => {
+    const saved = automation({
+      autoTriggers: [
+        httpTrigger({
+          request: {
+            method: 'GET',
+            url: 'https://api.test/items',
+            headers: [{ key: 'token', value: 'HCIPHER', secret: true }],
+            query: [{ key: 'token', value: 'QCIPHER', secret: true }]
+          }
+        })
+      ]
+    })
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body: [] }
+    })
+    await runTest(
+      { store: fakeStore([saved]), execute },
+      {
+        request: {
+          method: 'GET',
+          url: 'https://api.test/items',
+          headers: [{ key: 'token', value: HTTP_SECRET_MASK, secret: true }],
+          query: [{ key: 'token', value: HTTP_SECRET_MASK, secret: true }]
+        },
+        automationId: 'a1',
+        autoTriggerId: 't1'
+      }
+    )
+    // Old key-based resolution cross-matched query→header ciphertext; positional keeps them distinct.
+    expect(seen?.headers[0].value).toBe('HCIPHER')
+    expect(seen?.query[0].value).toBe('QCIPHER')
   })
 })
 

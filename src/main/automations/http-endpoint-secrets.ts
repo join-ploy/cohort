@@ -38,6 +38,37 @@ export function maskHttpKeyValues(values: HttpKeyValue[]): HttpKeyValue[] {
   return values.map((kv) => (kv.secret ? { ...kv, value: HTTP_SECRET_MASK } : kv))
 }
 
+// Resolve a draft Test/fetch request's secrets to PLAINTEXT: a masked (unchanged)
+// secret reuses the saved ciphertext POSITIONALLY (mirroring sealHttpKeyValues) and
+// is decrypted; a freshly-typed secret is already plaintext and passes through.
+export function resolveDraftRequestSecrets(
+  request: HttpRequestConfig,
+  saved?: HttpRequestConfig
+): HttpRequestConfig {
+  const resolveKv = (incoming: HttpKeyValue[], savedArr?: HttpKeyValue[]): HttpKeyValue[] =>
+    incoming.map((kv, i) => {
+      if (!kv.secret) {
+        return kv
+      }
+      // Why: a non-mask value is freshly typed plaintext — never run it through decrypt.
+      if (kv.value !== HTTP_SECRET_MASK) {
+        return kv
+      }
+      const prior = savedArr?.[i]
+      return { ...kv, value: prior?.secret ? decryptSecret(prior.value) : '' }
+    })
+  let body = request.body
+  if (request.bodySecret && body === HTTP_SECRET_MASK) {
+    body = saved?.bodySecret && saved.body ? decryptSecret(saved.body) : ''
+  }
+  return {
+    ...request,
+    headers: resolveKv(request.headers, saved?.headers),
+    query: resolveKv(request.query, saved?.query),
+    body
+  }
+}
+
 // In-main, just before a request: turn ciphertext back into plaintext.
 export function decryptHttpRequest(request: HttpRequestConfig): HttpRequestConfig {
   return {

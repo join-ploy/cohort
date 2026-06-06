@@ -8,13 +8,15 @@ import {
   sealHttpKeyValues,
   maskHttpKeyValues,
   decryptHttpRequest,
+  resolveDraftRequestSecrets,
   sealAutoTriggers,
   maskAutoTriggers
 } from './http-endpoint-secrets'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
-  type HttpEndpointConfig
+  type HttpEndpointConfig,
+  type HttpRequestConfig
 } from '../../shared/automations-types'
 
 const secret = (value: string) => ({ key: 'Authorization', value, secret: true as const })
@@ -82,6 +84,73 @@ describe('decryptHttpRequest', () => {
     })
     expect(req.query[0].value).toBe('QCIPHER') // identity decryption in test
     expect(req.body).toBe('BCIPHER')
+  })
+})
+
+describe('resolveDraftRequestSecrets', () => {
+  const req = (over: Partial<HttpRequestConfig> = {}): HttpRequestConfig => ({
+    method: 'GET',
+    url: 'https://x',
+    headers: [],
+    query: [],
+    ...over
+  })
+
+  it('resolves a masked secret header to the saved decrypted value positionally', () => {
+    const saved = req({ headers: [{ key: 'Authorization', value: 'CIPHER', secret: true }] })
+    const draft = req({
+      headers: [{ key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    const out = resolveDraftRequestSecrets(draft, saved)
+    expect(out.headers[0].value).toBe('CIPHER') // identity decrypt of the reused ciphertext
+  })
+
+  it('resolves a same-named secret header AND query to their OWN saved value', () => {
+    const saved = req({
+      headers: [{ key: 'token', value: 'HCIPHER', secret: true }],
+      query: [{ key: 'token', value: 'QCIPHER', secret: true }]
+    })
+    const draft = req({
+      headers: [{ key: 'token', value: HTTP_SECRET_MASK, secret: true }],
+      query: [{ key: 'token', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    const out = resolveDraftRequestSecrets(draft, saved)
+    expect(out.headers[0].value).toBe('HCIPHER')
+    expect(out.query[0].value).toBe('QCIPHER')
+  })
+
+  it('resolves duplicate masked secret keys positionally ([A,B], not [A,A])', () => {
+    const dup = (value: string) => ({ key: 'p', value, secret: true as const })
+    const saved = req({ headers: [dup('A'), dup('B')] })
+    const draft = req({ headers: [dup(HTTP_SECRET_MASK), dup(HTTP_SECRET_MASK)] })
+    const out = resolveDraftRequestSecrets(draft, saved)
+    expect(out.headers.map((h) => h.value)).toEqual(['A', 'B'])
+  })
+
+  it('passes a freshly typed (non-mask) secret through unchanged', () => {
+    const draft = req({ headers: [{ key: 'Authorization', value: 'Bearer typed', secret: true }] })
+    const out = resolveDraftRequestSecrets(draft, undefined)
+    expect(out.headers[0].value).toBe('Bearer typed')
+  })
+
+  it('clears a masked secret with no saved counterpart at its index', () => {
+    const draft = req({
+      headers: [{ key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    const out = resolveDraftRequestSecrets(draft, undefined)
+    expect(out.headers[0].value).toBe('')
+  })
+
+  it('resolves a masked secret body to the saved body; passes a non-mask body through', () => {
+    const saved = req({ body: 'BCIPHER', bodySecret: true })
+    const masked = resolveDraftRequestSecrets(
+      req({ body: HTTP_SECRET_MASK, bodySecret: true }),
+      saved
+    )
+    expect(masked.body).toBe('BCIPHER') // identity decrypt of the saved body
+
+    const typed = resolveDraftRequestSecrets(req({ body: '{"new":1}', bodySecret: true }), saved)
+    expect(typed.body).toBe('{"new":1}')
   })
 })
 

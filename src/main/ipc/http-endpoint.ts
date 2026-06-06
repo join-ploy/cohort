@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
-import { decryptHttpRequest } from '../automations/http-endpoint-secrets'
+import {
+  decryptHttpRequest,
+  resolveDraftRequestSecrets
+} from '../automations/http-endpoint-secrets'
 import {
   executeHttpEndpointRequest,
   type HttpEndpointResponse
@@ -11,12 +14,7 @@ import {
   buildDedupKey,
   getByPath
 } from '../../shared/http-endpoint-mapping'
-import {
-  HTTP_SECRET_MASK,
-  type HttpEndpointItem,
-  type HttpKeyValue,
-  type HttpRequestConfig
-} from '../../shared/automations-types'
+import { type HttpEndpointItem, type HttpRequestConfig } from '../../shared/automations-types'
 
 export type HttpEndpointIpcDeps = {
   store: Store
@@ -24,35 +22,22 @@ export type HttpEndpointIpcDeps = {
   execute?: (request: HttpRequestConfig) => Promise<HttpEndpointResponse>
 }
 
-// Resolve mask sentinels in a draft request against the saved trigger's stored
-// ciphertext, then decrypt for execution. Lets the Test button fire with secrets
-// the renderer never sees.
+// Resolve mask sentinels in a draft request to plaintext against the saved
+// trigger's stored secrets (positionally), letting the Test button fire with
+// secrets the renderer never sees.
 export function resolveDraftRequest(
   store: Store,
   request: HttpRequestConfig,
   automationId?: string,
   autoTriggerId?: string
 ): HttpRequestConfig {
-  const saved = automationId
+  const savedRequest = automationId
     ? store
         .listAutomations()
         .find((a) => a.id === automationId)
         ?.autoTriggers?.find((t) => t.id === autoTriggerId)?.http?.request
     : undefined
-  const merge = (kv: HttpKeyValue): HttpKeyValue => {
-    if (kv.secret && kv.value === HTTP_SECRET_MASK) {
-      const prior = saved?.headers
-        .concat(saved?.query ?? [])
-        .find((s) => s.key === kv.key && s.secret)
-      return { ...kv, value: prior?.value ?? '' }
-    }
-    return kv
-  }
-  return decryptHttpRequest({
-    ...request,
-    headers: request.headers.map(merge),
-    query: request.query.map(merge)
-  })
+  return resolveDraftRequestSecrets(request, savedRequest)
 }
 
 export async function runTest(
