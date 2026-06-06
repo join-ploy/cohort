@@ -57,9 +57,53 @@ describe('sealHttpKeyValues', () => {
   })
 })
 
+describe('sealHttpKeyValues — stable id correlation (FIX I1)', () => {
+  it('keeps a masked secret matched by id when a non-secret row above it is deleted', () => {
+    const existing = [
+      { id: 'a', key: 'X', value: 'plain' },
+      { id: 'b', key: 'Auth', value: 'CIPHER', secret: true as const }
+    ]
+    // Renderer deleted row 'a'; the masked secret 'b' is now at index 0.
+    const incoming = [{ id: 'b', key: 'Auth', value: HTTP_SECRET_MASK, secret: true as const }]
+    const [out] = sealHttpKeyValues(incoming, existing)
+    expect(out.value).toBe('CIPHER') // matched by id 'b', not positional index 0
+  })
+
+  it('does not swap ciphertext when two id-bearing secrets are reordered', () => {
+    const existing = [
+      { id: 'a', key: 'A', value: 'CIPHER_A', secret: true as const },
+      { id: 'b', key: 'B', value: 'CIPHER_B', secret: true as const }
+    ]
+    const incoming = [
+      { id: 'b', key: 'B', value: HTTP_SECRET_MASK, secret: true as const },
+      { id: 'a', key: 'A', value: HTTP_SECRET_MASK, secret: true as const }
+    ]
+    const out = sealHttpKeyValues(incoming, existing)
+    expect(out.map((kv) => kv.value)).toEqual(['CIPHER_B', 'CIPHER_A'])
+  })
+
+  it('warns and clears a masked secret whose id has no prior match (genuine loss)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const existing = [{ id: 'a', key: 'A', value: 'CIPHER', secret: true as const }]
+    const [out] = sealHttpKeyValues(
+      [{ id: 'missing', key: 'A', value: HTTP_SECRET_MASK, secret: true as const }],
+      existing
+    )
+    expect(out.value).toBe('') // does NOT fall through to positional index 0
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+
 describe('maskHttpKeyValues', () => {
   it('replaces secret values with the mask', () => {
     expect(maskHttpKeyValues([secret('CIPHER')])[0].value).toBe(HTTP_SECRET_MASK)
+  })
+
+  it('preserves the row id so it round-trips back through the renderer', () => {
+    const out = maskHttpKeyValues([{ id: 'a', key: 'Auth', value: 'CIPHER', secret: true }])
+    expect(out[0].id).toBe('a')
+    expect(out[0].value).toBe(HTTP_SECRET_MASK)
   })
 })
 
@@ -151,6 +195,37 @@ describe('resolveDraftRequestSecrets', () => {
 
     const typed = resolveDraftRequestSecrets(req({ body: '{"new":1}', bodySecret: true }), saved)
     expect(typed.body).toBe('{"new":1}')
+  })
+
+  it('resolves a masked secret by id after a non-secret row above it was deleted', () => {
+    const saved = req({
+      headers: [
+        { id: 'a', key: 'X', value: 'plain' },
+        { id: 'b', key: 'Auth', value: 'CIPHER', secret: true }
+      ]
+    })
+    const draft = req({
+      headers: [{ id: 'b', key: 'Auth', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    const out = resolveDraftRequestSecrets(draft, saved)
+    expect(out.headers[0].value).toBe('CIPHER') // identity decrypt of the id-matched ciphertext
+  })
+
+  it('does not swap when two id-bearing secrets are reordered', () => {
+    const saved = req({
+      headers: [
+        { id: 'a', key: 'A', value: 'CIPHER_A', secret: true },
+        { id: 'b', key: 'B', value: 'CIPHER_B', secret: true }
+      ]
+    })
+    const draft = req({
+      headers: [
+        { id: 'b', key: 'B', value: HTTP_SECRET_MASK, secret: true },
+        { id: 'a', key: 'A', value: HTTP_SECRET_MASK, secret: true }
+      ]
+    })
+    const out = resolveDraftRequestSecrets(draft, saved)
+    expect(out.headers.map((h) => h.value)).toEqual(['CIPHER_B', 'CIPHER_A'])
   })
 })
 

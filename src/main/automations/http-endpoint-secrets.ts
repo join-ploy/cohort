@@ -19,10 +19,12 @@ export function sealHttpKeyValues(
     if (kv.value !== HTTP_SECRET_MASK) {
       return { ...kv, value: encryptSecret(kv.value) }
     }
-    // Why: the editor edits these arrays in place, so position — not key — is the
-    // stable correlator across a load→edit→save round-trip. Key-matching mis-pairs
-    // legal duplicate keys and wipes a secret whose key was renamed.
-    const prior = existing[i]
+    // Why: correlate a masked (unchanged) secret to its prior by stable id first so
+    // deleting/reordering other rows can't shift it onto the wrong key. Fall back to
+    // positional only for legacy id-less rows — still preserving the rename and
+    // duplicate-key wins of index matching. An id with no id-matched prior secret is
+    // a genuinely missing prior, so it warns and clears below.
+    const prior = kv.id ? existing.find((e) => e.id === kv.id && e.secret) : existing[i]
     if (prior?.secret) {
       return { ...kv, value: prior.value }
     }
@@ -54,7 +56,10 @@ export function resolveDraftRequestSecrets(
       if (kv.value !== HTTP_SECRET_MASK) {
         return kv
       }
-      const prior = savedArr?.[i]
+      // Why: id-first correlation mirrors sealHttpKeyValues so a deleted/reordered
+      // row can't resolve a masked secret against the wrong saved ciphertext;
+      // positional fallback only for legacy id-less rows.
+      const prior = kv.id ? savedArr?.find((e) => e.id === kv.id && e.secret) : savedArr?.[i]
       return { ...kv, value: prior?.secret ? decryptSecret(prior.value) : '' }
     })
   let body = request.body

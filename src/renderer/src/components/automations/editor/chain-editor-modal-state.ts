@@ -106,7 +106,8 @@ export function buildTriggerSchema(
   }
   // The http-endpoint source has no static overlay — its variables come from the
   // saved Test mapping, so build a flat `trigger.http.*` schema from enabled fields.
-  const httpTrigger = autoTriggers.find((t) => t.source === 'http-endpoint' && t.http)
+  // Only an enabled trigger contributes its overlay, mirroring the github-pr guard.
+  const httpTrigger = autoTriggers.find((t) => t.enabled && t.source === 'http-endpoint' && t.http)
   if (httpTrigger?.http) {
     const httpSchema: OutputSchema = {}
     for (const f of httpTrigger.http.fields) {

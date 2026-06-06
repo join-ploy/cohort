@@ -79,11 +79,26 @@ describe('request reducers', () => {
     expect(t.http?.request.method).toBe('GET') // original untouched
   })
 
-  it('addHeader appends a blank row without mutating the original', () => {
+  it('addHeader appends a blank row with a stable id, without mutating the original', () => {
     const t = httpTrigger({ request: req({ headers: [] }) })
     const next = addHeader(t)
-    expect(next.http?.request.headers).toEqual([{ key: '', value: '' }])
+    const headers = next.http?.request.headers ?? []
+    expect(headers).toHaveLength(1)
+    expect(headers[0].key).toBe('')
+    expect(headers[0].value).toBe('')
+    // Why: the id correlates secret mask-reuse across delete/reorder (FIX I1).
+    expect(typeof headers[0].id).toBe('string')
     expect(t.http?.request.headers).toEqual([])
+  })
+
+  it('preserves the row id across updateHeader and toggleHeaderSecret', () => {
+    const t = addHeader(httpTrigger({ request: req({ headers: [] }) }))
+    const id = t.http?.request.headers[0].id
+    expect(typeof id).toBe('string')
+    const updated = updateHeader(t, 0, { key: 'Authorization', value: 'x' })
+    expect(updated.http?.request.headers[0].id).toBe(id)
+    const secreted = toggleHeaderSecret(updated, 0)
+    expect(secreted.http?.request.headers[0].id).toBe(id)
   })
 
   it('updateHeader patches a single row by index', () => {
@@ -157,9 +172,13 @@ describe('request reducers', () => {
   it('query reducers mirror header reducers', () => {
     const t = httpTrigger({ request: req({ query: [] }) })
     const added = addQuery(t)
-    expect(added.http?.request.query).toEqual([{ key: '', value: '' }])
+    const [row] = added.http?.request.query ?? []
+    expect(row.key).toBe('')
+    expect(row.value).toBe('')
+    expect(typeof row.id).toBe('string')
     const patched = updateQuery(added, 0, { key: 'page', value: '1' })
-    expect(patched.http?.request.query[0]).toEqual({ key: 'page', value: '1' })
+    // id is preserved across updateQuery (spread of the existing row).
+    expect(patched.http?.request.query[0]).toMatchObject({ key: 'page', value: '1', id: row.id })
     expect(removeQuery(patched, 0).http?.request.query).toEqual([])
   })
 })

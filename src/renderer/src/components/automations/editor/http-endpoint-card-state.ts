@@ -39,7 +39,8 @@ export function setRequestField(
 export function addHeader(trigger: AutoTrigger): AutoTrigger {
   return withRequest(trigger, (request) => ({
     ...request,
-    headers: [...request.headers, { key: '', value: '' }]
+    // Why: mint a stable id so secret mask-reuse survives later delete/reorder.
+    headers: [...request.headers, { key: '', value: '', id: crypto.randomUUID() }]
   }))
 }
 
@@ -94,7 +95,8 @@ export function toggleBodySecret(trigger: AutoTrigger): AutoTrigger {
 export function addQuery(trigger: AutoTrigger): AutoTrigger {
   return withRequest(trigger, (request) => ({
     ...request,
-    query: [...request.query, { key: '', value: '' }]
+    // Why: mint a stable id so secret mask-reuse survives later delete/reorder.
+    query: [...request.query, { key: '', value: '', id: crypto.randomUUID() }]
   }))
 }
 

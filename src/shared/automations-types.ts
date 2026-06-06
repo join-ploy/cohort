@@ -259,6 +259,11 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 // is ciphertext at rest, the masked sentinel when sent to the renderer, and is
 // only ever decrypted in-main right before a request fires.
 export type HttpKeyValue = {
+  // Why: stable per-row id minted in the editor so secret mask-reuse correlates a
+  // masked value to its prior ciphertext by identity, surviving row delete/reorder
+  // (positional matching would shift the secret onto the wrong key). Optional for
+  // back-compat with legacy id-less rows, which fall back to positional matching.
+  id?: string
   key: string
   value: string
   secret?: boolean

@@ -47,6 +47,7 @@ import { splitWorktreeId } from '../../shared/worktree-id'
 import { hasPromptTargetChangesFromMain } from './prompt-target-main-changes'
 import { inferSidebarPromptAgent } from '../../shared/sidebar-prompt-agent'
 import { getEffectiveHooks } from '../hooks'
+import { maskAutoTriggers } from './http-endpoint-secrets'
 
 // Why: duplicated from renderer's chain-editor-state because that module is
 // renderer-only. Kept inline to avoid a new shared runtime file for a one-liner.
@@ -1159,7 +1160,13 @@ export class AutomationService {
       workspaceId: automation.workspaceId,
       error: null
     })
-    const payload: AutomationDispatchRequest = { automation, run }
+    // Why: every automation crossing to the renderer must be masked — uphold the
+    // invariant structurally even though http triggers don't reach this legacy
+    // dispatch path today.
+    const payload: AutomationDispatchRequest = {
+      automation: { ...automation, autoTriggers: maskAutoTriggers(automation.autoTriggers) },
+      run
+    }
     webContents.send('automations:dispatchRequested', payload)
   }
 }
