@@ -1,6 +1,6 @@
 # Generic HTTP Endpoint Trigger — Design
 
-**Status:** Approved (brainstorming → design); ready for implementation plan.
+**Status:** Implemented.
 **Date:** 2026-06-06
 
 ## Goal
@@ -322,3 +322,26 @@ Per repo norms: `pnpm tc:node` + `pnpm tc:web` and targeted `vitest` on the new 
 6. **Large responses** exhausting memory. Hard response-size cap before parse.
 7. **Dynamic catalog staleness** between Test and live data. The persisted snapshot is the
    contract; drift is surfaced on re-Test, not silently reconciled.
+
+## Deviations from plan
+
+Notable adaptations made during implementation; none change the design's intent.
+
+- **Positional secret resolution.** `resolveDraftRequestSecrets` (and `sealHttpKeyValues`)
+  pair masked secrets to their saved ciphertext by **index**, not by key name. Key-based
+  matching cross-contaminated a same-named header and query param (and broke on renames);
+  positional pairing keeps each carrier's secret distinct and survives key renames.
+- **Per-trigger poll clock wired in `index.ts`.** The engine's `httpLastPoll` /
+  `httpLastPollSet` deps reuse the existing in-memory `autoTriggerWatermarks` map with an
+  `http|<triggerId>` key prefix rather than introducing a separate store.
+- **`AutoTriggerCard` dispatcher split.** The http branch is rendered via an extracted
+  dispatcher component (not an early `return` inside the original card body) to satisfy
+  React's rules-of-hooks (the two source variants call different hooks).
+- **`buildDedupKey` JSON-encodes** the chosen field values (e.g. `[1]`) instead of
+  space-joining them, giving a collision-safe, type-preserving entity id.
+- **ISO-strict date parsing.** `parseDateValue` accepts epoch seconds/ms and
+  `Date.parse`-able strings and fails closed on anything else, so the date gate never
+  silently passes an unparseable value.
+- **Un-secret clears the mask.** Toggling a header/query/body off `secret` while it still
+  shows the mask sentinel clears the value rather than persisting the literal mask as
+  plaintext — guarding against a mask string leaking into a real request.
