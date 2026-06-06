@@ -121,3 +121,54 @@ export function flattenItem(item: unknown): MappedField[] {
   visit(item, '', 0)
   return out
 }
+
+const KEY_SEP = ' '
+
+export function buildDedupKey(item: unknown, dedupeFields: string[]): string {
+  const parts = dedupeFields
+    .map((f) => getByPath(item, f))
+    .filter((v) => v !== undefined && v !== null)
+  if (parts.length === 0) {
+    return `hash:${stableHash(item)}` // Why: keep dedup working even when chosen fields are absent.
+  }
+  return parts.map((v) => String(v)).join(KEY_SEP)
+}
+
+export function mapItemToVariables(item: unknown, fields: MappedField[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of fields) {
+    if (f.enabled) {
+      out[f.variableName] = getByPath(item, f.path)
+    }
+  }
+  return out
+}
+
+// Returns true if the item passes the gate (fail-closed on missing/unparseable
+// when a field is configured; no gate when dateGateField is null).
+export function evaluateDateGate(
+  item: unknown,
+  dateGateField: string | null,
+  enabledAt: number
+): boolean {
+  if (dateGateField === null) {
+    return true
+  }
+  const parsed = parseDateValue(getByPath(item, dateGateField))
+  if (parsed === null) {
+    return false
+  }
+  return parsed > enabledAt
+}
+
+// Small deterministic string hash (FNV-1a) — order-independent JSON is not
+// required because object key order is stable for a given producer.
+function stableHash(value: unknown): string {
+  const json = JSON.stringify(value) ?? ''
+  let h = 0x811c9dc5
+  for (let i = 0; i < json.length; i++) {
+    h ^= json.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}

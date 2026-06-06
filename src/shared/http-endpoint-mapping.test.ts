@@ -6,7 +6,10 @@ import {
   parseDateValue,
   inferFieldType,
   flattenItem,
-  defaultVariableName
+  defaultVariableName,
+  buildDedupKey,
+  mapItemToVariables,
+  evaluateDateGate
 } from './http-endpoint-mapping'
 
 describe('detectArrayPaths', () => {
@@ -82,5 +85,44 @@ describe('flattenItem', () => {
 describe('defaultVariableName', () => {
   it('sanitizes dots and brackets to underscores', () => {
     expect(defaultVariableName('labels[0].name')).toBe('labels_0_name')
+  })
+})
+
+describe('buildDedupKey', () => {
+  it('joins the chosen field values', () => {
+    expect(buildDedupKey({ id: 7, k: 'a' }, ['id', 'k'])).toBe('7 a')
+  })
+  it('falls back to a stable hash of the whole item when no fields resolve', () => {
+    const a = buildDedupKey({ x: 1 }, [])
+    const b = buildDedupKey({ x: 1 }, [])
+    expect(a).toBe(b)
+    expect(a).not.toBe(buildDedupKey({ x: 2 }, []))
+  })
+})
+
+describe('mapItemToVariables', () => {
+  it('emits only enabled fields keyed by variableName', () => {
+    const fields = [
+      { path: 'id', variableName: 'id', enabled: true, type: 'number' as const, sampleValue: 1 },
+      { path: 'x', variableName: 'x', enabled: false, type: 'string' as const, sampleValue: '' }
+    ]
+    expect(mapItemToVariables({ id: 9, x: 'no' }, fields)).toEqual({ id: 9 })
+  })
+})
+
+describe('evaluateDateGate', () => {
+  const enabledAt = Date.parse('2026-06-01T00:00:00Z')
+  it('passes when the gate field is later than enabledAt', () => {
+    expect(evaluateDateGate({ at: '2026-06-02T00:00:00Z' }, 'at', enabledAt)).toBe(true)
+  })
+  it('fails closed when later-or-equal is not met', () => {
+    expect(evaluateDateGate({ at: '2026-05-30T00:00:00Z' }, 'at', enabledAt)).toBe(false)
+  })
+  it('fails closed when the field is missing/unparseable', () => {
+    expect(evaluateDateGate({}, 'at', enabledAt)).toBe(false)
+    expect(evaluateDateGate({ at: 'nope' }, 'at', enabledAt)).toBe(false)
+  })
+  it('passes everything when no gate field is configured', () => {
+    expect(evaluateDateGate({}, null, enabledAt)).toBe(true)
   })
 })
