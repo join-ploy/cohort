@@ -58,8 +58,11 @@ async function* pollHttpEndpoint(
       continue
     }
     const vars = mapItemToVariables(item, cfg.fields)
-    // Why: getByPath (not flat access) so dotted date-gate paths resolve.
-    const gateMs = cfg.dateGateField ? parseDateValue(getByPath(item, cfg.dateGateField)) : null
+    // Why: getByPath (not flat access) so dotted date-gate paths resolve. Use the
+    // same `=== null` "no gate" contract as evaluateDateGate so the filter and the
+    // updatedAt stamp can't disagree on an empty-string gate field.
+    const gateMs =
+      cfg.dateGateField !== null ? parseDateValue(getByPath(item, cfg.dateGateField)) : null
     yield {
       entityId: buildDedupKey(item, cfg.dedupeFields),
       // Why: provenance only — the engine re-checks updatedAt >= since, and a

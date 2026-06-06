@@ -89,6 +89,30 @@ describe('http-endpoint source', () => {
     expect(events).toHaveLength(2)
   })
 
+  it('does not let gated-out items consume the cap', async () => {
+    // Interleave gated-out items; the cap must bound EMITTED events, so the two
+    // yielded must be the non-gated ones (id 1, 3), not the first two scanned.
+    const data = [
+      { id: 0, updated: '2026-05-01T00:00:00Z' }, // gated out
+      { id: 1, updated: '2026-06-05T00:00:00Z' },
+      { id: 2, updated: '2026-05-02T00:00:00Z' }, // gated out
+      { id: 3, updated: '2026-06-05T00:00:00Z' },
+      { id: 4, updated: '2026-06-05T00:00:00Z' }
+    ]
+    const source = makeHttpEndpointSource({
+      execute: async () => ({ status: 200, durationMs: 1, body: { data } }),
+      now: () => Date.parse('2026-06-06T00:00:00Z')
+    })
+    const events = await collect(
+      source.poll({
+        since: Date.parse('2026-06-01T00:00:00Z'),
+        hostId: 'local',
+        http: cfg({ maxItemsPerPoll: 2 })
+      })
+    )
+    expect(events.map((e) => e.entityId)).toEqual(['[1]', '[3]'])
+  })
+
   it('throws on non-2xx so the engine logs + skips dispatch', async () => {
     const source = makeHttpEndpointSource({
       execute: async () => ({ status: 503, durationMs: 1, body: 'down' }),
