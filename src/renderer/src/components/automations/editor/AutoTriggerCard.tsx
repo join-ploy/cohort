@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { GitPullRequest, History, Plus, Trash2, Zap } from 'lucide-react'
+import { GitPullRequest, Globe, History, Plus, Trash2, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type {
@@ -48,7 +48,8 @@ const SOURCE_META: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   'linear-issue': { label: 'Linear issue', icon: Zap },
-  'github-pr': { label: 'GitHub PR', icon: GitPullRequest }
+  'github-pr': { label: 'GitHub PR', icon: GitPullRequest },
+  'http-endpoint': { label: 'HTTP endpoint', icon: Globe }
 }
 
 // Pure helpers — exported so they can be unit-tested without rendering. The
