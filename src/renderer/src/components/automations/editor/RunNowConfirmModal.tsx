@@ -4,6 +4,7 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
+  HttpEndpointItem,
   LinearIssuePayload,
   RunNowPayload
 } from '../../../../../shared/automations-types'
@@ -37,7 +38,7 @@ export function RunNowConfirmModal(props: RunNowConfirmModalProps): React.JSX.El
 function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Element {
   const [pickedLinear, setPickedLinear] = useState<LinearIssuePayload | null>(null)
   const [pickedProjectId, setPickedProjectId] = useState<string | null>(null)
-  const [pickedHttp, setPickedHttp] = useState<Record<string, unknown> | null>(null)
+  const [pickedHttp, setPickedHttp] = useState<HttpEndpointItem | null>(null)
   const [running, setRunning] = useState(false)
   const repos = useAppStore((s) => s.repos as Repo[])
 
@@ -73,7 +74,7 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
         payload.projectId = pickedProjectId
       }
       if (pickedHttp) {
-        payload.http = pickedHttp
+        payload.http = pickedHttp.vars
       }
       await props.onRun(payload)
       props.onClose()
@@ -150,7 +151,12 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
               <h3 className="text-xs font-medium text-foreground">Endpoint item</h3>
               {pickedHttp ? (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-input bg-muted/30 px-2 py-1.5 text-xs">
-                  <span className="truncate text-foreground">Item selected</span>
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate font-medium text-foreground">{pickedHttp.label}</span>
+                    {pickedHttp.subtitle ? (
+                      <span className="truncate text-muted-foreground">{pickedHttp.subtitle}</span>
+                    ) : null}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setPickedHttp(null)}

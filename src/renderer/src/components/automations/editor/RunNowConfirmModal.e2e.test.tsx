@@ -206,4 +206,57 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
     expect(onRun.mock.calls[0][0]).toMatchObject({ http: { id: 1, title: 'Item one' } })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
+
+  it('names the picked item in the chosen-state row', async () => {
+    ;(globalThis.window as unknown as { api: unknown }).api = {
+      httpEndpoint: {
+        fetchItems: vi
+          .fn()
+          .mockResolvedValue([
+            { key: 'k1', label: 'Item one', subtitle: 'subtitle one', vars: { id: 1 } }
+          ])
+      }
+    }
+    const httpAutomation: Automation = {
+      ...makeAutomation(),
+      trigger: { kind: 'manual' },
+      autoTriggers: [
+        {
+          id: 'http-1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          rules: [],
+          manualEnabled: true,
+          http: {
+            request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+            itemsPath: null,
+            fields: [],
+            dedupeFields: [],
+            dateGateField: null
+          }
+        }
+      ]
+    }
+    const { RunNowConfirmModal } = await import('./RunNowConfirmModal')
+    render(
+      <RunNowConfirmModal
+        open={true}
+        automation={httpAutomation}
+        onClose={() => {}}
+        onRun={async () => {}}
+      />
+    )
+
+    const row = (await screen.findByText('Item one')).closest('[data-http-item-key]')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!)
+
+    // The picker is replaced by a chosen-state row naming the item (label +
+    // subtitle) plus a Change control — not the generic "Item selected".
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy())
+    expect(screen.getByText('Item one')).toBeTruthy()
+    expect(screen.getByText('subtitle one')).toBeTruthy()
+    expect(screen.queryByText('Item selected')).toBeNull()
+  })
 })

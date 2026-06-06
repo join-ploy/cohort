@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { Globe, LoaderCircle, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -9,7 +10,7 @@ import type { HttpEndpointItem } from '../../../../../shared/automations-types'
 export type HttpEndpointItemPickerProps = {
   automationId: string
   autoTriggerId: string
-  onSelect: (vars: Record<string, unknown>) => void
+  onSelect: (item: HttpEndpointItem) => void
   className?: string
 }
 
@@ -28,6 +29,9 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [commandValue, setCommandValue] = useState('')
+  // Why: bumping this counter re-runs the fetch effect, letting the error branch
+  // offer a Retry without remounting the picker (failed fetch is recoverable).
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let stale = false
@@ -53,7 +57,7 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
     return () => {
       stale = true
     }
-  }, [automationId, autoTriggerId])
+  }, [automationId, autoTriggerId, reloadKey])
 
   // Why: the full list is already in memory after the fetch, so a typed query
   // filters client-side — no per-keystroke round-trip to the endpoint.
@@ -82,7 +86,7 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
   const ActiveIcon = loading ? LoaderCircle : Search
 
   const handleSelect = (item: HttpEndpointItem): void => {
-    props.onSelect(item.vars)
+    props.onSelect(item)
   }
 
   return (
@@ -131,8 +135,16 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
               ))}
             </div>
           ) : error !== null ? (
-            <div className="px-3 py-6 text-center text-xs text-destructive">
-              Failed to load items: {error}
+            <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-xs text-destructive">
+              <span>Failed to load items: {error}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setReloadKey((k) => k + 1)}
+              >
+                Retry
+              </Button>
             </div>
           ) : results.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-muted-foreground">

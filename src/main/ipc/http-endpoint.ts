@@ -77,7 +77,10 @@ export async function runFetchItems(
   return items.map((item, i) => {
     const vars = mapItemToVariables(item, cfg.fields)
     return {
-      key: cfg.dedupeFields.length ? buildDedupKey(item, cfg.dedupeFields) : String(i),
+      // Why: append the index so the picker key is unique even when two items
+      // share dedupe-field values — this is a list/selection id, not the poll
+      // dedup key, so collisions here would dupe React keys and mis-target Enter.
+      key: `${cfg.dedupeFields.length ? buildDedupKey(item, cfg.dedupeFields) : 'item'}#${i}`,
       label: String(cfg.labelField ? (getByPath(item, cfg.labelField) ?? '') : `Item ${i + 1}`),
       subtitle: String(cfg.subtitleField ? (getByPath(item, cfg.subtitleField) ?? '') : ''),
       vars

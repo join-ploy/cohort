@@ -243,13 +243,15 @@ describe('runFetchItems', () => {
     )
     expect(items).toEqual([
       {
-        key: JSON.stringify([7]),
+        // Why: dedup key plus the item index keeps picker keys unique even on
+        // dedupe-field collisions (it's a list id, not the poll dedup key).
+        key: `${JSON.stringify([7])}#0`,
         label: 'First',
         subtitle: 'Ada',
         vars: { id: 7, title: 'First' }
       },
       {
-        key: JSON.stringify([9]),
+        key: `${JSON.stringify([9])}#1`,
         label: 'Second',
         subtitle: 'Bob',
         vars: { id: 9, title: 'Second' }
@@ -271,9 +273,30 @@ describe('runFetchItems', () => {
       { store: fakeStore([noMeta]), execute },
       { automationId: 'a1', autoTriggerId: 't1' }
     )
-    expect(items[0].key).toBe('0')
+    expect(items[0].key).toBe('item#0')
     expect(items[0].label).toBe('Item 1')
     expect(items[0].subtitle).toBe('')
+  })
+
+  it('keeps keys unique when two items share dedupe-field values', async () => {
+    const body = {
+      data: [
+        { id: 7, title: 'First', author: 'Ada' },
+        { id: 7, title: 'Dup', author: 'Bob' }
+      ]
+    }
+    const execute = vi.fn(
+      async (): Promise<HttpEndpointResponse> => ({ status: 200, durationMs: 1, body })
+    )
+    const items = await runFetchItems(
+      { store: fakeStore([saved]), execute },
+      { automationId: 'a1', autoTriggerId: 't1' }
+    )
+    expect(items[0].key).not.toBe(items[1].key)
+    expect(items.map((i) => i.key)).toEqual([
+      `${JSON.stringify([7])}#0`,
+      `${JSON.stringify([7])}#1`
+    ])
   })
 
   it('throws on a non-2xx response', async () => {

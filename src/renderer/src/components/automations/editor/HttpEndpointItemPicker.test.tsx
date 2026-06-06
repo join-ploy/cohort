@@ -50,14 +50,14 @@ describe('HttpEndpointItemPicker', () => {
     expect(screen.getByText('subtitle two')).toBeTruthy()
   })
 
-  it('calls onSelect with the picked item vars', async () => {
+  it('calls onSelect with the whole picked item', async () => {
     stubFetchItems(async () => [itemA, itemB])
     const onSelect = vi.fn()
     render(<HttpEndpointItemPicker automationId="auto-1" autoTriggerId="t1" onSelect={onSelect} />)
     const row = (await screen.findByText('Second item')).closest('[data-http-item-key]')
     expect(row).not.toBeNull()
     fireEvent.click(row!)
-    expect(onSelect).toHaveBeenCalledWith({ id: 2, title: 'Second item' })
+    expect(onSelect).toHaveBeenCalledWith(itemB)
   })
 
   it('shows a loading state before the fetch resolves', async () => {
@@ -92,5 +92,24 @@ describe('HttpEndpointItemPicker', () => {
     })
     render(<HttpEndpointItemPicker automationId="a" autoTriggerId="t" onSelect={() => {}} />)
     expect(await screen.findByText(/Failed to load/i)).toBeTruthy()
+  })
+
+  it('recovers via the Retry button after a failed fetch', async () => {
+    let calls = 0
+    const fetchItems = stubFetchItems(async () => {
+      calls += 1
+      if (calls === 1) {
+        throw new Error('boom')
+      }
+      return [itemA, itemB]
+    })
+    render(<HttpEndpointItemPicker automationId="a" autoTriggerId="t" onSelect={() => {}} />)
+    // First fetch rejects → error branch with a Retry control.
+    expect(await screen.findByText(/Failed to load/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    // Retry bumps the reload key, re-runs the fetch, and the items render.
+    expect(await screen.findByText('First item')).toBeTruthy()
+    expect(screen.getByText('Second item')).toBeTruthy()
+    expect(fetchItems).toHaveBeenCalledTimes(2)
   })
 })
