@@ -218,6 +218,30 @@ describe('HttpEndpointTriggerCard interactions', () => {
     expect(select.textContent).toContain('data')
   })
 
+  it('clears a prior success badge when a later Test rejects', async () => {
+    const testMock = window.api.httpEndpoint.test as ReturnType<typeof vi.fn>
+    render(
+      <HttpEndpointTriggerCard
+        trigger={mkTrigger()}
+        onChange={() => {}}
+        onRemove={() => {}}
+        automationId=""
+        projects={projects}
+      />
+    )
+    const testButton = screen.getByRole('button', { name: 'Test' })
+
+    // First Test resolves → success badge appears.
+    fireEvent.click(testButton)
+    expect(await screen.findByText(/200/)).toBeTruthy()
+
+    // Next Test rejects → the error shows and the stale "200" badge is gone.
+    testMock.mockRejectedValueOnce(new Error('boom'))
+    fireEvent.click(testButton)
+    expect(await screen.findByText('boom')).toBeTruthy()
+    expect(screen.queryByText(/200/)).toBeNull()
+  })
+
   it('calls onChange via applyTestMapping when an items path is chosen', () => {
     const onChange = vi.fn()
     render(

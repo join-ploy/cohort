@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import type {
-  AutoTrigger,
-  HttpEndpointConfig,
-  HttpRequestConfig,
-  MappedField
+import {
+  HTTP_SECRET_MASK,
+  type AutoTrigger,
+  type HttpEndpointConfig,
+  type HttpRequestConfig,
+  type MappedField
 } from '../../../../../shared/automations-types'
 import {
   addHeader,
@@ -21,6 +22,7 @@ import {
   setPollingEnabled,
   setRequestField,
   setSubtitleField,
+  toggleBodySecret,
   toggleFieldEnabled,
   toggleHeaderSecret,
   updateHeader,
@@ -115,6 +117,41 @@ describe('request reducers', () => {
     const on = toggleHeaderSecret(t, 0)
     expect(on.http?.request.headers[0].secret).toBe(true)
     expect(toggleHeaderSecret(on, 0).http?.request.headers[0].secret).toBe(false)
+  })
+
+  it('toggleHeaderSecret OFF on a masked value clears it so the sentinel never persists', () => {
+    const t = httpTrigger({
+      request: req({ headers: [{ key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }] })
+    })
+    const off = toggleHeaderSecret(t, 0)
+    expect(off.http?.request.headers[0].secret).toBe(false)
+    expect(off.http?.request.headers[0].value).toBe('')
+  })
+
+  it('toggleHeaderSecret OFF on a freshly typed value leaves it intact', () => {
+    const t = httpTrigger({
+      request: req({ headers: [{ key: 'Authorization', value: 'plain-token', secret: true }] })
+    })
+    const off = toggleHeaderSecret(t, 0)
+    expect(off.http?.request.headers[0].secret).toBe(false)
+    expect(off.http?.request.headers[0].value).toBe('plain-token')
+  })
+
+  it('toggleBodySecret OFF on a masked body clears it; ON / non-masked just flips the flag', () => {
+    const masked = httpTrigger({ request: req({ body: HTTP_SECRET_MASK, bodySecret: true }) })
+    const off = toggleBodySecret(masked)
+    expect(off.http?.request.bodySecret).toBe(false)
+    expect(off.http?.request.body).toBe('')
+
+    const plain = httpTrigger({ request: req({ body: '{"a":1}', bodySecret: true }) })
+    const offPlain = toggleBodySecret(plain)
+    expect(offPlain.http?.request.bodySecret).toBe(false)
+    expect(offPlain.http?.request.body).toBe('{"a":1}') // freshly typed body untouched
+
+    const visible = httpTrigger({ request: req({ body: '{"a":1}', bodySecret: false }) })
+    const on = toggleBodySecret(visible)
+    expect(on.http?.request.bodySecret).toBe(true)
+    expect(on.http?.request.body).toBe('{"a":1}') // flipping ON never touches body
   })
 
   it('query reducers mirror header reducers', () => {

@@ -33,6 +33,7 @@ import {
   setPollingEnabled,
   setRequestField,
   setSubtitleField,
+  toggleBodySecret,
   toggleFieldEnabled,
   toggleHeaderSecret,
   updateHeader,
@@ -288,6 +289,8 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
       setLastTest({ status: res.status, durationMs: res.durationMs })
     } catch (err) {
       setTestError(err instanceof Error ? err.message : String(err))
+      // Why: a failed Test must not leave a stale success badge next to the error.
+      setLastTest(null)
     } finally {
       setTesting(false)
     }
@@ -453,13 +456,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                 size="xs"
                 aria-label="Toggle body secret"
                 aria-pressed={request.bodySecret ?? false}
-                onClick={() =>
-                  onChange(
-                    setRequestField(trigger, {
-                      bodySecret: !request.bodySecret
-                    })
-                  )
-                }
+                onClick={() => onChange(toggleBodySecret(trigger))}
               >
                 {request.bodySecret ? <Lock className="size-3" /> : <Unlock className="size-3" />}
                 Secret

@@ -1,9 +1,10 @@
-import type {
-  AutoTrigger,
-  HttpEndpointConfig,
-  HttpKeyValue,
-  HttpRequestConfig,
-  MappedField
+import {
+  HTTP_SECRET_MASK,
+  type AutoTrigger,
+  type HttpEndpointConfig,
+  type HttpKeyValue,
+  type HttpRequestConfig,
+  type MappedField
 } from '../../../../../shared/automations-types'
 
 // Why: every reducer is a no-op on a trigger with no http config so a stray
@@ -63,8 +64,31 @@ export function updateHeader(
 export function toggleHeaderSecret(trigger: AutoTrigger, index: number): AutoTrigger {
   return withRequest(trigger, (request) => ({
     ...request,
-    headers: request.headers.map((h, i) => (i === index ? { ...h, secret: !h.secret } : h))
+    headers: request.headers.map((h, i) => {
+      if (i !== index) {
+        return h
+      }
+      const secret = !h.secret
+      // Why: the mask sentinel must never survive as a non-secret value — clearing
+      // it on un-secret mirrors "Replace" so it can't seal/send as a real header.
+      if (!secret && h.value === HTTP_SECRET_MASK) {
+        return { ...h, secret, value: '' }
+      }
+      return { ...h, secret }
+    })
   }))
+}
+
+export function toggleBodySecret(trigger: AutoTrigger): AutoTrigger {
+  return withRequest(trigger, (request) => {
+    const bodySecret = !request.bodySecret
+    // Why: mirror the header fix — un-secreting a sealed body clears the mask
+    // sentinel so it can't seal/send as a literal request body.
+    if (!bodySecret && request.body === HTTP_SECRET_MASK) {
+      return { ...request, bodySecret, body: '' }
+    }
+    return { ...request, bodySecret }
+  })
 }
 
 export function addQuery(trigger: AutoTrigger): AutoTrigger {
