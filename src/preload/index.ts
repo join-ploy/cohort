@@ -102,6 +102,8 @@ import type {
   AutomationRun,
   AutomationUpdateInput,
   AutoDedupEntry,
+  HttpEndpointItem,
+  HttpRequestConfig,
   RunNowPayload,
   SerializableTriggerSource,
   TriggerPollStatus,
@@ -2704,6 +2706,19 @@ const api = {
       hostId?: string
     }): Promise<{ value: string; label: string }[]> =>
       ipcRenderer.invoke('triggerSources:fetchOptions', args)
+  },
+
+  httpEndpoint: {
+    test: (args: {
+      request: HttpRequestConfig
+      automationId?: string
+      autoTriggerId?: string
+    }): Promise<{ status: number; durationMs: number; body: unknown }> =>
+      ipcRenderer.invoke('httpEndpoint:test', args),
+    fetchItems: (args: {
+      automationId: string
+      autoTriggerId: string
+    }): Promise<HttpEndpointItem[]> => ipcRenderer.invoke('httpEndpoint:fetchItems', args)
   },
 
   e2e: {

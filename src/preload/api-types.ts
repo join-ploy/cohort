@@ -195,6 +195,8 @@ import type {
   AutomationRun,
   AutomationUpdateInput,
   AutoDedupEntry,
+  HttpEndpointItem,
+  HttpRequestConfig,
   RunNowPayload,
   SerializableTriggerSource,
   TriggerPollStatus,
@@ -1444,6 +1446,17 @@ export type PreloadApi = {
       field: string
       hostId?: string
     }) => Promise<{ value: string; label: string }[]>
+  }
+  httpEndpoint: {
+    test: (args: {
+      request: HttpRequestConfig
+      automationId?: string
+      autoTriggerId?: string
+    }) => Promise<{ status: number; durationMs: number; body: unknown }>
+    fetchItems: (args: {
+      automationId: string
+      autoTriggerId: string
+    }) => Promise<HttpEndpointItem[]>
   }
   wsl: {
     isAvailable: () => Promise<boolean>
