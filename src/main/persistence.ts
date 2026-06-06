@@ -1,4 +1,4 @@
-import { app, safeStorage } from 'electron'
+import { app } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from 'fs'
 import { writeFile, rename, mkdir, rm } from 'fs/promises'
 import { join, dirname } from 'path'
@@ -49,34 +49,14 @@ import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session
 import { getRepoIdFromWorktreeId, splitWorktreeId } from '../shared/worktree-id'
 import { generateUniqueWorkspaceName } from '../shared/workspace-name-generator'
 import { upgradeLegacyAutomation } from './persistence-automation-migration'
+import { encryptSecret, decryptSecret } from './secret-encryption'
 
 function encrypt(plaintext: string): string {
-  if (!plaintext || !safeStorage.isEncryptionAvailable()) {
-    return plaintext
-  }
-  try {
-    return safeStorage.encryptString(plaintext).toString('base64')
-  } catch (err) {
-    console.error('[persistence] Encryption failed:', err)
-    return plaintext
-  }
+  return encryptSecret(plaintext)
 }
 
 function decrypt(ciphertext: string): string {
-  if (!ciphertext || !safeStorage.isEncryptionAvailable()) {
-    return ciphertext
-  }
-  try {
-    return safeStorage.decryptString(Buffer.from(ciphertext, 'base64'))
-  } catch {
-    // Why: if decryption fails, it likely means the value was stored as
-    // plaintext (pre-encryption build) or the OS keychain changed. Fall
-    // back to the raw string so users don't lose their cookie after upgrade.
-    console.warn(
-      '[persistence] safeStorage decryption failed — returning ciphertext as-is. Possible keychain reset.'
-    )
-    return ciphertext
-  }
+  return decryptSecret(ciphertext)
 }
 
 function encryptOptionalSecret(value: string | null | undefined): string | null {
