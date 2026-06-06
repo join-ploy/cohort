@@ -158,6 +158,8 @@ export type AutomationDispatchRequest = {
 export type RunNowPayload = {
   linear?: { issue: LinearIssuePayload }
   github?: { pr: GithubPrPayload }
+  // Mapped variables from a polled/picked HTTP item → run.context.trigger.http.
+  http?: Record<string, unknown>
   // Operator-picked project at manual-run time. When set, takes precedence
   // over the automation's stored projectId for that run.
   projectId?: string
@@ -187,7 +189,7 @@ export type TriggerConfig = {
 
 // Auto-trigger source identifiers. Each source has its own poller wiring;
 // extra sources will be added here as they come online.
-export type TriggerSourceId = 'linear-issue' | 'github-pr'
+export type TriggerSourceId = 'linear-issue' | 'github-pr' | 'http-endpoint'
 
 // Renderer-facing projection of a FieldDescriptor. The main-process descriptor
 // carries `fetchOptions: (ctx) => Promise<...>`, which cannot cross the IPC
@@ -242,6 +244,75 @@ export type AutoTrigger = {
   // Watch-list used by source-scoped triggers (github-pr) to bound polling to
   // specific repos; unused by linear-issue.
   repoIds?: string[]
+  // http-endpoint only. `enabled` is the master switch; these gate the two
+  // independent capabilities over the same endpoint definition.
+  http?: HttpEndpointConfig
+  pollingEnabled?: boolean
+  manualEnabled?: boolean
+}
+
+// --- Generic HTTP endpoint trigger ---------------------------------------
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+// A request key/value (header or query param). When `secret` is true the value
+// is ciphertext at rest, the masked sentinel when sent to the renderer, and is
+// only ever decrypted in-main right before a request fires.
+export type HttpKeyValue = {
+  key: string
+  value: string
+  secret?: boolean
+}
+
+export type HttpRequestConfig = {
+  method: HttpMethod
+  url: string
+  headers: HttpKeyValue[]
+  query: HttpKeyValue[]
+  // Raw request body (usually JSON). `secret: true` encrypts it like a header.
+  body?: string
+  bodySecret?: boolean
+}
+
+export type MappedFieldType = 'string' | 'number' | 'boolean' | 'date' | 'null' | 'unknown'
+
+// One discovered leaf from the Test sample. `path` is the dot-path into an item
+// (e.g. 'author.name', 'labels[0].name'); `variableName` is the flat key the
+// step templates reference as `trigger.http.<variableName>`.
+export type MappedField = {
+  path: string
+  variableName: string
+  enabled: boolean
+  type: MappedFieldType
+  sampleValue: unknown
+}
+
+export type HttpEndpointConfig = {
+  request: HttpRequestConfig
+  // Dot-path to the items array; null = the whole response body is one item.
+  itemsPath: string | null
+  fields: MappedField[]
+  // Last Test response, persisted so the dry-run/variable panel work offline.
+  sampleResponse?: unknown
+  // Poll-only:
+  dedupeFields: string[] // dot-paths composing the dedup key
+  dateGateField: string | null // dot-path whose parsed date must beat enabledAt
+  intervalMs?: number // per-trigger cadence; falls back to the global interval
+  maxItemsPerPoll?: number // safety bound; default 100
+  // Manual-only:
+  labelField?: string // dot-path shown as the picker's primary label
+  subtitleField?: string // dot-path shown as the picker's secondary line
+}
+
+// Masked sentinel sent to the renderer in place of an encrypted secret value.
+export const HTTP_SECRET_MASK = '••••••••'
+
+// One item returned by httpEndpoint:fetchItems for the manual run-time picker.
+export type HttpEndpointItem = {
+  key: string // dedup key (or index) — React list key + selection id
+  label: string
+  subtitle: string
+  vars: Record<string, unknown> // mapped variables → becomes trigger.http.*
 }
 
 // Persisted dedup record so a given (automation, autoTrigger, entity) only
