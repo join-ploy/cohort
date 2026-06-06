@@ -1,4 +1,8 @@
-import type { ConditionOp, TriggerSourceId } from '../../../shared/automations-types'
+import type {
+  ConditionOp,
+  HttpEndpointConfig,
+  TriggerSourceId
+} from '../../../shared/automations-types'
 
 export type PollCtx = {
   since: number
@@ -6,6 +10,10 @@ export type PollCtx = {
   // Union of the watching triggers' repoIds; set by the engine for
   // source-scoped sources like github-pr, ignored by linear-issue.
   repoIds?: string[]
+  // Set by the engine for the per-trigger http-endpoint source; ignored by
+  // the global linear/github sources.
+  http?: HttpEndpointConfig
+  now?: number
 }
 
 export type FieldDescriptor = {
