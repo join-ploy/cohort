@@ -31,7 +31,8 @@ import {
   getOutputSchemaForKind,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
-  type NestedSchema
+  type NestedSchema,
+  type OutputSchema
 } from '../../../../../shared/automation-step-schemas'
 
 export type ChainEditorError = TemplateError & {
@@ -102,6 +103,18 @@ export function buildTriggerSchema(
   // so surface its variables in the picker too.
   if (autoTriggers.some((t) => t.enabled && t.source === 'github-pr')) {
     base.github = GITHUB_PR_TRIGGER_OVERLAY.github
+  }
+  // The http-endpoint source has no static overlay — its variables come from the
+  // saved Test mapping, so build a flat `trigger.http.*` schema from enabled fields.
+  const httpTrigger = autoTriggers.find((t) => t.source === 'http-endpoint' && t.http)
+  if (httpTrigger?.http) {
+    const httpSchema: OutputSchema = {}
+    for (const f of httpTrigger.http.fields) {
+      if (f.enabled) {
+        httpSchema[f.variableName] = f.type === 'number' ? 'number' : 'string'
+      }
+    }
+    base.http = httpSchema
   }
   return base
 }
