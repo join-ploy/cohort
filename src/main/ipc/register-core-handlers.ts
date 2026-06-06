@@ -25,6 +25,7 @@ import { setTrustedBrowserRendererWebContentsId, setAgentBrowserBridgeRef } from
 import { registerSessionHandlers } from './session'
 import { registerSettingsHandlers } from './settings'
 import { registerAutomationHandlers } from './automations'
+import { registerHttpEndpointHandlers } from './http-endpoint'
 import { registerTelemetryHandlers } from './telemetry'
 import { registerBrowserHandlers } from './browser'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
@@ -98,6 +99,7 @@ export function registerCoreHandlers(
   registerSettingsHandlers(store)
   if (automations) {
     registerAutomationHandlers(store, automations)
+    registerHttpEndpointHandlers({ store })
   }
   registerTelemetryHandlers(store)
   registerBrowserHandlers()

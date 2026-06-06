@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import type { AutomationService } from '../automations/service'
+import { maskAutoTriggers, sealAutoTriggers } from '../automations/http-endpoint-secrets'
 import type {
   Automation,
   AutomationCreateInput,
@@ -13,7 +14,29 @@ import type {
 } from '../../shared/automations-types'
 
 export function registerAutomationHandlers(store: Store, service: AutomationService): void {
-  ipcMain.handle('automations:list', (): Automation[] => store.listAutomations())
+  // Why: http-endpoint request secrets are sealed (ciphertext) at rest and must
+  // be masked before any automation crosses to the renderer; on save we re-seal
+  // against the PRIOR stored trigger so an unchanged (masked) secret keeps its
+  // ciphertext instead of being overwritten with the mask sentinel.
+  const maskAutomation = (a: Automation): Automation => ({
+    ...a,
+    autoTriggers: maskAutoTriggers(a.autoTriggers)
+  })
+  const sealInput = (input: AutomationCreateInput): AutomationCreateInput => ({
+    ...input,
+    autoTriggers: sealAutoTriggers(input.autoTriggers, undefined)
+  })
+  const sealUpdates = (id: string, updates: AutomationUpdateInput): AutomationUpdateInput => {
+    if (!('autoTriggers' in updates)) {
+      return updates
+    }
+    const prior = store.listAutomations().find((a) => a.id === id)
+    return { ...updates, autoTriggers: sealAutoTriggers(updates.autoTriggers, prior?.autoTriggers) }
+  }
+
+  ipcMain.handle('automations:list', (): Automation[] =>
+    store.listAutomations().map(maskAutomation)
+  )
   ipcMain.handle(
     'automations:listRuns',
     (_event, args?: { automationId?: string }): AutomationRun[] =>
@@ -21,12 +44,13 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
   )
   ipcMain.handle(
     'automations:create',
-    (_event, input: AutomationCreateInput): Automation => store.createAutomation(input)
+    (_event, input: AutomationCreateInput): Automation =>
+      maskAutomation(store.createAutomation(sealInput(input)))
   )
   ipcMain.handle(
     'automations:update',
     (_event, args: { id: string; updates: AutomationUpdateInput }): Automation =>
-      store.updateAutomation(args.id, args.updates)
+      maskAutomation(store.updateAutomation(args.id, sealUpdates(args.id, args.updates)))
   )
   ipcMain.handle('automations:delete', (_event, args: { id: string }): void => {
     store.deleteAutomation(args.id)
@@ -72,8 +96,7 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
   ipcMain.handle('automations:rendererReady', (): void => {
     service.setRendererReady()
   })
-  ipcMain.handle(
-    'automations:triggerPollStatus',
-    (): TriggerPollStatus[] => service.getTriggerPollStatus()
+  ipcMain.handle('automations:triggerPollStatus', (): TriggerPollStatus[] =>
+    service.getTriggerPollStatus()
   )
 }
