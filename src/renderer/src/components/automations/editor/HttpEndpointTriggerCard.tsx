@@ -401,7 +401,9 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">Headers</span>
+            {/* Why: block label (not inline span) so the Add button below doesn't
+                collapse onto the label's line when there are no rows yet. */}
+            <p className="text-[11px] font-medium text-muted-foreground">Headers</p>
             {request.headers.map((h, i) => (
               <KeyValueRow
                 key={i}
@@ -425,7 +427,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">Query parameters</span>
+            <p className="text-[11px] font-medium text-muted-foreground">Query parameters</p>
             {request.query.map((q, i) => (
               <KeyValueRow
                 key={i}
