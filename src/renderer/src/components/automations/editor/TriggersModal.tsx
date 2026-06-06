@@ -127,16 +127,32 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
   }
 
   const addTrigger = (source: TriggerSourceId): void => {
-    setDraftAutoTriggers((list) => [
-      ...list,
-      {
-        id: crypto.randomUUID(),
-        source,
-        enabled: true,
-        enabledAt: Date.now(),
-        rules: []
-      }
-    ])
+    const base: AutoTrigger = {
+      id: crypto.randomUUID(),
+      source,
+      enabled: true,
+      enabledAt: Date.now(),
+      rules: []
+    }
+    // Why: http-endpoint needs a per-trigger request/mapping config seeded up
+    // front so its editor card has something to render; polling is the default
+    // capability. Other sources keep the bare default.
+    const next: AutoTrigger =
+      source === 'http-endpoint'
+        ? {
+            ...base,
+            pollingEnabled: true,
+            manualEnabled: false,
+            http: {
+              request: { method: 'GET', url: '', headers: [], query: [] },
+              itemsPath: null,
+              fields: [],
+              dedupeFields: [],
+              dateGateField: null
+            }
+          }
+        : base
+    setDraftAutoTriggers((list) => [...list, next])
   }
 
   const removeTrigger = (id: string): void => {

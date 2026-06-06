@@ -360,6 +360,39 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
   })
 })
 
+describe('AutoTriggerCard — http-endpoint branch', () => {
+  it('renders the HttpEndpointTriggerCard for an http-endpoint trigger', () => {
+    const trig = mkTrigger({
+      source: 'http-endpoint',
+      pollingEnabled: true,
+      manualEnabled: false,
+      http: {
+        request: { method: 'GET', url: '', headers: [], query: [] },
+        itemsPath: null,
+        fields: [],
+        dedupeFields: [],
+        dateGateField: null
+      }
+    })
+    const html = renderToStaticMarkup(
+      <AutoTriggerCard
+        trigger={trig}
+        automationId=""
+        onChange={() => {}}
+        onRemove={() => {}}
+        projects={projects}
+        fieldCatalog={fieldCatalog}
+        loadOptions={noopLoadOptions}
+      />
+    )
+    // The endpoint card's capability switches confirm the branch fired.
+    expect(html).toContain('Poll automatically')
+    expect(html).toContain('Allow manual run')
+    // The linear/github dedup footer must NOT render for the http card.
+    expect(html).not.toContain('Fired for ')
+  })
+})
+
 describe('AutoTriggerCard — dedup footer wording', () => {
   it('uses "PRs" in the dedup footer for a github-pr trigger', () => {
     const html = renderToStaticMarkup(
