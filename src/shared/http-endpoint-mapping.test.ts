@@ -4,7 +4,9 @@ import {
   detectArrayPaths,
   resolveItems,
   parseDateValue,
-  inferFieldType
+  inferFieldType,
+  flattenItem,
+  defaultVariableName
 } from './http-endpoint-mapping'
 
 describe('detectArrayPaths', () => {
@@ -58,5 +60,27 @@ describe('inferFieldType', () => {
     expect(inferFieldType(42)).toBe('number')
     expect(inferFieldType(true)).toBe('boolean')
     expect(inferFieldType(null)).toBe('null')
+  })
+})
+
+describe('flattenItem', () => {
+  it('flattens nested objects and arrays into dot/bracket paths', () => {
+    const item = { id: 7, author: { name: 'Ada' }, labels: [{ name: 'bug' }] }
+    const fields = flattenItem(item)
+    const byPath = Object.fromEntries(fields.map((f) => [f.path, f]))
+    expect(byPath['id'].type).toBe('number')
+    expect(byPath['author.name'].sampleValue).toBe('Ada')
+    expect(byPath['labels[0].name'].type).toBe('string')
+  })
+  it('defaults every field enabled with a sanitized variable name', () => {
+    const [f] = flattenItem({ 'author.name': 'x' })
+    expect(f.enabled).toBe(true)
+    expect(f.variableName).toBe(defaultVariableName('author.name'))
+  })
+})
+
+describe('defaultVariableName', () => {
+  it('sanitizes dots and brackets to underscores', () => {
+    expect(defaultVariableName('labels[0].name')).toBe('labels_0_name')
   })
 })

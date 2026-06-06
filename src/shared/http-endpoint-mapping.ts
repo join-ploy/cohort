@@ -2,7 +2,7 @@
 // Pure, IO-free mapping between an HTTP response and trigger variables.
 // Shared by the renderer Test preview and the main-process poller.
 
-import type { MappedFieldType } from './automations-types'
+import type { MappedField, MappedFieldType } from './automations-types'
 
 export type ArrayCandidate = { path: string; length: number }
 
@@ -81,4 +81,43 @@ export function inferFieldType(value: unknown): MappedFieldType {
     return parseDateValue(value) !== null ? 'date' : 'string'
   }
   return 'unknown'
+}
+
+// Flat key from a path: trigger.http.<variableName> can't contain dots/brackets
+// without nesting, so collapse them to underscores for the default name.
+export function defaultVariableName(path: string): string {
+  return path.replace(/\[(\d+)\]/g, '_$1').replace(/\./g, '_')
+}
+
+const MAX_FLATTEN_DEPTH = 6 // Why: bound pathological deeply-nested payloads.
+
+export function flattenItem(item: unknown): MappedField[] {
+  const out: MappedField[] = []
+  const visit = (node: unknown, path: string, depth: number): void => {
+    if (depth > MAX_FLATTEN_DEPTH) {
+      return
+    }
+    if (Array.isArray(node)) {
+      node.forEach((el, i) => visit(el, `${path}[${i}]`, depth + 1))
+      return
+    }
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        visit(v, path ? `${path}.${k}` : k, depth + 1)
+      }
+      return
+    }
+    // Leaf (primitive or null).
+    if (path !== '') {
+      out.push({
+        path,
+        variableName: defaultVariableName(path),
+        enabled: true,
+        type: inferFieldType(node),
+        sampleValue: node
+      })
+    }
+  }
+  visit(item, '', 0)
+  return out
 }
