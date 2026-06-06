@@ -240,6 +240,36 @@ describe('capability toggles derive enabled', () => {
   })
 })
 
+describe('reducer edge cases', () => {
+  it('updateHeader/removeHeader/updateQuery no-op on an out-of-range index', () => {
+    const t = httpTrigger({ request: req({ headers: [{ key: 'A', value: '1' }] }) })
+    expect(updateHeader(t, 9, { value: 'x' }).http?.request.headers).toEqual([
+      { key: 'A', value: '1' }
+    ])
+    expect(removeHeader(t, 9).http?.request.headers).toEqual([{ key: 'A', value: '1' }])
+    expect(updateQuery(t, 9, { value: 'x' }).http?.request.query).toEqual([])
+  })
+
+  it('clears optional fields when set to undefined', () => {
+    const t = httpTrigger({ intervalMs: 5000, labelField: 'name', subtitleField: 'at' })
+    expect(setIntervalMs(t, undefined).http?.intervalMs).toBeUndefined()
+    expect(setLabelField(t, undefined).http?.labelField).toBeUndefined()
+    expect(setSubtitleField(t, undefined).http?.subtitleField).toBeUndefined()
+  })
+
+  it('setManualEnabled(false) with polling off also clears the master enabled', () => {
+    const t = httpTrigger({}, { pollingEnabled: false, manualEnabled: true, enabled: true })
+    const next = setManualEnabled(t, false)
+    expect(next.manualEnabled).toBe(false)
+    expect(next.enabled).toBe(false)
+  })
+
+  it('setManualEnabled(true) with polling on keeps enabled true', () => {
+    const t = httpTrigger({}, { pollingEnabled: true, manualEnabled: false, enabled: true })
+    expect(setManualEnabled(t, true).enabled).toBe(true)
+  })
+})
+
 describe('non-http triggers are left untouched', () => {
   it('returns the same reference for triggers without an http config', () => {
     const t = nonHttpTrigger()
