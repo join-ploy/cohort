@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { GitPullRequest, History, Plus, Trash2, Zap } from 'lucide-react'
+import { GitPullRequest, Globe, History, Plus, Trash2, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type {
@@ -16,6 +16,7 @@ import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
+import { HttpEndpointTriggerCard } from './HttpEndpointTriggerCard'
 
 export type AutoTriggerCardProps = {
   trigger: AutoTrigger
@@ -48,7 +49,8 @@ const SOURCE_META: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   'linear-issue': { label: 'Linear issue', icon: Zap },
-  'github-pr': { label: 'GitHub PR', icon: GitPullRequest }
+  'github-pr': { label: 'GitHub PR', icon: GitPullRequest },
+  'http-endpoint': { label: 'HTTP endpoint', icon: Globe }
 }
 
 // Pure helpers — exported so they can be unit-tested without rendering. The
@@ -156,7 +158,28 @@ export function updateCondition(
   }
 }
 
+// Why: http-endpoint carries a wholly different per-trigger editor (request,
+// mapping, dedup), so dispatch to a dedicated card. Branch here in a hook-free
+// wrapper rather than early-returning inside the rule-based card below — that
+// would call its hooks conditionally and trip react-hooks/rules-of-hooks.
 export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element {
+  if (props.trigger.source === 'http-endpoint') {
+    return (
+      <HttpEndpointTriggerCard
+        trigger={props.trigger}
+        onChange={props.onChange}
+        onRemove={props.onRemove}
+        automationId={props.automationId}
+        projects={props.projects}
+      />
+    )
+  }
+  return <RuleBasedTriggerCard {...props} />
+}
+
+// The rules + dedup-footer editor shared by the global linear-issue / github-pr
+// sources. The http-endpoint source uses HttpEndpointTriggerCard instead.
+function RuleBasedTriggerCard(props: AutoTriggerCardProps): React.JSX.Element {
   const {
     trigger,
     onChange,

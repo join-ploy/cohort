@@ -509,6 +509,59 @@ describe('AutomationService.dispatchAutoRun', () => {
     const trigCtx = run.context?.trigger as { github?: { pr: { number: number } } }
     expect(trigCtx.github?.pr.number).toBe(7)
   })
+
+  it('http-endpoint: targets rule.projectId and seeds trigger.http from event.payload', async () => {
+    const store = await createStore()
+    // rule.projectId (p2) differs from automation.projectId (p1) to prove the
+    // http-endpoint path targets the rule's project.
+    store.addRepo(makeRepo({ id: 'p1' }))
+    store.addRepo(makeRepo({ id: 'p2', path: '/repo2' }))
+    const automation = store.createAutomation({
+      name: 'Auto chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [makeChainStep()]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    const httpTrigger: AutoTrigger = {
+      id: 'at1',
+      source: 'http-endpoint',
+      enabled: true,
+      enabledAt: 0,
+      rules: []
+    }
+    const rule: Rule = { id: 'rl1', projectId: 'p2', conditions: [] }
+    await service.dispatchAutoRun({
+      automation: stored,
+      trigger: httpTrigger,
+      rule,
+      // event.payload is the mapped-variables object → becomes trigger.http.
+      event: {
+        entityId: '7',
+        updatedAt: 100,
+        fields: { id: 7, title: 'Widget' },
+        payload: { id: 7, title: 'Widget' }
+      }
+    })
+
+    const runs = store.listAutomationRuns(automation.id)
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    expect(run.triggerSource).toBe('http-endpoint')
+    expect(run.triggerEntityId).toBe('7')
+    const automationCtx = run.context?.automation as { projectId: string }
+    expect(automationCtx.projectId).toBe('p2')
+    const trigCtx = run.context?.trigger as { http?: Record<string, unknown> }
+    expect(trigCtx.http).toEqual({ id: 7, title: 'Widget' })
+  })
 })
 
 describe('AutomationService.restartRun', () => {

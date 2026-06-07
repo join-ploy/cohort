@@ -101,6 +101,7 @@ export type EngineHarness = {
   dispatched: DispatchedRecord[]
   dedup: Set<string>
   lastPollMap: Map<string, number>
+  httpLastPollMap: Map<string, number>
 }
 
 export function makeEngine(opts: {
@@ -110,6 +111,7 @@ export function makeEngine(opts: {
   dedup?: Set<string>
   dispatched?: DispatchedRecord[]
   lastPollMap?: Map<string, number>
+  httpLastPollMap?: Map<string, number>
   onError?: AutoTriggerEngineDeps['onError']
 }): EngineHarness {
   const registry = new TriggerSourceRegistry()
@@ -117,6 +119,7 @@ export function makeEngine(opts: {
   const dedup = opts.dedup ?? new Set<string>()
   const dispatched = opts.dispatched ?? []
   const lastPollMap = opts.lastPollMap ?? new Map<string, number>()
+  const httpLastPollMap = opts.httpLastPollMap ?? new Map<string, number>()
   const engine = new AutoTriggerEngine({
     registry,
     listAutomations: () => opts.automations,
@@ -131,9 +134,13 @@ export function makeEngine(opts: {
     lastPollSet: (s, h, v) => {
       lastPollMap.set(`${s}|${h}`, v)
     },
+    httpLastPoll: (id) => httpLastPollMap.get(id) ?? 0,
+    httpLastPollSet: (id, v) => {
+      httpLastPollMap.set(id, v)
+    },
     hostId: 'h1',
     now: () => opts.now ?? 2000,
     onError: opts.onError
   })
-  return { engine, dispatched, dedup, lastPollMap }
+  return { engine, dispatched, dedup, lastPollMap, httpLastPollMap }
 }

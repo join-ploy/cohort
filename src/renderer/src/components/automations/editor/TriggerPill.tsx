@@ -14,7 +14,8 @@ export type TriggerPillProps = {
 // Why: per-source short label keeps adding future sources to a single line.
 const SOURCE_LABEL: Record<TriggerSourceId, string> = {
   'linear-issue': 'Linear auto',
-  'github-pr': 'GitHub PR auto'
+  'github-pr': 'GitHub PR auto',
+  'http-endpoint': 'HTTP auto'
 }
 
 function sourceLabelFor(source: TriggerSourceId): string {

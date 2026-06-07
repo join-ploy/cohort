@@ -23,6 +23,9 @@ export type AutoTriggerEngineDeps = {
   ) => void
   lastPoll: (sourceId: TriggerSourceId, hostId: string) => number
   lastPollSet: (sourceId: TriggerSourceId, hostId: string, value: number) => void
+  // Per-http-trigger interval gate clock (in-memory, keyed by trigger id).
+  httpLastPoll: (triggerId: string) => number
+  httpLastPollSet: (triggerId: string, value: number) => void
   hostId: string
   now: () => number
   /** Optional logger; defaults to console.warn for errors. */
@@ -82,10 +85,11 @@ export class AutoTriggerEngine {
       const automations = this.deps.listAutomations()
       const active: ActiveEntry[] = []
       for (const a of automations) {
-        // Why: auto-triggers require chain-shape automations (dispatchRun only
-        // supports those). Skip legacy automations entirely so we don't write
-        // dedup rows for runs we can't actually dispatch.
-        if (!a.trigger || !a.steps || a.steps.length === 0) {
+        // Why: honor the automation-level pause (enabled=false) — like the rrule
+        // scheduler does — so a paused automation's auto-triggers stop firing.
+        // Also require chain-shape automations (dispatchRun only supports those)
+        // so we don't write dedup rows for runs we can't actually dispatch.
+        if (!a.enabled || !a.trigger || !a.steps || a.steps.length === 0) {
           continue
         }
         for (const t of a.autoTriggers ?? []) {
@@ -98,13 +102,28 @@ export class AutoTriggerEngine {
         return
       }
 
+      // Why: http-endpoint triggers each carry their own endpoint + interval, so
+      // they poll per-trigger; every other source keeps the shared grouped poll.
+      const httpEntries = active.filter(
+        (e) => e.trigger.source === 'http-endpoint' && (e.trigger.pollingEnabled ?? true)
+      )
+      const sharedEntries = active.filter((e) => e.trigger.source !== 'http-endpoint')
+
       // Why: group active triggers by source so we poll each source once per
       // tick even when multiple automations share it.
       const bySource = new Map<TriggerSourceId, ActiveEntry[]>()
-      for (const entry of active) {
+      for (const entry of sharedEntries) {
         const list = bySource.get(entry.trigger.source) ?? []
         list.push(entry)
         bySource.set(entry.trigger.source, list)
+      }
+
+      for (const entry of httpEntries) {
+        try {
+          await this.pollHttpTrigger(entry)
+        } catch (err) {
+          this.reportError(`tick:http(${entry.trigger.id})`, err)
+        }
       }
 
       for (const [sourceId, group] of bySource) {
@@ -178,6 +197,61 @@ export class AutoTriggerEngine {
     }
   }
 
+  // Poll a single http-endpoint trigger against its own endpoint + interval.
+  private async pollHttpTrigger(entry: ActiveEntry): Promise<void> {
+    const { automation, trigger } = entry
+    if (!trigger.http) {
+      return
+    }
+    const nowMs = this.deps.now()
+    const intervalMs = trigger.http.intervalMs ?? this.intervalMs
+    if (nowMs - this.deps.httpLastPoll(trigger.id) < intervalMs) {
+      return
+    }
+    // Why: stamp the clock BEFORE polling so a FAILING endpoint still honors its
+    // interval — the clock advances even when poll() throws, so a broken endpoint
+    // isn't re-hit every tick. (Duplicate dispatch is guarded by dedup, not this.)
+    this.deps.httpLastPollSet(trigger.id, nowMs)
+
+    const source = this.deps.registry.get('http-endpoint')
+    if (!source) {
+      return
+    }
+    for await (const event of source.poll({
+      since: trigger.enabledAt,
+      hostId: this.deps.hostId,
+      http: trigger.http
+    })) {
+      try {
+        if (this.deps.dedupHas(automation.id, trigger.id, event.entityId)) {
+          continue
+        }
+        // Why: an http trigger with no conditions runs on every item, so treat an
+        // empty rules array as one implicit match targeting the automation project.
+        const rule =
+          trigger.rules.length === 0
+            ? { id: 'implicit', conditions: [], projectId: automation.projectId }
+            : firstMatch(trigger.rules, event)
+        if (!rule) {
+          continue
+        }
+        // Why: insert dedup BEFORE dispatch so a crash mid-dispatch can't re-fire
+        // the same (automation, trigger, entity) tuple on retry.
+        this.deps.dedupInsert(
+          automation.id,
+          trigger.id,
+          trigger.source,
+          event.entityId,
+          event.entityIdentifier,
+          this.deps.now()
+        )
+        await this.deps.dispatchAutoRun({ automation, trigger, rule, event })
+      } catch (err) {
+        this.reportError(`tick:http-event(${trigger.id}:${event.entityId})`, err)
+      }
+    }
+  }
+
   /** Snapshot of current poll timing for each active source. */
   getPollStatus(): Map<TriggerSourceId, { lastPollAt: number; intervalMs: number }> {
     const result = new Map<TriggerSourceId, { lastPollAt: number; intervalMs: number }>()
@@ -187,7 +261,18 @@ export class AutoTriggerEngine {
         continue
       }
       for (const t of a.autoTriggers ?? []) {
-        if (t.enabled && !result.has(t.source)) {
+        if (!t.enabled || result.has(t.source)) {
+          continue
+        }
+        if (t.source === 'http-endpoint') {
+          // Why: http triggers keep their own per-trigger clock + interval; the
+          // source-keyed status reports the first such trigger (per-trigger
+          // status is a follow-up). Reading lastPoll() here would always be 0.
+          result.set(t.source, {
+            lastPollAt: this.deps.httpLastPoll(t.id),
+            intervalMs: t.http?.intervalMs ?? this.intervalMs
+          })
+        } else {
           result.set(t.source, {
             lastPollAt: this.deps.lastPoll(t.source, this.deps.hostId),
             intervalMs: this.intervalMs

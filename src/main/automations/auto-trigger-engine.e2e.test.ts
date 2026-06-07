@@ -11,7 +11,9 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { AutoTriggerEngine } from './auto-trigger-engine'
 import { TriggerSourceRegistry } from './trigger-sources/registry'
+import { makeHttpEndpointSource } from './trigger-sources/http-endpoint'
 import { AutomationService } from './service'
+import type { HttpEndpointResponse } from './http-endpoint-request'
 import type { CandidateEvent, TriggerSource } from './trigger-sources/types'
 import type { Repo } from '../../shared/types'
 import type { Store } from '../persistence'
@@ -158,10 +160,129 @@ async function setup(opts: SetupOpts): Promise<Harness> {
       }),
     lastPoll: () => 0,
     lastPollSet: () => undefined,
+    httpLastPoll: () => 0,
+    httpLastPollSet: () => undefined,
     hostId: 'test',
     now: () => Date.now()
   })
   return { store, service, engine, automationId: automation.id, autoTriggerId }
+}
+
+// Fixed clock so the per-trigger interval gate is deterministic across ticks.
+const HTTP_NOW = Date.parse('2026-06-06T00:00:00Z')
+const HTTP_ENABLED_AT = Date.parse('2026-06-01T00:00:00Z')
+
+type HttpHarness = {
+  store: Store
+  engine: AutoTriggerEngine
+  automationId: string
+  autoTriggerId: string
+  executeCalls: () => number
+  httpLastPollMap: Map<string, number>
+}
+
+// Mirrors `setup` but seeds an http-endpoint trigger driven by a stub executor
+// returning two items: one past `enabledAt` (fires) and one before it (date-gated).
+async function setupHttp(): Promise<HttpHarness> {
+  const store = await createStore()
+  store.addRepo(makeRepo())
+  const automation = store.createAutomation({
+    name: 'auto-http',
+    prompt: '',
+    agentId: 'claude',
+    projectId: 'p1',
+    workspaceMode: 'new_per_run',
+    timezone: 'UTC',
+    rrule: '',
+    dtstart: 0,
+    trigger: { kind: 'manual' },
+    steps: [
+      {
+        id: 'step-1',
+        kind: 'wait-for-setup',
+        config: { worktreeRef: 'dummy', requireSuccess: false },
+        onFailure: 'continue',
+        timeoutSeconds: null
+      }
+    ]
+  })
+  const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+  const autoTriggerId = 'at-http'
+  stored.autoTriggers = [
+    {
+      id: autoTriggerId,
+      source: 'http-endpoint',
+      enabled: true,
+      enabledAt: HTTP_ENABLED_AT,
+      pollingEnabled: true,
+      rules: [],
+      http: {
+        request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+        itemsPath: 'data',
+        fields: [
+          { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 0 },
+          { path: 'title', variableName: 'title', enabled: true, type: 'string', sampleValue: '' },
+          { path: 'updated', variableName: 'updated', enabled: true, type: 'date', sampleValue: '' }
+        ],
+        dedupeFields: ['id'],
+        dateGateField: 'updated',
+        intervalMs: 300_000
+      }
+    }
+  ]
+
+  let executeCount = 0
+  const execute = async (): Promise<HttpEndpointResponse> => {
+    executeCount++
+    return {
+      status: 200,
+      durationMs: 1,
+      body: {
+        data: [
+          { id: 1, title: 'New', updated: '2026-06-05T00:00:00Z' }, // past enabledAt → fires
+          { id: 2, title: 'Old', updated: '2026-05-01T00:00:00Z' } // before enabledAt → gated out
+        ]
+      }
+    }
+  }
+  const registry = new TriggerSourceRegistry()
+  registry.register(makeHttpEndpointSource({ execute, now: () => HTTP_NOW }))
+
+  const httpLastPollMap = new Map<string, number>()
+  const service = new AutomationService(store, { tickMs: 60_000 })
+  const engine = new AutoTriggerEngine({
+    registry,
+    listAutomations: () => store.listAutomations(),
+    dispatchAutoRun: async (args) => {
+      await service.dispatchAutoRun(args)
+    },
+    dedupHas: (a, t, e) => store.hasAutomationAutoDedup(a, t, e),
+    dedupInsert: (a, t, s, e, ei, firedAt) =>
+      store.insertAutomationAutoDedup({
+        automationId: a,
+        autoTriggerId: t,
+        sourceId: s,
+        entityId: e,
+        entityIdentifier: ei,
+        firedAt
+      }),
+    lastPoll: () => 0,
+    lastPollSet: () => undefined,
+    httpLastPoll: (id) => httpLastPollMap.get(id) ?? 0,
+    httpLastPollSet: (id, v) => {
+      httpLastPollMap.set(id, v)
+    },
+    hostId: 'test',
+    now: () => HTTP_NOW
+  })
+  return {
+    store,
+    engine,
+    automationId: automation.id,
+    autoTriggerId,
+    executeCalls: () => executeCount,
+    httpLastPollMap
+  }
 }
 
 describe('AutoTriggerEngine end-to-end (real service + store, fake source)', () => {
@@ -245,5 +366,46 @@ describe('AutoTriggerEngine end-to-end (real service + store, fake source)', () 
 
     const dedupAfter = store.listAutomationAutoDedup(automationId).length
     expect(dedupAfter).toBe(dedupBefore)
+  })
+})
+
+describe('AutoTriggerEngine http-endpoint end-to-end (real service + store, stub executor)', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-auto-http-e2e-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  it('polls the endpoint and dispatches exactly ONE run with trigger.http context (date-gated item only)', async () => {
+    const { store, engine, automationId, autoTriggerId } = await setupHttp()
+    await engine.tick()
+
+    const runs = store.listAutomationRuns(automationId)
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    expect(run.trigger).toBe('auto')
+    expect(run.triggerSource).toBe('http-endpoint')
+    // Empty rules → one implicit match; dedup key is the JSON-encoded id value.
+    expect(run.triggerRuleId).toBe('implicit')
+    expect(run.triggerEntityId).toBe('[1]')
+    expect(run.triggerAutoTriggerId).toBe(autoTriggerId)
+    // trigger.http carries the mapped variables from the firing (un-gated) item only.
+    const ctx = run.context as { trigger?: { http?: Record<string, unknown> } }
+    expect(ctx.trigger?.http).toEqual({ id: 1, title: 'New', updated: '2026-06-05T00:00:00Z' })
+    expect(store.hasAutomationAutoDedup(automationId, autoTriggerId, '[1]')).toBe(true)
+  })
+
+  it('a second tick within intervalMs re-polls nothing and never re-fires the deduped item', async () => {
+    const { store, engine, automationId, executeCalls, httpLastPollMap } = await setupHttp()
+    await engine.tick()
+    await engine.tick()
+
+    expect(store.listAutomationRuns(automationId)).toHaveLength(1)
+    // Interval gate: the second tick must skip the poll entirely (not just dedup).
+    expect(executeCalls()).toBe(1)
+    // Clock was stamped on the first poll and is reused to gate the second tick.
+    expect(httpLastPollMap.get('at-http')).toBe(HTTP_NOW)
   })
 })

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Automation } from '../../../../../shared/automations-types'
+import type { Automation, AutoTrigger } from '../../../../../shared/automations-types'
 import type { LinearIssue, Repo } from '../../../../../shared/types'
 
 // Why: RunNowConfirmModal mounts the real LinearIssuePicker + ProjectPicker
@@ -175,6 +175,37 @@ describe('RunNowConfirmModal', () => {
         onRun={async () => {}}
       />
     )
+    expect(markup).toMatch(/<button[^>]*aria-label=["']Run["'][^>]*disabled/)
+  })
+
+  it('renders the HTTP item picker and gates Run for a manual http trigger', async () => {
+    const httpTrigger: AutoTrigger = {
+      id: 'http-1',
+      source: 'http-endpoint',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      manualEnabled: true,
+      http: {
+        request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+        itemsPath: null,
+        fields: [],
+        dedupeFields: [],
+        dateGateField: null
+      }
+    }
+    const { RunNowConfirmModal } = await import('./RunNowConfirmModal')
+    const markup = renderToStaticMarkup(
+      <RunNowConfirmModal
+        open={true}
+        automation={makeAutomation({ trigger: { kind: 'manual' }, autoTriggers: [httpTrigger] })}
+        onClose={() => {}}
+        onRun={async () => {}}
+      />
+    )
+    // The picker's filter input identifies it.
+    expect(markup).toMatch(/aria-label=["']Filter endpoint items["']/)
+    // Run is gated until an item is picked.
     expect(markup).toMatch(/<button[^>]*aria-label=["']Run["'][^>]*disabled/)
   })
 

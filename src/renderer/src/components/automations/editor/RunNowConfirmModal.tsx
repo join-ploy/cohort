@@ -4,12 +4,14 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
+  HttpEndpointItem,
   LinearIssuePayload,
   RunNowPayload
 } from '../../../../../shared/automations-types'
 import type { Repo } from '../../../../../shared/types'
 import { LinearIssuePicker } from './LinearIssuePicker'
 import { ProjectPicker } from './ProjectPicker'
+import { HttpEndpointItemPicker } from './HttpEndpointItemPicker'
 
 export type RunNowConfirmModalProps = {
   open: boolean
@@ -36,14 +38,22 @@ export function RunNowConfirmModal(props: RunNowConfirmModalProps): React.JSX.El
 function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Element {
   const [pickedLinear, setPickedLinear] = useState<LinearIssuePayload | null>(null)
   const [pickedProjectId, setPickedProjectId] = useState<string | null>(null)
+  const [pickedHttp, setPickedHttp] = useState<HttpEndpointItem | null>(null)
   const [running, setRunning] = useState(false)
   const repos = useAppStore((s) => s.repos as Repo[])
 
   const needsLinear = !!props.automation.trigger?.acceptsLinearTicket
   const needsProject = !!props.automation.trigger?.acceptsProjectSelection
+  // Why: a manual http-endpoint trigger requires picking a live item before run
+  // so its mapped variables can seed run.context.trigger.http.*.
+  const httpTrigger = props.automation.autoTriggers?.find(
+    (t) => t.source === 'http-endpoint' && t.manualEnabled
+  )
+  const needsHttp = !!httpTrigger
   const canRun =
     (!needsLinear || pickedLinear !== null) &&
     (!needsProject || pickedProjectId !== null) &&
+    (!needsHttp || pickedHttp !== null) &&
     !running
 
   const pickedProjectName = pickedProjectId
@@ -62,6 +72,9 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
       }
       if (pickedProjectId) {
         payload.projectId = pickedProjectId
+      }
+      if (pickedHttp) {
+        payload.http = pickedHttp.vars
       }
       await props.onRun(payload)
       props.onClose()
@@ -129,6 +142,35 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
                 </div>
               ) : (
                 <ProjectPicker onSelect={(id) => setPickedProjectId(id)} />
+              )}
+            </section>
+          ) : null}
+
+          {httpTrigger ? (
+            <section className="flex flex-col gap-2">
+              <h3 className="text-xs font-medium text-foreground">Endpoint item</h3>
+              {pickedHttp ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-input bg-muted/30 px-2 py-1.5 text-xs">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate font-medium text-foreground">{pickedHttp.label}</span>
+                    {pickedHttp.subtitle ? (
+                      <span className="truncate text-muted-foreground">{pickedHttp.subtitle}</span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPickedHttp(null)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <HttpEndpointItemPicker
+                  automationId={props.automation.id}
+                  autoTriggerId={httpTrigger.id}
+                  onSelect={setPickedHttp}
+                />
               )}
             </section>
           ) : null}

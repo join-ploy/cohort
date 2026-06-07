@@ -65,6 +65,7 @@ import { AutoTriggerEngine } from './automations/auto-trigger-engine'
 import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
 import { makeGithubPrSource } from './automations/trigger-sources/github-pr'
+import { makeHttpEndpointSource } from './automations/trigger-sources/http-endpoint'
 import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
@@ -682,6 +683,7 @@ app.whenReady().then(async () => {
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
   triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
+  triggerSourceRegistry.register(makeHttpEndpointSource())
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.
   registerTriggerSourceHandlers(triggerSourceRegistry)
@@ -690,6 +692,9 @@ app.whenReady().then(async () => {
   // TODO(persist): in-memory until we add a per-source watermark table to the
   // settings store; restart falls back to enabledAt and re-polls any backlog.
   const autoTriggerWatermarks = new Map<string, number>()
+  // Per-http-trigger interval clock, keyed by trigger id. In-memory like the
+  // source watermarks above.
+  const httpTriggerLastPoll = new Map<string, number>()
   // Why: dispatchAutoRun lives on AutomationService but the engine needs it as
   // a ctor dep — late-bind via serviceRef so both can coexist. The engine's
   // start/stop lifecycle is owned by AutomationService.start()/stop() so the
@@ -723,6 +728,10 @@ app.whenReady().then(async () => {
       autoTriggerWatermarks.get(`${sourceId}|${hostId}`) ?? 0,
     lastPollSet: (sourceId: TriggerSourceId, hostId, value) => {
       autoTriggerWatermarks.set(`${sourceId}|${hostId}`, value)
+    },
+    httpLastPoll: (triggerId) => httpTriggerLastPoll.get(triggerId) ?? 0,
+    httpLastPollSet: (triggerId, value) => {
+      httpTriggerLastPoll.set(triggerId, value)
     },
     hostId: AUTO_TRIGGER_HOST_ID,
     now: () => Date.now()

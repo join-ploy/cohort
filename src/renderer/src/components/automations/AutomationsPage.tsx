@@ -38,6 +38,7 @@ import { formatAutomationDateTimeWithRelative } from './automation-page-parts'
 import { AutomationDetail } from './AutomationDetail'
 import { ChainEditorModal } from './editor/ChainEditorModal'
 import { RunNowConfirmModal } from './editor/RunNowConfirmModal'
+import { automationNeedsRunNowPayload } from './editor/run-now-payload-gate'
 
 const AUTOMATIONS_CHANGED_EVENT = 'orca:automations-changed'
 
@@ -306,12 +307,10 @@ export default function AutomationsPage(): React.JSX.Element {
     toast.message('Automation run queued.')
   }
 
-  // Why: when the automation's trigger requires extra inputs we route through
-  // the confirm modal; otherwise dispatch directly.
+  // Why: when the automation needs extra run-time inputs (Linear/project/manual
+  // http) we route through the confirm modal; otherwise dispatch directly.
   const requestRunNow = (automation: Automation): void => {
-    const needsPayload =
-      !!automation.trigger?.acceptsLinearTicket || !!automation.trigger?.acceptsProjectSelection
-    if (needsPayload) {
+    if (automationNeedsRunNowPayload(automation)) {
       setConfirmRunFor(automation)
     } else {
       void runNow(automation)

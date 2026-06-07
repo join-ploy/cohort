@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type {
+  AutoTrigger,
   CreateWorkspaceGroupConfig,
+  MappedField,
   Step,
   StepOrGroup
 } from '../../../../../shared/automations-types'
@@ -8,6 +10,7 @@ import type { Repo } from '../../../../../shared/types'
 import type { ChainDraft } from '../../../lib/chain-editor-state'
 import {
   STEP_KIND_ORDER,
+  buildTriggerSchema,
   chainHasStep,
   chainReferencesAutomationProjectId,
   computeAllErrors,
@@ -205,6 +208,78 @@ describe('getAvailableVariablesAtStep — github.pr overlay', () => {
     } as ChainDraft
     const out = getAvailableVariablesAtStep(draft, 0, [])
     expect((out.trigger as Record<string, unknown>).github).toBeUndefined()
+  })
+})
+
+describe('buildTriggerSchema — trigger.http.* overlay from saved fields', () => {
+  function httpTrigger(fields: MappedField[]): AutoTrigger {
+    return {
+      id: 'h1',
+      source: 'http-endpoint',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      http: {
+        request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+        itemsPath: 'data',
+        fields,
+        dedupeFields: [],
+        dateGateField: null
+      }
+    }
+  }
+
+  // Enabled id:number + title:string surface; the disabled field must not.
+  const fields: MappedField[] = [
+    { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 1 },
+    { path: 'title', variableName: 'title', enabled: true, type: 'string', sampleValue: 'x' },
+    { path: 'ignored', variableName: 'ignored', enabled: false, type: 'string', sampleValue: 'y' }
+  ]
+
+  it('folds enabled mapped fields into a flat http schema with mapped leaf types', () => {
+    const schema = buildTriggerSchema({ kind: 'manual' }, [httpTrigger(fields)])
+    expect(schema.http).toEqual({ id: 'number', title: 'string' })
+  })
+
+  it('maps non-number field types to string leaves', () => {
+    const schema = buildTriggerSchema({ kind: 'manual' }, [
+      httpTrigger([
+        { path: 'open', variableName: 'open', enabled: true, type: 'boolean', sampleValue: true },
+        { path: 'at', variableName: 'at', enabled: true, type: 'date', sampleValue: '2026-06-06' }
+      ])
+    ])
+    expect(schema.http).toEqual({ open: 'string', at: 'string' })
+  })
+
+  it('surfaces trigger.http.* via getAvailableVariablesAtStep and omits disabled fields', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [httpTrigger(fields)] } as ChainDraft
+    const out = getAvailableVariablesAtStep(draft, 0, [])
+    const http = (out.trigger as Record<string, Record<string, string>>).http
+    expect(http.id).toBe('number')
+    expect(http.title).toBe('string')
+    expect(http.ignored).toBeUndefined()
+  })
+
+  it('lets computeAllErrors resolve a {{trigger.http.id}} reference', () => {
+    const draft = {
+      ...makeDraft([
+        {
+          id: 'rp',
+          kind: 'run-prompt',
+          config: {
+            worktreeRef: 'wt',
+            agentId: 'claude',
+            prompt: 'id={{trigger.http.id}}',
+            doneDebounceSeconds: 5
+          },
+          onFailure: 'halt',
+          timeoutSeconds: null
+        }
+      ]),
+      autoTriggers: [httpTrigger(fields)]
+    } as ChainDraft
+    const triggerErrs = computeAllErrors(draft, []).filter((e) => e.path.startsWith('trigger.'))
+    expect(triggerErrs).toEqual([])
   })
 })
 

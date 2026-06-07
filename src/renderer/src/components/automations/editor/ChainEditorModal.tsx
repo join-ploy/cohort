@@ -64,6 +64,7 @@ import {
 import { AvailableVariablesPanel } from './AvailableVariablesPanel'
 import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
 import { RunNowConfirmModal } from './RunNowConfirmModal'
+import { automationNeedsRunNowPayload } from './run-now-payload-gate'
 import { TriggerPill } from './TriggerPill'
 import { TriggersModal } from './TriggersModal'
 
@@ -398,12 +399,10 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
           if (!props.automation || !props.onRunNow) {
             return
           }
-          // Why: when the trigger requires extra inputs (Linear ticket or
-          // worktree), defer to the confirm modal so the operator can supply
-          // them. Otherwise dispatch directly.
-          const needsPayload =
-            !!draft.trigger?.acceptsLinearTicket || !!draft.trigger?.acceptsProjectSelection
-          if (needsPayload) {
+          // Why: when the run needs extra inputs (Linear ticket, picked project, or
+          // a manual http item), defer to the confirm modal so the operator can
+          // supply them. Otherwise dispatch directly.
+          if (automationNeedsRunNowPayload(draft)) {
             setRunConfirmOpen(true)
           } else {
             void props.onRunNow(props.automation.id)

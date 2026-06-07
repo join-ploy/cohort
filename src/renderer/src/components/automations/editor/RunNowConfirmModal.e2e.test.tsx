@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { Automation, RunNowPayload } from '../../../../../shared/automations-types'
 import type { LinearIssue, Repo } from '../../../../../shared/types'
 
@@ -99,6 +99,10 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
     mockState = baseStoreState()
   })
 
+  afterEach(() => {
+    cleanup()
+  })
+
   it('assembles a payload from Linear + project picker selections', async () => {
     const onRun = vi.fn<(payload: RunNowPayload) => Promise<void>>().mockResolvedValue(undefined)
     const onClose = vi.fn()
@@ -148,5 +152,111 @@ describe('RunNowConfirmModal — end-to-end payload assembly', () => {
     })
     // Modal closes itself after a successful run.
     await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('assembles a payload carrying http vars from the endpoint item picker', async () => {
+    ;(globalThis.window as unknown as { api: unknown }).api = {
+      httpEndpoint: {
+        fetchItems: vi
+          .fn()
+          .mockResolvedValue([
+            { key: 'k1', label: 'Item one', subtitle: 's1', vars: { id: 1, title: 'Item one' } }
+          ])
+      }
+    }
+    const httpAutomation: Automation = {
+      ...makeAutomation(),
+      // Only a manual http trigger — no linear/project pickers in play here.
+      trigger: { kind: 'manual' },
+      autoTriggers: [
+        {
+          id: 'http-1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          rules: [],
+          manualEnabled: true,
+          http: {
+            request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+            itemsPath: null,
+            fields: [],
+            dedupeFields: [],
+            dateGateField: null
+          }
+        }
+      ]
+    }
+    const onRun = vi.fn<(payload: RunNowPayload) => Promise<void>>().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    const { RunNowConfirmModal } = await import('./RunNowConfirmModal')
+
+    render(
+      <RunNowConfirmModal open={true} automation={httpAutomation} onClose={onClose} onRun={onRun} />
+    )
+
+    const row = (await screen.findByText('Item one')).closest('[data-http-item-key]')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!)
+
+    const runButton = screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement
+    await waitFor(() => expect(runButton.disabled).toBe(false))
+    fireEvent.click(runButton)
+
+    await waitFor(() => expect(onRun).toHaveBeenCalled())
+    expect(onRun.mock.calls[0][0]).toMatchObject({ http: { id: 1, title: 'Item one' } })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('names the picked item in the chosen-state row', async () => {
+    ;(globalThis.window as unknown as { api: unknown }).api = {
+      httpEndpoint: {
+        fetchItems: vi
+          .fn()
+          .mockResolvedValue([
+            { key: 'k1', label: 'Item one', subtitle: 'subtitle one', vars: { id: 1 } }
+          ])
+      }
+    }
+    const httpAutomation: Automation = {
+      ...makeAutomation(),
+      trigger: { kind: 'manual' },
+      autoTriggers: [
+        {
+          id: 'http-1',
+          source: 'http-endpoint',
+          enabled: true,
+          enabledAt: 0,
+          rules: [],
+          manualEnabled: true,
+          http: {
+            request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+            itemsPath: null,
+            fields: [],
+            dedupeFields: [],
+            dateGateField: null
+          }
+        }
+      ]
+    }
+    const { RunNowConfirmModal } = await import('./RunNowConfirmModal')
+    render(
+      <RunNowConfirmModal
+        open={true}
+        automation={httpAutomation}
+        onClose={() => {}}
+        onRun={async () => {}}
+      />
+    )
+
+    const row = (await screen.findByText('Item one')).closest('[data-http-item-key]')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!)
+
+    // The picker is replaced by a chosen-state row naming the item (label +
+    // subtitle) plus a Change control — not the generic "Item selected".
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy())
+    expect(screen.getByText('Item one')).toBeTruthy()
+    expect(screen.getByText('subtitle one')).toBeTruthy()
+    expect(screen.queryByText('Item selected')).toBeNull()
   })
 })

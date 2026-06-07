@@ -47,6 +47,7 @@ import { splitWorktreeId } from '../../shared/worktree-id'
 import { hasPromptTargetChangesFromMain } from './prompt-target-main-changes'
 import { inferSidebarPromptAgent } from '../../shared/sidebar-prompt-agent'
 import { getEffectiveHooks } from '../hooks'
+import { maskAutoTriggers } from './http-endpoint-secrets'
 
 // Why: duplicated from renderer's chain-editor-state because that module is
 // renderer-only. Kept inline to avoid a new shared runtime file for a one-liner.
@@ -653,6 +654,10 @@ export class AutomationService {
       // The PR's own repo is the run target — not rule.projectId (rules are pure
       // filters for github-pr; the watch-list/event determines the repo).
       runPayload = { projectId: event.repoId, github: { pr: prPayload } }
+    } else if (trigger.source === 'http-endpoint') {
+      // Why: event.payload already holds the mapped variables that become
+      // run.context.trigger.http.*; the rule decides the target project.
+      runPayload = { projectId: rule.projectId, http: event.payload }
     } else {
       runPayload = { projectId: rule.projectId }
     }
@@ -676,6 +681,9 @@ export class AutomationService {
     }
     if (payload?.github) {
       triggerContext.github = payload.github
+    }
+    if (payload?.http) {
+      triggerContext.http = payload.http
     }
     if (payload?.projectId) {
       // Why: validate the picked project up-front so the run fails fast with a
@@ -1152,7 +1160,13 @@ export class AutomationService {
       workspaceId: automation.workspaceId,
       error: null
     })
-    const payload: AutomationDispatchRequest = { automation, run }
+    // Why: every automation crossing to the renderer must be masked — uphold the
+    // invariant structurally even though http triggers don't reach this legacy
+    // dispatch path today.
+    const payload: AutomationDispatchRequest = {
+      automation: { ...automation, autoTriggers: maskAutoTriggers(automation.autoTriggers) },
+      run
+    }
     webContents.send('automations:dispatchRequested', payload)
   }
 }
