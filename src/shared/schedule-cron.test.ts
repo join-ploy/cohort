@@ -70,8 +70,42 @@ describe('schedule-cron', () => {
     expect(recurrenceFromCron('garbage')).toBeNull()
   })
 
+  it('returns null for out-of-range fields, matching cron validity', () => {
+    expect(recurrenceFromCron('99 * * * *')).toBeNull() // minute > 59
+    expect(recurrenceFromCron('0 25 * * *')).toBeNull() // hour > 23
+    expect(recurrenceFromCron('0 9 32 * *')).toBeNull() // day-of-month > 31
+    expect(recurrenceFromCron('0 9 0 * *')).toBeNull() // day-of-month < 1
+  })
+
+  it('normalizes weekly days (sorted, de-duplicated) on parse', () => {
+    expect(recurrenceFromCron('0 9 * * 5,1,3')).toEqual({
+      freq: 'weekly',
+      days: [1, 3, 5],
+      hour: 9,
+      minute: 0
+    })
+    expect(recurrenceFromCron('0 9 * * 1,1')).toEqual({
+      freq: 'weekly',
+      days: [1],
+      hour: 9,
+      minute: 0
+    })
+  })
+
+  it('returns null for valid crons the builder cannot model', () => {
+    // Weekday ranges and Sunday-as-7 aren't representable by the visual builder (0–6 only).
+    expect(recurrenceFromCron('0 9 * * 1-5')).toBeNull()
+    expect(recurrenceFromCron('0 9 * * 7')).toBeNull()
+  })
+
   it('describes a builder cron and falls back to Custom for the rest', () => {
     expect(describeCron('0 9 * * *')).toBe('Daily at 09:00')
     expect(describeCron('*/15 9-17 * * *')).toBe('Custom (*/15 9-17 * * *)')
+  })
+
+  it('describes hourly, weekly, and monthly builder crons', () => {
+    expect(describeCron('30 * * * *')).toBe('Hourly at :30')
+    expect(describeCron('0 9 * * 5,1,3')).toBe('Weekly on Mon, Wed, Fri at 09:00')
+    expect(describeCron('0 9 15 * *')).toBe('Monthly on day 15 at 09:00')
   })
 })

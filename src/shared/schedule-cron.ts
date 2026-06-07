@@ -74,10 +74,15 @@ export function recurrenceFromCron(cron: string): Recurrence | null {
   if (mon !== '*') {
     return null
   }
+  // Bound each field to its cron-valid range so recurrenceFromCron and
+  // isValidCron stay consistent — out-of-range fields fall through to null.
   if (!INT.test(min)) {
     return null
   }
   const minute = Number(min)
+  if (minute > 59) {
+    return null
+  }
 
   // hourly: "<min> * * * *"
   if (hr === '*' && dom === '*' && dow === '*') {
@@ -87,6 +92,9 @@ export function recurrenceFromCron(cron: string): Recurrence | null {
     return null
   }
   const hour = Number(hr)
+  if (hour > 23) {
+    return null
+  }
 
   // daily: "<min> <hr> * * *"
   if (dom === '*' && dow === '*') {
@@ -99,12 +107,18 @@ export function recurrenceFromCron(cron: string): Recurrence | null {
     if (!days.every((d) => INT.test(d) && Number(d) >= 0 && Number(d) <= 6)) {
       return null
     }
-    return { freq: 'weekly', days: days.map(Number), hour, minute }
+    // Normalize to match the builder's canonical day list (sorted, de-duplicated).
+    const normalized = [...new Set(days.map(Number))].sort((a, b) => a - b)
+    return { freq: 'weekly', days: normalized, hour, minute }
   }
 
   // monthly: "<min> <hr> <dom> * *"
   if (dow === '*' && INT.test(dom)) {
-    return { freq: 'monthly', dayOfMonth: Number(dom), hour, minute }
+    const dayOfMonth = Number(dom)
+    if (dayOfMonth < 1 || dayOfMonth > 31) {
+      return null
+    }
+    return { freq: 'monthly', dayOfMonth, hour, minute }
   }
 
   return null
