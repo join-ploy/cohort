@@ -41,6 +41,7 @@ describe('ChainEditorModal — end-to-end composition', () => {
         repos={REPOS}
         reviewCommands={REVIEW_COMMANDS}
         createPrCommands={CREATE_PR_COMMANDS}
+        httpConnections={[]}
         onClose={onClose}
         onSave={onSave}
         onRunNow={onRunNow}
@@ -114,6 +115,7 @@ describe('ChainEditorModal — step picker', () => {
         repos={REPOS}
         reviewCommands={REVIEW_COMMANDS}
         createPrCommands={CREATE_PR_COMMANDS}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />

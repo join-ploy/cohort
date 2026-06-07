@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { Step, StepConfig } from '../../../../../shared/automations-types'
+import type { HttpConnection, Step, StepConfig } from '../../../../../shared/automations-types'
 import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
 import { CreateWorktreeStepCard } from './CreateWorktreeStepCard'
@@ -9,7 +9,7 @@ import { RunPromptStepCard } from './RunPromptStepCard'
 import { RunCommandStepCard } from './RunCommandStepCard'
 import { UpdateLinearIssueStepCard } from './UpdateLinearIssueStepCard'
 import { CollectCiResultsStepCard } from './CollectCiResultsStepCard'
-import { StepCardChrome } from './StepCardChrome'
+import { HttpRequestStepCard } from './HttpRequestStepCard'
 
 export type ChainEditorStepCardRouterProps = {
   step: Step
@@ -21,6 +21,7 @@ export type ChainEditorStepCardRouterProps = {
   repos: Repo[]
   reviewCommands: SidebarPromptCommand[]
   createPrCommands: SidebarPromptCommand[]
+  httpConnections: HttpConnection[]
   /** Forwarded to StepCardChrome — disables the sortable drag handle when the
    *  card lives inside a parallel group container that owns vertical drag. */
   disableDrag?: boolean
@@ -85,11 +86,12 @@ export function ChainEditorStepCardRouter(
     case 'collect-ci-results':
       return <CollectCiResultsStepCard {...common} onConfigChange={props.onConfigChange} />
     case 'http-request':
-      // Interim placeholder; the real HttpRequestStepCard lands in Task D6.
       return (
-        <StepCardChrome {...common} onConfigChange={props.onConfigChange}>
-          <p className="text-xs text-muted-foreground">HTTP request — editor coming soon.</p>
-        </StepCardChrome>
+        <HttpRequestStepCard
+          {...common}
+          httpConnections={props.httpConnections}
+          onConfigChange={props.onConfigChange}
+        />
       )
   }
 }

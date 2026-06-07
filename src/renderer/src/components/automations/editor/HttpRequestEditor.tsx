@@ -265,11 +265,7 @@ export function HttpRequestEditor(props: HttpRequestEditorProps): React.JSX.Elem
           <Input
             aria-label={connection ? 'Path' : 'URL'}
             value={request.url}
-            placeholder={
-              connection
-                ? '/items?since={{trigger.http.updatedAt}}'
-                : 'https://api.example.com/items'
-            }
+            placeholder={connection ? '/items' : 'https://api.example.com/items'}
             onChange={(e) => onChange(setRequestField(value, { url: e.target.value }))}
             className="h-8 flex-1 text-xs"
           />

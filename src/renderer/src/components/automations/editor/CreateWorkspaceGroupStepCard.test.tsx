@@ -183,6 +183,7 @@ describe('CreateWorkspaceGroupStepCard', () => {
         repos={REPOS}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onIdChange={() => {}}
         onConfigChange={() => {}}
         onOnFailureChange={() => {}}

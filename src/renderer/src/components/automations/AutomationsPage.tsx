@@ -56,6 +56,7 @@ export default function AutomationsPage(): React.JSX.Element {
   // render via a fallback inside the selector.
   const reviewCommands = settings?.reviewCommands ?? []
   const createPrCommands = settings?.createPrCommands ?? []
+  const httpConnections = settings?.httpConnections ?? []
   const selectedId = useAppStore((s) => s.selectedAutomationId)
   const setSelectedId = useAppStore((s) => s.setSelectedAutomationId)
   const duplicateAutomation = useAppStore((s) => s.duplicateAutomation)
@@ -421,6 +422,7 @@ export default function AutomationsPage(): React.JSX.Element {
         repos={repos}
         reviewCommands={reviewCommands}
         createPrCommands={createPrCommands}
+        httpConnections={httpConnections}
         onClose={() => setEditorOpen(false)}
         onSave={handleSaveAutomation}
         onRunNow={(id, payload) => {

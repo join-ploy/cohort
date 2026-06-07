@@ -107,6 +107,7 @@ describe('ChainEditorModal — drag-and-drop wiring', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -134,6 +135,7 @@ describe('ChainEditorModal — drag-and-drop wiring', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -150,6 +152,7 @@ describe('ChainEditorModal — drag-and-drop wiring', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -190,6 +193,7 @@ describe('ChainEditorModal — drag-and-drop wiring', () => {
         ]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -234,6 +238,7 @@ describe('ChainEditorModal — drag-and-drop wiring', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />

@@ -29,6 +29,7 @@ const isMac =
 import type {
   Automation,
   AutoTrigger,
+  HttpConnection,
   RunNowPayload,
   Step,
   StepConfig,
@@ -76,6 +77,7 @@ export type ChainEditorModalProps = {
   repos: Repo[]
   reviewCommands: SidebarPromptCommand[]
   createPrCommands: SidebarPromptCommand[]
+  httpConnections: HttpConnection[]
   onClose: () => void
   onSave: (automation: Automation) => Promise<void>
   onRunNow?: (automationId: string, payload?: RunNowPayload) => void | Promise<void>
@@ -493,6 +495,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                                 repos={props.repos}
                                 reviewCommands={props.reviewCommands}
                                 createPrCommands={props.createPrCommands}
+                                httpConnections={props.httpConnections}
                                 onIdChange={(newId) => renameStep(step.id, newId)}
                                 onConfigChange={(config) => updateStepConfig(step.id, config)}
                                 onOnFailureChange={(val) => updateStep(step.id, { onFailure: val })}
@@ -532,6 +535,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                           repos={props.repos}
                           reviewCommands={props.reviewCommands}
                           createPrCommands={props.createPrCommands}
+                          httpConnections={props.httpConnections}
                           onIdChange={(newId) => renameStep(item.id, newId)}
                           onConfigChange={(config) => updateStepConfig(item.id, config)}
                           onOnFailureChange={(val) => updateStep(item.id, { onFailure: val })}
