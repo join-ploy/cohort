@@ -1,7 +1,12 @@
 import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import type { AutomationService } from '../automations/service'
-import { maskAutoTriggers, sealAutoTriggers } from '../automations/http-endpoint-secrets'
+import {
+  maskAutoTriggers,
+  sealAutoTriggers,
+  sealHttpRequestSteps,
+  maskHttpRequestSteps
+} from '../automations/http-endpoint-secrets'
 import type {
   Automation,
   AutomationCreateInput,
@@ -14,24 +19,35 @@ import type {
 } from '../../shared/automations-types'
 
 export function registerAutomationHandlers(store: Store, service: AutomationService): void {
-  // Why: http-endpoint request secrets are sealed (ciphertext) at rest and must
-  // be masked before any automation crosses to the renderer; on save we re-seal
-  // against the PRIOR stored trigger so an unchanged (masked) secret keeps its
-  // ciphertext instead of being overwritten with the mask sentinel.
+  // Why: http trigger AND http-request step request secrets are sealed (ciphertext)
+  // at rest and must be masked before any automation crosses to the renderer; on
+  // save we re-seal against the PRIOR stored trigger/step so an unchanged (masked)
+  // secret keeps its ciphertext instead of being overwritten with the mask sentinel.
   const maskAutomation = (a: Automation): Automation => ({
     ...a,
-    autoTriggers: maskAutoTriggers(a.autoTriggers)
+    autoTriggers: maskAutoTriggers(a.autoTriggers),
+    steps: maskHttpRequestSteps(a.steps)
   })
   const sealInput = (input: AutomationCreateInput): AutomationCreateInput => ({
     ...input,
-    autoTriggers: sealAutoTriggers(input.autoTriggers, undefined)
+    autoTriggers: sealAutoTriggers(input.autoTriggers, undefined),
+    steps: sealHttpRequestSteps(input.steps, undefined)
   })
   const sealUpdates = (id: string, updates: AutomationUpdateInput): AutomationUpdateInput => {
-    if (!('autoTriggers' in updates)) {
+    const touchesTriggers = 'autoTriggers' in updates
+    const touchesSteps = 'steps' in updates
+    if (!touchesTriggers && !touchesSteps) {
       return updates
     }
     const prior = store.listAutomations().find((a) => a.id === id)
-    return { ...updates, autoTriggers: sealAutoTriggers(updates.autoTriggers, prior?.autoTriggers) }
+    const sealed: AutomationUpdateInput = { ...updates }
+    if (touchesTriggers) {
+      sealed.autoTriggers = sealAutoTriggers(updates.autoTriggers, prior?.autoTriggers)
+    }
+    if (touchesSteps) {
+      sealed.steps = sealHttpRequestSteps(updates.steps, prior?.steps)
+    }
+    return sealed
   }
 
   ipcMain.handle('automations:list', (): Automation[] =>

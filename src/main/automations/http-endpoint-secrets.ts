@@ -4,7 +4,10 @@ import {
   type AutoTrigger,
   type HttpConnection,
   type HttpKeyValue,
-  type HttpRequestConfig
+  type HttpRequestConfig,
+  type HttpRequestStepConfig,
+  type Step,
+  type StepOrGroup
 } from '../../shared/automations-types'
 
 // On save: encrypt freshly typed secrets; reuse stored ciphertext when the
@@ -160,6 +163,73 @@ export function maskAutoTriggers(triggers: AutoTrigger[] | undefined): AutoTrigg
       }
     }
   })
+}
+
+// Seal every http-request step's request secrets against the prior saved steps
+// (matched by step id) so unchanged masked values keep their ciphertext. Walks
+// parallel groups; non-http-request steps pass through untouched.
+export function sealHttpRequestSteps(
+  next: StepOrGroup[] | undefined,
+  prior: StepOrGroup[] | undefined
+): StepOrGroup[] | undefined {
+  if (!next) {
+    return next
+  }
+  const priorById = new Map<string, Step>()
+  for (const item of prior ?? []) {
+    for (const step of Array.isArray(item) ? item : [item]) {
+      priorById.set(step.id, step)
+    }
+  }
+  const sealStep = (step: Step): Step => {
+    if (step.kind !== 'http-request') {
+      return step
+    }
+    const config = step.config as HttpRequestStepConfig
+    const priorReq = (priorById.get(step.id)?.config as HttpRequestStepConfig | undefined)?.request
+    return {
+      ...step,
+      config: {
+        ...config,
+        request: {
+          ...config.request,
+          headers: sealHttpKeyValues(config.request.headers, priorReq?.headers ?? []),
+          query: sealHttpKeyValues(config.request.query, priorReq?.query ?? []),
+          body: sealBody(config.request, priorReq)
+        }
+      }
+    }
+  }
+  return next.map((item) => (Array.isArray(item) ? item.map(sealStep) : sealStep(item)))
+}
+
+// On read for the renderer: never expose http-request step secret ciphertext.
+export function maskHttpRequestSteps(steps: StepOrGroup[] | undefined): StepOrGroup[] | undefined {
+  if (!steps) {
+    return steps
+  }
+  const maskStep = (step: Step): Step => {
+    if (step.kind !== 'http-request') {
+      return step
+    }
+    const config = step.config as HttpRequestStepConfig
+    return {
+      ...step,
+      config: {
+        ...config,
+        request: {
+          ...config.request,
+          headers: maskHttpKeyValues(config.request.headers),
+          query: maskHttpKeyValues(config.request.query),
+          body:
+            config.request.bodySecret && config.request.body
+              ? HTTP_SECRET_MASK
+              : config.request.body
+        }
+      }
+    }
+  }
+  return steps.map((item) => (Array.isArray(item) ? item.map(maskStep) : maskStep(item)))
 }
 
 // Seal each connection's header secrets against the prior saved connections
