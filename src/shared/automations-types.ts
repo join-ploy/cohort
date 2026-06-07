@@ -160,6 +160,8 @@ export type RunNowPayload = {
   github?: { pr: GithubPrPayload }
   // Mapped variables from a polled/picked HTTP item → run.context.trigger.http.
   http?: Record<string, unknown>
+  // Schedule fire metadata → run.context.trigger.schedule for templating.
+  schedule?: { firedAt: number; scheduledFor: number; cron: string; timezone: string }
   // Operator-picked project at manual-run time. When set, takes precedence
   // over the automation's stored projectId for that run.
   projectId?: string
@@ -189,7 +191,7 @@ export type TriggerConfig = {
 
 // Auto-trigger source identifiers. Each source has its own poller wiring;
 // extra sources will be added here as they come online.
-export type TriggerSourceId = 'linear-issue' | 'github-pr' | 'http-endpoint'
+export type TriggerSourceId = 'linear-issue' | 'github-pr' | 'http-endpoint' | 'schedule'
 
 // Renderer-facing projection of a FieldDescriptor. The main-process descriptor
 // carries `fetchOptions: (ctx) => Promise<...>`, which cannot cross the IPC
@@ -249,6 +251,15 @@ export type AutoTrigger = {
   http?: HttpEndpointConfig
   pollingEnabled?: boolean
   manualEnabled?: boolean
+  // schedule source only: the cron recurrence + timezone this trigger fires on.
+  schedule?: ScheduleConfig
+}
+
+// Schedule trigger config — a standard 5-field cron plus an IANA timezone.
+// The visual builder edits this; the raw-cron field exposes `cron` directly.
+export type ScheduleConfig = {
+  cron: string
+  timezone: string
 }
 
 // --- Generic HTTP endpoint trigger ---------------------------------------

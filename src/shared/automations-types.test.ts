@@ -17,7 +17,9 @@ import type {
   WaitForSetupConfig,
   RunCommandConfig,
   UpdateLinearIssueConfig,
-  LinearIssuePayload
+  LinearIssuePayload,
+  TriggerSourceId,
+  ScheduleConfig
 } from './automations-types'
 import type { TuiAgent } from './types'
 
@@ -224,6 +226,15 @@ describe('AutoTrigger shape', () => {
       autoTriggers: [trig]
     }
     expect(a.autoTriggers?.[0]?.rules[0]?.projectId).toBe('p1')
+  })
+})
+
+describe('schedule trigger source', () => {
+  it('schedule is a trigger source with a cron+timezone config', () => {
+    expectTypeOf<'schedule'>().toMatchTypeOf<TriggerSourceId>()
+    expectTypeOf<ScheduleConfig>().toEqualTypeOf<{ cron: string; timezone: string }>()
+    const t: Pick<AutoTrigger, 'schedule'> = { schedule: { cron: '0 9 * * *', timezone: 'UTC' } }
+    expect(t.schedule?.cron).toBe('0 9 * * *')
   })
 })
 
