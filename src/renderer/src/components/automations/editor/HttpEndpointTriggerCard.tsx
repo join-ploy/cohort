@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
+  type HttpConnection,
   type HttpKeyValue,
   type HttpMethod,
   type MappedField
@@ -25,6 +26,7 @@ import {
   removeHeader,
   removeQuery,
   renameField,
+  setConnectionId,
   setDateGateField,
   setDedupeFields,
   setIntervalMs,
@@ -61,6 +63,9 @@ export type HttpEndpointTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker in the conditions section. */
   projects: { id: string; displayName: string }[]
+  /** Reusable connection library — the picker references one by id; when set, the
+   *  URL field becomes a path joined to the connection's base URL. */
+  httpConnections: HttpConnection[]
 }
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -208,7 +213,7 @@ function CapabilitySwitch(props: CapabilitySwitchProps): React.JSX.Element {
 }
 
 export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): React.JSX.Element {
-  const { trigger, onChange, onRemove, automationId, projects } = props
+  const { trigger, onChange, onRemove, automationId, projects, httpConnections } = props
   const http = trigger.http
 
   // Why: persisted sample drives the items dropdown + remapping offline, so
@@ -245,6 +250,11 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
   }
 
   const request = http.request
+  // A dangling connectionId (connection deleted, no D7 validation yet) resolves to
+  // undefined, which falls the field back to absolute-URL labeling — acceptable.
+  const connection = http.connectionId
+    ? httpConnections.find((c) => c.id === http.connectionId)
+    : undefined
   // Why: the whole-item + array outputs (json) are usable as variables but not as
   // dedupe keys, date gates, or picker labels — those need scalar leaf fields.
   const scalarFields = http.fields.filter((f) => f.enabled && f.type !== 'json')
@@ -350,6 +360,21 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
         {/* 2. Request */}
         <div className="space-y-2">
           <SectionHeading>Request</SectionHeading>
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-medium text-muted-foreground">Connection</p>
+            <NativeSelect
+              ariaLabel="Connection"
+              value={http.connectionId ?? ''}
+              onChange={(id) => onChange(setConnectionId(trigger, id === '' ? undefined : id))}
+            >
+              <option value="">None — inline URL</option>
+              {httpConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.displayName}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
           <div className="flex items-center gap-2">
             <NativeSelect
               ariaLabel="Method"
@@ -365,13 +390,22 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               ))}
             </NativeSelect>
             <Input
-              aria-label="URL"
+              aria-label={connection ? 'Path' : 'URL'}
               value={request.url}
-              placeholder="https://api.example.com/items"
+              placeholder={
+                connection
+                  ? '/items?since={{trigger.http.updatedAt}}'
+                  : 'https://api.example.com/items'
+              }
               onChange={(e) => onChange(setRequestField(trigger, { url: e.target.value }))}
               className="h-8 flex-1 text-xs"
             />
           </div>
+          {connection ? (
+            <p className="text-[11px] text-muted-foreground">
+              Joined to {connection.baseUrl} · headers from {connection.displayName}
+            </p>
+          ) : null}
 
           <div className="space-y-1.5">
             {/* Why: block label (not inline span) so the Add button below doesn't

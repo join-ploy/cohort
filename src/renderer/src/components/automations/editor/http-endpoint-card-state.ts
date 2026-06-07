@@ -36,6 +36,15 @@ export function setRequestField(
   return withRequest(trigger, (request) => ({ ...request, ...patch }))
 }
 
+// Select/clear the reusable connection this trigger points at. Clearing returns
+// the card to fully-inline mode (URL is an absolute URL again).
+export function setConnectionId(
+  trigger: AutoTrigger,
+  connectionId: string | undefined
+): AutoTrigger {
+  return withHttp(trigger, (http) => ({ ...http, connectionId }))
+}
+
 export function addHeader(trigger: AutoTrigger): AutoTrigger {
   return withRequest(trigger, (request) => ({
     ...request,

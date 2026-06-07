@@ -7,6 +7,7 @@ import type {
   AutoTrigger,
   Condition,
   ConditionOp,
+  HttpConnection,
   Rule,
   SerializableFieldDescriptor,
   TriggerSourceId
@@ -28,6 +29,8 @@ export type AutoTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker. */
   projects: { id: string; displayName: string }[]
+  /** Reusable connection library — forwarded to the http-endpoint card's picker. */
+  httpConnections: HttpConnection[]
   /** Repo catalog for the github-pr watch-list combobox. Optional so legacy /
    *  linear-only call sites stay unchanged; defaults to an empty list. */
   repos?: Repo[]
@@ -173,6 +176,7 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
         onRemove={props.onRemove}
         automationId={props.automationId}
         projects={props.projects}
+        httpConnections={props.httpConnections}
       />
     )
   }

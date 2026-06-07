@@ -6,12 +6,17 @@ import { useAppStore } from '@/store'
 import type {
   TriggerConfig,
   AutoTrigger,
+  HttpConnection,
   SerializableFieldDescriptor,
   SerializableTriggerSource,
   TriggerSourceId
 } from '../../../../../shared/automations-types'
 import type { Repo } from '../../../../../shared/types'
 import { AutoTriggerCard } from './AutoTriggerCard'
+
+// Stable empty fallback so reads while settings is null don't churn an extra
+// render with a fresh array identity each time.
+const EMPTY_HTTP_CONNECTIONS: HttpConnection[] = []
 
 export type TriggersModalProps = {
   open: boolean
@@ -44,6 +49,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
     () => repos.map((r) => ({ id: r.id, displayName: r.displayName })),
     [repos]
   )
+  const httpConnections = useAppStore((s) => s.settings?.httpConnections ?? EMPTY_HTTP_CONNECTIONS)
 
   // Why: load the source catalog from main on each modal open so a fresh
   // Linear connect/disconnect is reflected without a reload. Empty default keeps
@@ -299,6 +305,7 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
                       }
                       onRemove={() => removeTrigger(t.id)}
                       projects={projects}
+                      httpConnections={httpConnections}
                       repos={repos}
                       fieldCatalog={fieldCatalogBySource.get(t.source) ?? []}
                       loadOptions={loadOptionsFor(t.source)}
