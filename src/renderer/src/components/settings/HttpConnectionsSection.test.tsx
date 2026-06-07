@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { HTTP_SECRET_MASK, type HttpConnection } from '../../../../shared/automations-types'
 
 // Why: SearchableSetting reads the search query from useAppStore — stub it so the
@@ -17,7 +18,13 @@ import { HttpConnectionsSection } from './HttpConnectionsSection'
 afterEach(() => cleanup())
 
 function conn(overrides: Partial<HttpConnection> = {}): HttpConnection {
-  return { id: 'c1', displayName: 'Prod API', baseUrl: '', headers: [], ...overrides }
+  return {
+    id: 'c1',
+    displayName: 'Prod API',
+    baseUrl: '',
+    headers: [],
+    ...overrides
+  }
 }
 
 describe('HttpConnectionsSection', () => {
@@ -44,7 +51,14 @@ describe('HttpConnectionsSection', () => {
   it('renders a masked secret header as set with Replace (no editable value), and Replace clears it', () => {
     const onChange = vi.fn()
     const existing = conn({
-      headers: [{ id: 'h1', key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+      headers: [
+        {
+          id: 'h1',
+          key: 'Authorization',
+          value: HTTP_SECRET_MASK,
+          secret: true
+        }
+      ]
     })
     render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
     expect(screen.getByText('•••• (set)')).toBeTruthy()
@@ -61,5 +75,43 @@ describe('HttpConnectionsSection', () => {
     render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete Prod API' }))
     expect(onChange).toHaveBeenCalledWith([])
+  })
+
+  // Why: user-event (not fireEvent) simulates the blur-before-click focus shift
+  // that triggers the clobber bug — the toggle's payload must fold the live
+  // valueDraft so the just-typed value survives the discrete action.
+  it('preserves a typed header value when the secret toggle is clicked', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const existing = conn({
+      headers: [{ id: 'h1', key: 'Authorization', value: '', secret: false }]
+    })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+
+    await user.type(screen.getByLabelText('Header value'), 'sk-123')
+    await user.click(screen.getByRole('button', { name: 'Toggle Header secret' }))
+
+    // The controlled spy never re-feeds props, so find the call that flipped
+    // secret on (the toggle's payload) and assert it kept the typed value.
+    const toggleCall = [...onChange.mock.calls]
+      .reverse()
+      .map((c) => c[0] as HttpConnection[])
+      .find((next) => next[0].headers[0].secret === true)
+    expect(toggleCall).toBeTruthy()
+    expect(toggleCall![0].headers[0].value).toBe('sk-123')
+    expect(toggleCall![0].headers[0].secret).toBe(true)
+  })
+
+  it('appends a header with an id when Add header is clicked', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const existing = conn({ headers: [] })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add header' }))
+
+    const next = onChange.mock.calls.at(-1)![0] as HttpConnection[]
+    expect(next[0].headers).toHaveLength(1)
+    expect(typeof next[0].headers[0].id).toBe('string')
   })
 })

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Automation } from '../../../../shared/automations-types'
+import type { Automation, HttpConnection } from '../../../../shared/automations-types'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { useAppStore } from '../../store'
@@ -13,6 +13,10 @@ export { AUTOMATIONS_PANE_SEARCH_ENTRIES }
 // IPC layer clamps to [15, 600] so the UI only needs to show the current
 // value and forward edits without local clamp duplication.
 const DEFAULT_POLL_INTERVAL_SECONDS = 60
+
+// Why: a stable reference so the Zustand selector's Object.is check doesn't see a
+// fresh [] every call (which would force extra renders) during the null/loading window.
+const EMPTY_HTTP_CONNECTIONS: HttpConnection[] = []
 
 export function hasAnyEnabledLinearIssueTrigger(automations: Automation[]): boolean {
   for (const automation of automations) {
@@ -128,7 +132,7 @@ export function AutomationsPane(): React.JSX.Element {
   )
   const updateSettings = useAppStore((s) => s.updateSettings)
   const linearStatus = useAppStore((s) => s.linearStatus)
-  const httpConnections = useAppStore((s) => s.settings?.httpConnections ?? [])
+  const httpConnections = useAppStore((s) => s.settings?.httpConnections ?? EMPTY_HTTP_CONNECTIONS)
 
   // Why: automations aren't in the global store, so fetch them here and
   // refresh on the existing `automations:changed` broadcast. The banner is

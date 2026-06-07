@@ -9,7 +9,6 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { SearchableSetting } from './SearchableSetting'
-import { AUTOMATIONS_PANE_SEARCH_ENTRIES } from './automations-search'
 
 type HttpConnectionsSectionProps = {
   httpConnections: HttpConnection[]
@@ -32,8 +31,6 @@ export function HttpConnectionsSection({
     onChange([...httpConnections, next])
   }, [httpConnections, onChange])
 
-  const entry = AUTOMATIONS_PANE_SEARCH_ENTRIES[2]
-
   return (
     <section className="space-y-6">
       <div className="space-y-1">
@@ -45,18 +42,21 @@ export function HttpConnectionsSection({
       </div>
 
       <SearchableSetting
-        title={entry.title}
-        description={entry.description}
-        keywords={entry.keywords}
+        title="HTTP Connections"
+        description="Reusable HTTP base URL + headers (including secret auth) for HTTP triggers and request steps."
+        keywords={[
+          'automation',
+          'http',
+          'connection',
+          'base url',
+          'header',
+          'secret',
+          'auth',
+          'reusable'
+        ]}
       >
         <div className="space-y-3 rounded-2xl border border-border/50 bg-background/80 p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h5 className="text-sm font-semibold">HTTP Connections</h5>
-              <p className="text-xs text-muted-foreground">
-                Define a connection once, then reference it from HTTP triggers and request steps.
-              </p>
-            </div>
+          <div className="flex items-center justify-end gap-3">
             <Button type="button" variant="outline" size="sm" onClick={handleAdd} className="gap-2">
               <Plus className="size-3.5" />
               Add
@@ -118,15 +118,26 @@ function ConnectionEditor({ value, onChange, onDelete }: ConnectionEditorProps):
     }
   }, [urlDraft, onChange, value])
 
-  const addHeader = useCallback(() => {
+  // Why: header edits and Add-header fire while name/URL drafts may be pending and
+  // uncommitted (updateSettings is async); fold the live drafts in so a header
+  // action can't drop an in-progress connection name/URL edit.
+  const current: HttpConnection = {
+    ...value,
+    displayName: nameDraft,
+    baseUrl: urlDraft
+  }
+
+  // Plain arrow (not useCallback): `current` is rebuilt every render, so
+  // memoizing here would buy nothing and risk capturing stale drafts.
+  const addHeader = (): void => {
     const header: HttpKeyValue = {
       id: globalThis.crypto.randomUUID(),
       key: '',
       value: '',
       secret: false
     }
-    onChange({ ...value, headers: [...value.headers, header] })
-  }, [onChange, value])
+    onChange({ ...current, headers: [...value.headers, header] })
+  }
 
   return (
     <div className="space-y-3 rounded-xl border border-border/40 bg-background/60 p-3">
@@ -173,15 +184,23 @@ function ConnectionEditor({ value, onChange, onDelete }: ConnectionEditorProps):
         {/* Block label (not inline) so the Add button doesn't collapse onto the
             label's line when there are no header rows yet. */}
         <p className="text-[11px] font-medium text-muted-foreground">Headers</p>
+        {/* Match headers by reference, not id: HttpKeyValue.id is optional, so two
+            legacy id-less rows could falsely collide on an undefined id. */}
         {value.headers.map((header) => (
           <HeaderRow
             key={header.id}
             pair={header}
             onChange={(next) =>
-              onChange({ ...value, headers: value.headers.map((h) => (h === header ? next : h)) })
+              onChange({
+                ...current,
+                headers: value.headers.map((h) => (h === header ? next : h))
+              })
             }
             onRemove={() =>
-              onChange({ ...value, headers: value.headers.filter((h) => h !== header) })
+              onChange({
+                ...current,
+                headers: value.headers.filter((h) => h !== header)
+              })
             }
           />
         ))}
@@ -224,6 +243,11 @@ function HeaderRow({ pair, onChange, onRemove }: HeaderRowProps): React.JSX.Elem
     }
   }, [valueDraft, onChange, pair])
 
+  // Why: discrete actions (toggle secret, Replace) fire alongside the input's
+  // blur; since updateSettings is async the props are still stale when they run,
+  // so fold the live drafts in to avoid clobbering an uncommitted key/value edit.
+  const current: HttpKeyValue = { ...pair, key: keyDraft, value: valueDraft }
+
   // Why: a sealed secret arrives from main as the mask sentinel — show it as
   // "set" and disabled so the user can't silently overwrite it by tabbing
   // through; an explicit Replace clears it back to an editable field.
@@ -246,7 +270,7 @@ function HeaderRow({ pair, onChange, onRemove }: HeaderRowProps): React.JSX.Elem
           <button
             type="button"
             className="cursor-pointer font-medium text-foreground hover:underline"
-            onClick={() => onChange({ ...pair, value: '' })}
+            onClick={() => onChange({ ...current, value: '' })}
           >
             Replace
           </button>
@@ -268,7 +292,7 @@ function HeaderRow({ pair, onChange, onRemove }: HeaderRowProps): React.JSX.Elem
         aria-label="Toggle Header secret"
         aria-pressed={pair.secret ?? false}
         title={pair.secret ? 'Secret — encrypted at rest' : 'Mark as secret'}
-        onClick={() => onChange({ ...pair, secret: !(pair.secret ?? false) })}
+        onClick={() => onChange({ ...current, secret: !(pair.secret ?? false) })}
       >
         {pair.secret ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
       </Button>
