@@ -280,6 +280,15 @@ export type HttpKeyValue = {
   secret?: boolean
 }
 
+// A reusable HTTP connection: the shared base URL + headers (incl. secrets) that
+// multiple http nodes (trigger + request steps) point at, entered once.
+export type HttpConnection = {
+  id: string
+  displayName: string
+  baseUrl: string
+  headers: HttpKeyValue[]
+}
+
 export type HttpRequestConfig = {
   method: HttpMethod
   url: string
@@ -308,6 +317,8 @@ export type MappedField = {
 
 export type HttpEndpointConfig = {
   request: HttpRequestConfig
+  // reusable connection whose base URL + headers merge into this request
+  connectionId?: string
   // Dot-path to the items array; null = the whole response body is one item.
   itemsPath: string | null
   fields: MappedField[]

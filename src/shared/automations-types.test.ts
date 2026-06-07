@@ -19,7 +19,9 @@ import type {
   UpdateLinearIssueConfig,
   LinearIssuePayload,
   TriggerSourceId,
-  ScheduleConfig
+  ScheduleConfig,
+  HttpConnection,
+  HttpEndpointConfig
 } from './automations-types'
 import type { TuiAgent } from './types'
 
@@ -235,6 +237,20 @@ describe('schedule trigger source', () => {
     expectTypeOf<ScheduleConfig>().toEqualTypeOf<{ cron: string; timezone: string }>()
     const t: Pick<AutoTrigger, 'schedule'> = { schedule: { cron: '0 9 * * *', timezone: 'UTC' } }
     expect(t.schedule?.cron).toBe('0 9 * * *')
+  })
+})
+
+describe('HttpConnection', () => {
+  it('HttpConnection holds id, displayName, baseUrl, secret-capable headers', () => {
+    const c: HttpConnection = {
+      id: 'c1',
+      displayName: 'Acme',
+      baseUrl: 'https://api.acme.dev',
+      headers: [{ key: 'X-Api-Key', value: 'secret', secret: true }]
+    }
+    expect(c.baseUrl).toBe('https://api.acme.dev')
+    const cfg: Pick<HttpEndpointConfig, 'connectionId'> = { connectionId: 'c1' }
+    expect(cfg.connectionId).toBe('c1')
   })
 })
 

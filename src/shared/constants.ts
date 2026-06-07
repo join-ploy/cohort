@@ -324,6 +324,9 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // something usable out of the box. Users can rename / replace / delete
     // from the General settings pane.
     reviewCommands: getDefaultReviewCommands(),
+    // Why: unlike reviewCommands/createPrCommands, no seed — connections carry
+    // secrets and are user-specific, so there's nothing sensible to ship.
+    httpConnections: [],
     createPrCommands: getDefaultCreatePrCommands(),
     // Why: VS Code preset + empty custom commands so the Editor button works out
     // of the box and Diff/Database custom stay disabled (faded) until configured.

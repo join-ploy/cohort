@@ -108,6 +108,7 @@ function createSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings
     terminalUnixShell: '',
     enableGitHubAttribution: true,
     reviewCommands: [],
+    httpConnections: [],
     createPrCommands: [],
     ...overrides,
     appFontFamily
