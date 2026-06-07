@@ -5,6 +5,7 @@ import { Label } from '../ui/label'
 import { useAppStore } from '../../store'
 import { SearchableSetting } from './SearchableSetting'
 import { AUTOMATIONS_PANE_SEARCH_ENTRIES } from './automations-search'
+import { HttpConnectionsSection } from './HttpConnectionsSection'
 
 export { AUTOMATIONS_PANE_SEARCH_ENTRIES }
 
@@ -127,6 +128,7 @@ export function AutomationsPane(): React.JSX.Element {
   )
   const updateSettings = useAppStore((s) => s.updateSettings)
   const linearStatus = useAppStore((s) => s.linearStatus)
+  const httpConnections = useAppStore((s) => s.settings?.httpConnections ?? [])
 
   // Why: automations aren't in the global store, so fetch them here and
   // refresh on the existing `automations:changed` broadcast. The banner is
@@ -160,13 +162,19 @@ export function AutomationsPane(): React.JSX.Element {
   }, [])
 
   return (
-    <AutomationsPaneView
-      pollIntervalSeconds={pollIntervalSeconds}
-      linearConnected={linearStatus.connected}
-      hasEnabledLinearTrigger={hasEnabledLinearTrigger}
-      onCommitPollInterval={(next) => {
-        void updateSettings({ automationsPollIntervalSeconds: next })
-      }}
-    />
+    <div className="space-y-8">
+      <AutomationsPaneView
+        pollIntervalSeconds={pollIntervalSeconds}
+        linearConnected={linearStatus.connected}
+        hasEnabledLinearTrigger={hasEnabledLinearTrigger}
+        onCommitPollInterval={(next) => {
+          void updateSettings({ automationsPollIntervalSeconds: next })
+        }}
+      />
+      <HttpConnectionsSection
+        httpConnections={httpConnections}
+        onChange={(next) => void updateSettings({ httpConnections: next })}
+      />
+    </div>
   )
 }

@@ -1,0 +1,65 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, fireEvent } from '@testing-library/react'
+import { HTTP_SECRET_MASK, type HttpConnection } from '../../../../shared/automations-types'
+
+// Why: SearchableSetting reads the search query from useAppStore — stub it so the
+// empty query passes the filter and the section's children actually render.
+vi.mock('@/store', () => ({
+  useAppStore: (selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector({ settingsSearchQuery: '' }) : {}
+}))
+
+import { HttpConnectionsSection } from './HttpConnectionsSection'
+
+// Why: jsdom auto-cleanup is off (no setupFiles), so accumulated DOM would make
+// role/label queries ambiguous between tests.
+afterEach(() => cleanup())
+
+function conn(overrides: Partial<HttpConnection> = {}): HttpConnection {
+  return { id: 'c1', displayName: 'Prod API', baseUrl: '', headers: [], ...overrides }
+}
+
+describe('HttpConnectionsSection', () => {
+  it('adds a connection with an id and empty headers when Add is clicked', () => {
+    const onChange = vi.fn()
+    render(<HttpConnectionsSection httpConnections={[]} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    const next = onChange.mock.calls[0][0] as HttpConnection[]
+    expect(next).toHaveLength(1)
+    expect(typeof next[0].id).toBe('string')
+    expect(next[0].headers).toEqual([])
+  })
+
+  it('commits an edited name on blur', () => {
+    const onChange = vi.fn()
+    const existing = conn({ displayName: 'Old' })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+    const name = screen.getByPlaceholderText('Production API') as HTMLInputElement
+    fireEvent.change(name, { target: { value: 'New name' } })
+    fireEvent.blur(name)
+    expect(onChange).toHaveBeenCalledWith([{ ...existing, displayName: 'New name' }])
+  })
+
+  it('renders a masked secret header as set with Replace (no editable value), and Replace clears it', () => {
+    const onChange = vi.fn()
+    const existing = conn({
+      headers: [{ id: 'h1', key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+    expect(screen.getByText('•••• (set)')).toBeTruthy()
+    expect(screen.queryByLabelText('Header value')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(onChange).toHaveBeenCalledWith([
+      { ...existing, headers: [{ ...existing.headers[0], value: '' }] }
+    ])
+  })
+
+  it('removes a connection when its delete button is clicked', () => {
+    const onChange = vi.fn()
+    const existing = conn({ displayName: 'Prod API' })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Prod API' }))
+    expect(onChange).toHaveBeenCalledWith([])
+  })
+})
