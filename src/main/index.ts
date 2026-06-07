@@ -66,6 +66,7 @@ import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
 import { makeGithubPrSource } from './automations/trigger-sources/github-pr'
 import { makeHttpEndpointSource } from './automations/trigger-sources/http-endpoint'
+import { makeScheduleSource } from './automations/trigger-sources/schedule'
 import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
@@ -684,6 +685,7 @@ app.whenReady().then(async () => {
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
   triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
   triggerSourceRegistry.register(makeHttpEndpointSource())
+  triggerSourceRegistry.register(makeScheduleSource())
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.
   registerTriggerSourceHandlers(triggerSourceRegistry)
