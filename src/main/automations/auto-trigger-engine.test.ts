@@ -620,6 +620,9 @@ describe('AutoTriggerEngine — schedule trigger', () => {
   const CRON = '0 9 * * *'
   const NINE_AM = Date.UTC(2026, 5, 7, 9, 0, 0)
   const NEXT_NINE_AM = Date.UTC(2026, 5, 8, 9, 0, 0)
+  // Mirror the engine's non-exported SCHEDULE_MAX_LATENESS_MS (not exported just
+  // for tests); the boundary cases below depend on this exact value.
+  const GRACE_MS = 5 * 60_000
 
   const scheduleAutomation = (): ReturnType<typeof makeAutomation> =>
     makeAutomation({
@@ -709,7 +712,7 @@ describe('AutoTriggerEngine — schedule trigger', () => {
     expect(scheduleNextRunMap.get('at1')).toBe(NINE_AM)
   })
 
-  it('is idempotent under a double tick at the same instant', async () => {
+  it('does not re-fire the same instant on a later tick (clock already advanced)', async () => {
     const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
     const { engine, dispatched } = makeEngine({
       source: makeScheduleSource(),
@@ -747,5 +750,113 @@ describe('AutoTriggerEngine — schedule trigger', () => {
     })
     await engine.tick()
     expect(dispatched).toEqual([])
+  })
+
+  it('degrades safely on an invalid cron — no fire, no throw, stays unanchored', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'schedule',
+          enabled: true,
+          enabledAt: 0,
+          rules: [],
+          schedule: { cron: 'garbage', timezone: 'UTC' }
+        }
+      ]
+    })
+    const errors: { where: string }[] = []
+    const scheduleNextRunMap = new Map<string, number>()
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [automation],
+      now: NINE_AM - 60_000,
+      scheduleNextRunMap,
+      onError: (where) => {
+        errors.push({ where })
+      }
+    })
+    // nextOccurrenceAfter returns null for a bad cron, so the anchor branch is a
+    // harmless no-op: it never throws, never fires, and never anchors.
+    await expect(engine.tick()).resolves.toBeUndefined()
+    expect(dispatched).toEqual([])
+    expect(scheduleNextRunMap.get('at1')).toBeUndefined()
+    expect(errors).toEqual([])
+  })
+
+  it('suppresses dispatch when the fire instant is already in the dedup set', async () => {
+    // Seed dedup with the exact entityId this fire would use so the per-event
+    // loop hits the dedupHas → continue branch (the real at-most-once belt),
+    // not the clock-advance guard the later-tick test covers.
+    const dedup = new Set<string>([`a1|at1|${new Date(NINE_AM).toISOString()}`])
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM + 10_000, // within grace, so it reaches the poll + event loop
+      dedup,
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+  })
+
+  it('fires at exactly the grace-window boundary', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM + GRACE_MS, // exactly at the boundary — still fresh, fires
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([
+      {
+        automationId: 'a1',
+        ruleId: 'implicit',
+        entityId: new Date(NINE_AM).toISOString()
+      }
+    ])
+  })
+
+  it('skips one millisecond past the grace window and re-anchors without firing', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM + GRACE_MS + 1, // one tick past the window — skip-missed
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    expect(scheduleNextRunMap.get('at1')).toBe(NEXT_NINE_AM)
+  })
+
+  it('anchors past a future enabledAt via Math.max(now, enabledAt)', async () => {
+    const automation = makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'schedule',
+          enabled: true,
+          // enabledAt sits days after the next 09:00, so the anchor must respect
+          // it rather than anchoring to the occurrence right after `now`.
+          enabledAt: Date.UTC(2026, 5, 10, 0, 0, 0),
+          rules: [],
+          schedule: { cron: CRON, timezone: 'UTC' }
+        }
+      ]
+    })
+    const scheduleNextRunMap = new Map<string, number>()
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [automation],
+      now: Date.UTC(2026, 5, 7, 8, 30, 0),
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    // First 09:00 strictly after enabledAt (10 Jun), not after now (7 Jun).
+    expect(scheduleNextRunMap.get('at1')).toBe(Date.UTC(2026, 5, 10, 9, 0, 0))
   })
 })

@@ -288,6 +288,8 @@ export class AutoTriggerEngine {
 
     if (nextRunAt === 0) {
       // First observation this process: anchor strictly in the future.
+      // Anchoring strictly in the future means a trigger created in the ~1 tick before
+      // its first occurrence will skip that occurrence — an accepted skip-missed cost.
       const anchor = nextOccurrenceAfter(cron, timezone, Math.max(nowMs, trigger.enabledAt))
       if (anchor !== null) {
         this.deps.scheduleNextRunSet(trigger.id, anchor)
