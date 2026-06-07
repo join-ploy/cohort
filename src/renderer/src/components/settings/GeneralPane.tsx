@@ -91,7 +91,7 @@ function ArchiveDurationRow({
       className="flex items-center justify-between gap-4 px-1 py-2"
     >
       <div className="space-y-0.5">
-        <Label>{title}</Label>
+        <Label htmlFor={id}>{title}</Label>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
       <div className="flex items-center gap-2">
@@ -102,10 +102,15 @@ function ArchiveDurationRow({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => commit(draft, parts.unit)}
-          className="h-7 w-16 text-xs"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              commit(draft, parts.unit)
+            }
+          }}
+          className="number-input-clean h-7 w-16 text-xs"
         />
         <Select value={parts.unit} onValueChange={(u) => commit(draft, u as DurationUnit)}>
-          <SelectTrigger size="sm" className="h-7 w-[110px] text-xs">
+          <SelectTrigger size="sm" className="h-7 w-[120px] text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -134,6 +139,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   const [pruneAllOpen, setPruneAllOpen] = useState(false)
   const [pruneForce, setPruneForce] = useState(false)
   const [pruneBusy, setPruneBusy] = useState(false)
+  const [cleanupBusy, setCleanupBusy] = useState(false)
 
   // Why: the force option is a one-shot intent — reset it whenever the dialog
   // closes so the next open starts unchecked.
@@ -144,22 +150,45 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   }, [pruneAllOpen])
 
   const handleCleanupNow = async (): Promise<void> => {
+    setCleanupBusy(true)
     try {
-      await window.api.worktrees.cleanupArchivedNow()
-      toast.success('Cleaned up expired archived workspaces.')
+      const { removed, failed } = await window.api.worktrees.cleanupArchivedNow()
+      // Why: cleanup swallows per-item failures into archiveCleanupError, so a
+      // blocked removal would otherwise read as success — report the split.
+      if (failed > 0) {
+        toast.warning(`Cleaned up ${removed}, but ${failed} could not be removed.`, {
+          description: 'Blocked workspaces stay in the Archived view with the reason shown.'
+        })
+      } else if (removed > 0) {
+        toast.success(`Cleaned up ${removed} archived workspace${removed === 1 ? '' : 's'}.`)
+      } else {
+        toast.success('No archived workspaces were due for cleanup.')
+      }
     } catch (err) {
       toast.error('Cleanup failed', {
         description: err instanceof Error ? err.message : String(err)
       })
+    } finally {
+      setCleanupBusy(false)
     }
   }
 
   const handlePruneAll = async (): Promise<void> => {
     setPruneBusy(true)
     try {
-      await window.api.worktrees.pruneAllArchivedNow(pruneForce)
-      toast.success('Pruned all archived workspaces.')
+      const { removed, failed } = await window.api.worktrees.pruneAllArchivedNow(pruneForce)
       setPruneAllOpen(false)
+      if (failed > 0) {
+        toast.warning(`Pruned ${removed}, but ${failed} could not be deleted.`, {
+          // Why: without force, dirty worktrees fail git removal — point the user
+          // at the checkbox so the result isn't a silent dead end.
+          description: pruneForce
+            ? 'Some removals failed; see the Archived view for details.'
+            : 'Re-run with “delete workspaces with uncommitted changes” to force-remove them.'
+        })
+      } else {
+        toast.success(`Pruned ${removed} archived workspace${removed === 1 ? '' : 's'}.`)
+      }
     } catch (err) {
       toast.error('Prune failed', {
         description: err instanceof Error ? err.message : String(err)
@@ -400,8 +429,8 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleCleanupNow}>
-              Run cleanup now
+            <Button variant="outline" size="sm" onClick={handleCleanupNow} disabled={cleanupBusy}>
+              {cleanupBusy ? 'Cleaning…' : 'Run cleanup now'}
             </Button>
             <Button variant="destructive" size="sm" onClick={() => setPruneAllOpen(true)}>
               Prune all archived now

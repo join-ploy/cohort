@@ -382,6 +382,32 @@ describe('archive cleanup service', () => {
     expect(store.getWorktreeMeta(id)).toBeUndefined()
   })
 
+  it('returns a {removed, failed} summary counting worktrees and groups', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorktreeMeta('repo1::/path/ok', { isArchived: true, archivedAt: now })
+    store.setWorktreeMeta('repo1::/path/blocked', { isArchived: true, archivedAt: now })
+    store.setWorkspaceGroup(makeGroup('group:ok', true, now))
+
+    const service = createCleanupService({
+      store,
+      runRemoval: async (id) => {
+        if (id.endsWith('blocked')) {
+          throw new Error('worktree has uncommitted changes')
+        }
+        store.removeWorktreeMeta(id)
+      },
+      runGroupRemoval: async (id) => {
+        store.removeWorkspaceGroup(id)
+      }
+    })
+
+    const summary = await service.runOnce({ ignoreTtl: true })
+    // 1 worktree + 1 group removed; 1 worktree blocked.
+    expect(summary).toEqual({ removed: 2, failed: 1 })
+  })
+
   it('deps.ttlMs override wins over settings for both types', async () => {
     const store = await createStore()
     const { createCleanupService } = await loadCleanupService()

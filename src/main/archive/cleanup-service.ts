@@ -16,8 +16,14 @@ export type CleanupServiceDeps = {
   now?: () => number
 }
 
+// Why: on-demand callers (the Settings "Run cleanup now" / "Prune all" buttons)
+// need to know what actually happened — doRunOnce swallows per-item failures
+// into archiveCleanupError, so without a summary a blocked removal would still
+// look like success to the user.
+export type CleanupSummary = { removed: number; failed: number }
+
 export type CleanupService = {
-  runOnce: (options?: { ignoreTtl?: boolean; force?: boolean }) => Promise<void>
+  runOnce: (options?: { ignoreTtl?: boolean; force?: boolean }) => Promise<CleanupSummary>
   start: () => void
   stop: () => void
 }
@@ -31,7 +37,7 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
   // removal would fail and re-materialize a phantom "Cleanup blocked" record.
   let tail: Promise<void> = Promise.resolve()
 
-  function runOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<void> {
+  function runOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<CleanupSummary> {
     const run = tail.then(
       () => doRunOnce(options),
       () => doRunOnce(options)
@@ -45,7 +51,10 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
     return run
   }
 
-  async function doRunOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<void> {
+  async function doRunOnce(options?: {
+    ignoreTtl?: boolean
+    force?: boolean
+  }): Promise<CleanupSummary> {
     const ignoreTtl = options?.ignoreTtl ?? false
     const force = options?.force ?? false
     // Why: resolve TTLs per-tick (not at construction) so a settings change takes
@@ -78,10 +87,14 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
       }
       candidates.push(worktreeId)
     }
+    let removed = 0
+    let failed = 0
     for (const id of candidates) {
       try {
         await deps.runRemoval(id, { force })
+        removed++
       } catch (err) {
+        failed++
         const message = err instanceof Error ? err.message : String(err)
         // Why: stay archived and keep archivedAt set so the next tick still
         // considers this worktree past TTL and retries on its own.
@@ -109,7 +122,9 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
     for (const id of groupCandidates) {
       try {
         await deps.runGroupRemoval(id, { force })
+        removed++
       } catch (err) {
+        failed++
         const message = err instanceof Error ? err.message : String(err)
         // Why: keep the group archived (mirrors the worktree path) so the next
         // tick retries; surface the reason on the record for the Archived view's
@@ -120,6 +135,8 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         }
       }
     }
+
+    return { removed, failed }
   }
 
   function start(): void {

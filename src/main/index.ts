@@ -668,11 +668,19 @@ app.whenReady().then(async () => {
   // respects the configured per-type durations (same as the hourly tick);
   // pruneAllArchivedNow ignores them and deletes every archived item now,
   // optionally force-deleting worktrees with uncommitted changes.
+  // Why: return the {removed, failed} summary so the Settings UI can tell the
+  // user whether anything was actually pruned (doRunOnce swallows per-item
+  // failures). Falls back to a zero summary if the service isn't ready yet.
   ipcMain.handle('worktrees:cleanupArchivedNow', async () => {
-    await archiveCleanup?.runOnce()
+    return (await archiveCleanup?.runOnce()) ?? { removed: 0, failed: 0 }
   })
   ipcMain.handle('worktrees:pruneAllArchivedNow', async (_event, force: boolean) => {
-    await archiveCleanup?.runOnce({ ignoreTtl: true, force: !!force })
+    return (
+      (await archiveCleanup?.runOnce({ ignoreTtl: true, force: !!force })) ?? {
+        removed: 0,
+        failed: 0
+      }
+    )
   })
   // Why: archiveCleanup.start() is deferred until after openMainWindow() runs
   // (below) so the immediate runOnce() inside start() sees a live mainWindow.

@@ -458,9 +458,10 @@ const api = {
     restore: (args: { worktreeId: string }): Promise<void> =>
       ipcRenderer.invoke('worktrees:restore', args),
 
-    cleanupArchivedNow: (): Promise<void> => ipcRenderer.invoke('worktrees:cleanupArchivedNow'),
+    cleanupArchivedNow: (): Promise<{ removed: number; failed: number }> =>
+      ipcRenderer.invoke('worktrees:cleanupArchivedNow'),
 
-    pruneAllArchivedNow: (force: boolean): Promise<void> =>
+    pruneAllArchivedNow: (force: boolean): Promise<{ removed: number; failed: number }> =>
       ipcRenderer.invoke('worktrees:pruneAllArchivedNow', force),
 
     // Why: e2e-only seam — preloadE2EConfig.enabled is true only when ORCA_E2E_*
