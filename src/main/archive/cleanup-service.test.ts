@@ -332,6 +332,56 @@ describe('archive cleanup service', () => {
     expect(groupForce).toEqual([true])
   })
 
+  it('passes force=false by default (ignoreTtl does not imply force)', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorktreeMeta('repo1::/path/wt', { isArchived: true, archivedAt: now })
+    store.setWorkspaceGroup(makeGroup('group:g', true, now))
+
+    const wtForce: (boolean | undefined)[] = []
+    const groupForce: (boolean | undefined)[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async (_id, opts) => {
+        wtForce.push(opts?.force)
+      },
+      runGroupRemoval: async (_id, opts) => {
+        groupForce.push(opts?.force)
+      }
+    })
+
+    await service.runOnce({ ignoreTtl: true })
+    expect(wtForce).toEqual([false])
+    expect(groupForce).toEqual([false])
+  })
+
+  it('serializes overlapping runs so an id is not removed twice', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const id = 'repo1::/path/wt'
+    store.setWorktreeMeta(id, { isArchived: true, archivedAt: Date.now() })
+
+    let calls = 0
+    const service = createCleanupService({
+      store,
+      runGroupRemoval: async () => {},
+      runRemoval: async (toRemove) => {
+        calls++
+        // Why: yield so a non-serialized second run could snapshot the same id
+        // before this run drops its meta — the guard must prevent that.
+        await Promise.resolve()
+        store.removeWorktreeMeta(toRemove)
+      }
+    })
+
+    // Fire two overlapping prune-all runs without awaiting the first.
+    await Promise.all([service.runOnce({ ignoreTtl: true }), service.runOnce({ ignoreTtl: true })])
+
+    expect(calls).toBe(1)
+    expect(store.getWorktreeMeta(id)).toBeUndefined()
+  })
+
   it('deps.ttlMs override wins over settings for both types', async () => {
     const store = await createStore()
     const { createCleanupService } = await loadCleanupService()

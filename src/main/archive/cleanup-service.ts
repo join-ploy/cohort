@@ -1,4 +1,5 @@
 import { ARCHIVE_CLEANUP_INTERVAL_MS, ARCHIVE_TTL_MS } from '../../shared/archive-constants'
+import { MIN_ARCHIVE_TTL_MS } from '../../shared/archive-duration'
 import type { Store } from '../persistence'
 
 export type CleanupServiceDeps = {
@@ -25,16 +26,38 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
   const interval = deps.intervalMs ?? ARCHIVE_CLEANUP_INTERVAL_MS
   const now = deps.now ?? Date.now
   let timer: ReturnType<typeof setInterval> | null = null
+  // Why: serialize ticks so an on-demand prune from Settings can't overlap the
+  // hourly/startup tick and double-remove the same archived id — the second
+  // removal would fail and re-materialize a phantom "Cleanup blocked" record.
+  let tail: Promise<void> = Promise.resolve()
 
-  async function runOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<void> {
+  function runOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<void> {
+    const run = tail.then(
+      () => doRunOnce(options),
+      () => doRunOnce(options)
+    )
+    // Why: swallow errors on the chain pointer (not the returned promise) so one
+    // failed run doesn't poison every subsequent caller.
+    tail = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
+
+  async function doRunOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<void> {
     const ignoreTtl = options?.ignoreTtl ?? false
     const force = options?.force ?? false
     // Why: resolve TTLs per-tick (not at construction) so a settings change takes
     // effect on the next cleanup without an app restart. deps.ttlMs is the
-    // test/E2E hard override and wins over settings for both types.
+    // test/E2E hard override and wins over settings for both types. Settings
+    // values are clamped to MIN_ARCHIVE_TTL_MS so a corrupt profile writing 0
+    // can't turn the silent hourly tick into an unprompted "prune everything".
     const settings = deps.store.getSettings()
-    const worktreeTtl = deps.ttlMs ?? settings.archiveWorktreeTtlMs ?? ARCHIVE_TTL_MS
-    const groupTtl = deps.ttlMs ?? settings.archiveGroupTtlMs ?? ARCHIVE_TTL_MS
+    const worktreeTtl =
+      deps.ttlMs ?? Math.max(MIN_ARCHIVE_TTL_MS, settings.archiveWorktreeTtlMs ?? ARCHIVE_TTL_MS)
+    const groupTtl =
+      deps.ttlMs ?? Math.max(MIN_ARCHIVE_TTL_MS, settings.archiveGroupTtlMs ?? ARCHIVE_TTL_MS)
     const currentNow = now()
     // Why: ignoreTtl ("Prune all now") treats every archived item as expired by
     // pinning the threshold to now — archivedAt is always <= now.
