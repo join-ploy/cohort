@@ -658,6 +658,12 @@ export class AutomationService {
       // Why: event.payload already holds the mapped variables that become
       // run.context.trigger.http.*; the rule decides the target project.
       runPayload = { projectId: rule.projectId, http: event.payload }
+    } else if (trigger.source === 'schedule') {
+      // Why: schedule has no external entity — the run targets the automation's
+      // project (carried by the implicit rule) and payload.schedule is the
+      // fire-time context surfaced to chain steps.
+      const schedulePayload = (event.payload as { schedule?: RunNowPayload['schedule'] }).schedule
+      runPayload = { projectId: rule.projectId, schedule: schedulePayload }
     } else {
       runPayload = { projectId: rule.projectId }
     }
@@ -684,6 +690,9 @@ export class AutomationService {
     }
     if (payload?.http) {
       triggerContext.http = payload.http
+    }
+    if (payload?.schedule) {
+      triggerContext.schedule = payload.schedule
     }
     if (payload?.projectId) {
       // Why: validate the picked project up-front so the run fails fast with a
