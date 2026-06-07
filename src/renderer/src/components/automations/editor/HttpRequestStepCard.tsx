@@ -54,6 +54,7 @@ export function HttpRequestStepCard(props: HttpRequestStepCardProps): React.JSX.
         value={config}
         onChange={props.onConfigChange}
         httpConnections={props.httpConnections}
+        available={props.available}
         onTest={onTest}
       />
     </StepCardChrome>

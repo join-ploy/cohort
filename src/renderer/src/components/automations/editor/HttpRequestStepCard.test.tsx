@@ -12,6 +12,12 @@ import type { AvailableVariables } from '../../../lib/template-dry-run'
 
 const EMPTY_AVAIL: AvailableVariables = { automation: {}, trigger: {}, steps: {} }
 
+const AVAIL_WITH_STEPS: AvailableVariables = {
+  automation: {},
+  trigger: {},
+  steps: { create1: { id: 'number', name: 'string' } }
+}
+
 const CONNECTIONS: HttpConnection[] = [
   { id: 'c1', displayName: 'Acme', baseUrl: 'https://api.acme.dev', headers: [] }
 ]
@@ -79,5 +85,29 @@ describe('HttpRequestStepCard', () => {
     expect(onConfigChange).toHaveBeenCalledTimes(1)
     const next = onConfigChange.mock.calls[0][0] as HttpRequestStepConfig
     expect(next.request.url).toBe('https://x/y')
+  })
+
+  // Why: the path/URL is templated at runtime, so authoring `{{steps.<id>.id}}`
+  // must surface the variable picker — the user's reported gap was "the dropdown
+  // doesn't appear" on this field.
+  it('opens the variable picker from the path field so previous-step IDs can be inserted', () => {
+    const { getByLabelText, queryByRole } = render(
+      <HttpRequestStepCard
+        step={makeStep({ request: { method: 'GET', url: '', headers: [], query: [] } })}
+        stepIndex={0}
+        available={AVAIL_WITH_STEPS}
+        httpConnections={CONNECTIONS}
+        onIdChange={noop}
+        onConfigChange={noop}
+        onOnFailureChange={noop}
+        onTimeoutChange={noop}
+        onDelete={noop}
+      />
+    )
+    expect(queryByRole('listbox')).toBeNull()
+    fireEvent.change(getByLabelText('URL'), { target: { value: '{{', selectionStart: 2 } })
+    const listbox = queryByRole('listbox')
+    expect(listbox).not.toBeNull()
+    expect(listbox?.textContent).toContain('create1.id')
   })
 })
