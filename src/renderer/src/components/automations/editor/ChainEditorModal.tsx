@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Plus, Play, X, GripVertical, ArrowUpFromLine } from 'lucide-react'
+import { Plus, Play, X, GripVertical, ArrowUpFromLine, ClipboardPaste } from 'lucide-react'
 import {
   DndContext,
   KeyboardSensor,
@@ -16,8 +16,15 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
 
 // Why: the editor renders as a fullscreen overlay covering the native macOS
 // traffic lights. Reserve the same 80px pad used by .titlebar-left so the
@@ -48,6 +55,7 @@ import {
   reorderSteps,
   ungroupStep
 } from '../../../lib/chain-editor-state'
+import { parseStepFromClipboard } from '../../../lib/chain-editor-clipboard'
 import {
   chainHasStep,
   computeAllErrors,
@@ -249,6 +257,33 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     setDirty(true)
     setParallelAddOpen(null)
   }, [])
+
+  // Why: paste reads the OS clipboard (via Electron IPC — navigator.clipboard is
+  // flaky in overlays), parses the tagged node envelope, and inserts the node
+  // verbatim. The node keeps its original id, so pasting into the same chain
+  // produces a duplicate-id error that blocks save — matching how every other
+  // invalid edit behaves. `place` decides where it lands (chain end vs. a
+  // parallel group).
+  const pasteStep = React.useCallback(
+    async (place: (steps: StepOrGroup[], step: Step) => StepOrGroup[]) => {
+      let text: string
+      try {
+        text = await window.api.ui.readClipboardText()
+      } catch {
+        toast.error('No automation node on the clipboard')
+        return
+      }
+      const step = parseStepFromClipboard(text)
+      if (!step) {
+        toast.error('No automation node on the clipboard')
+        return
+      }
+      setDraft((current) => ({ ...current, steps: place(current.steps, step) }))
+      setDirty(true)
+      toast.success('Node pasted')
+    },
+    []
+  )
 
   // Why: extracts a step from a parallel group and inserts it right after
   // the group's top-level position. If only one sibling remains,
@@ -516,6 +551,9 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                               setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
                             }
                             onPick={(kind) => addParallelStep(topIndex, kind)}
+                            onPaste={() =>
+                              void pasteStep((steps, step) => groupStepAt(steps, topIndex, step))
+                            }
                           />
                         </div>
                       </ParallelGroupContainer>
@@ -551,6 +589,9 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
                               setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
                             }
                             onPick={(kind) => addParallelStep(topIndex, kind)}
+                            onPaste={() =>
+                              void pasteStep((steps, step) => groupStepAt(steps, topIndex, step))
+                            }
                           />
                         </div>
                       </div>
@@ -566,6 +607,7 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
             kinds={availableStepKinds}
             onToggle={setAddOpen}
             onPick={addStep}
+            onPaste={() => void pasteStep((steps, step) => [...steps, step])}
           />
 
           <AvailableVariablesPanel available={availableAtEnd} className="mt-2" />
@@ -705,6 +747,7 @@ type AddStepControlProps = {
   kinds: StepKind[]
   onToggle: (next: boolean) => void
   onPick: (kind: StepKind) => void
+  onPaste: () => void
 }
 
 /**
@@ -784,6 +827,7 @@ type AddParallelButtonProps = {
   droppableId: string
   onToggle: () => void
   onPick: (kind: StepKind) => void
+  onPaste: () => void
 }
 
 function AddParallelButton(props: AddParallelButtonProps): React.JSX.Element {
@@ -793,16 +837,26 @@ function AddParallelButton(props: AddParallelButtonProps): React.JSX.Element {
       ref={setNodeRef}
       className={cn('relative flex shrink-0 items-center', isOver && 'rounded-md ring-2 ring-ring')}
     >
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Add parallel step"
-        aria-expanded={props.open}
-        onClick={props.onToggle}
-        className="text-muted-foreground hover:text-foreground"
-      >
-        <Plus className="size-3.5" />
-      </Button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Add parallel step"
+            aria-expanded={props.open}
+            onClick={props.onToggle}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          <ContextMenuItem onSelect={props.onPaste}>
+            <ClipboardPaste className="size-3.5" />
+            Paste node
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {props.open ? (
         <div
           role="menu"
@@ -829,16 +883,26 @@ function AddParallelButton(props: AddParallelButtonProps): React.JSX.Element {
 function AddStepControl(props: AddStepControlProps): React.JSX.Element {
   return (
     <div className="relative flex justify-center py-2">
-      <Button
-        variant="outline"
-        size="sm"
-        aria-label="Add step"
-        aria-expanded={props.open}
-        onClick={() => props.onToggle(!props.open)}
-      >
-        <Plus className="size-3.5" />
-        Add step
-      </Button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Add step"
+            aria-expanded={props.open}
+            onClick={() => props.onToggle(!props.open)}
+          >
+            <Plus className="size-3.5" />
+            Add step
+          </Button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          <ContextMenuItem onSelect={props.onPaste}>
+            <ClipboardPaste className="size-3.5" />
+            Paste node
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {props.open ? (
         <div
           role="menu"
