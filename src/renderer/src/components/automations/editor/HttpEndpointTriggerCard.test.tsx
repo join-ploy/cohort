@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { HttpEndpointTriggerCard, findDuplicateVariableNames } from './HttpEndpointTriggerCard'
+import { HttpEndpointTriggerCard } from './HttpEndpointTriggerCard'
+import { findDuplicateVariableNames } from './HttpRequestEditor'
 import type {
   AutoTrigger,
   HttpConnection,
