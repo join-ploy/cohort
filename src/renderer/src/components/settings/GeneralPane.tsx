@@ -4,7 +4,22 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Separator } from '../ui/separator'
-import { FolderOpen, Timer } from 'lucide-react'
+import { Check, FolderOpen, LoaderCircle, Timer, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '../ui/dialog'
+import { ARCHIVE_TTL_MS } from '../../../../shared/archive-constants'
+import {
+  msToDurationParts,
+  durationPartsToMs,
+  type DurationUnit
+} from '../../../../shared/archive-duration'
 import { useAppStore } from '../../store'
 import { CliSection } from './CliSection'
 import {
@@ -14,6 +29,7 @@ import {
 } from '../../../../shared/constants'
 import { clampNumber } from '@/lib/terminal-theme'
 import {
+  GENERAL_ARCHIVE_SEARCH_ENTRIES,
   GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
@@ -35,6 +51,74 @@ type GeneralPaneProps = {
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
 
+function ArchiveDurationRow({
+  id,
+  title,
+  description,
+  keywords,
+  valueMs,
+  onChangeMs
+}: {
+  id: string
+  title: string
+  description: string
+  keywords: string[]
+  valueMs: number
+  onChangeMs: (ms: number) => void
+}): React.JSX.Element {
+  const parts = msToDurationParts(valueMs)
+  const [draft, setDraft] = useState(String(parts.value))
+  // Why: re-sync the visible number when the persisted value changes externally,
+  // without clobbering a mid-edit draft on every keystroke.
+  useEffect(() => {
+    setDraft(String(msToDurationParts(valueMs).value))
+  }, [valueMs])
+
+  const commit = (rawValue: string, unit: DurationUnit): void => {
+    const n = Number(rawValue)
+    if (!Number.isFinite(n) || n <= 0) {
+      setDraft(String(msToDurationParts(valueMs).value))
+      return
+    }
+    onChangeMs(durationPartsToMs(n, unit))
+  }
+
+  return (
+    <SearchableSetting
+      title={title}
+      description={description}
+      keywords={keywords}
+      className="flex items-center justify-between gap-4 px-1 py-2"
+    >
+      <div className="space-y-0.5">
+        <Label>{title}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type="number"
+          min={1}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commit(draft, parts.unit)}
+          className="h-7 w-16 text-xs"
+        />
+        <Select value={parts.unit} onValueChange={(u) => commit(draft, u as DurationUnit)}>
+          <SelectTrigger size="sm" className="h-7 w-[110px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="hours">Hours</SelectItem>
+            <SelectItem value="days">Days</SelectItem>
+            <SelectItem value="weeks">Weeks</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </SearchableSetting>
+  )
+}
+
 export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((s) => s.settingsSearchQuery)
   // Why: fork disable — the upstream Updates section + its supporting state
@@ -46,6 +130,44 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   useEffect(() => {
     setAutoSaveDelayDraft(String(settings.editorAutoSaveDelayMs))
   }, [settings.editorAutoSaveDelayMs])
+
+  const [pruneAllOpen, setPruneAllOpen] = useState(false)
+  const [pruneForce, setPruneForce] = useState(false)
+  const [pruneBusy, setPruneBusy] = useState(false)
+
+  // Why: the force option is a one-shot intent — reset it whenever the dialog
+  // closes so the next open starts unchecked.
+  useEffect(() => {
+    if (!pruneAllOpen) {
+      setPruneForce(false)
+    }
+  }, [pruneAllOpen])
+
+  const handleCleanupNow = async (): Promise<void> => {
+    try {
+      await window.api.worktrees.cleanupArchivedNow()
+      toast.success('Cleaned up expired archived workspaces.')
+    } catch (err) {
+      toast.error('Cleanup failed', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    }
+  }
+
+  const handlePruneAll = async (): Promise<void> => {
+    setPruneBusy(true)
+    try {
+      await window.api.worktrees.pruneAllArchivedNow(pruneForce)
+      toast.success('Pruned all archived workspaces.')
+      setPruneAllOpen(false)
+    } catch (err) {
+      toast.error('Prune failed', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      setPruneBusy(false)
+    }
+  }
 
   const handleBrowseWorkspace = async () => {
     const path = await window.api.repos.pickFolder()
@@ -217,6 +339,75 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
             </button>
           </SearchableSetting>
         </div>
+      </section>
+    ) : null,
+    matchesSettingsSearch(searchQuery, GENERAL_ARCHIVE_SEARCH_ENTRIES) ? (
+      <section key="workspace-archiving" className="space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">Workspace Archiving</h3>
+          <p className="text-xs text-muted-foreground">
+            How long archived workspaces are kept before they&apos;re permanently deleted.
+          </p>
+        </div>
+
+        <ArchiveDurationRow
+          id="general-archive-worktree-ttl"
+          title="Keep Archived Workspaces"
+          description="Archived worktrees are permanently deleted after this long."
+          keywords={[
+            'archive',
+            'prune',
+            'cleanup',
+            'retention',
+            'duration',
+            'worktree',
+            'delete',
+            'ttl'
+          ]}
+          valueMs={settings.archiveWorktreeTtlMs ?? ARCHIVE_TTL_MS}
+          onChangeMs={(ms) => updateSettings({ archiveWorktreeTtlMs: ms })}
+        />
+
+        <ArchiveDurationRow
+          id="general-archive-group-ttl"
+          title="Keep Archived Groups"
+          description="Archived workspace groups are permanently deleted after this long."
+          keywords={[
+            'archive',
+            'prune',
+            'cleanup',
+            'retention',
+            'duration',
+            'group',
+            'delete',
+            'ttl'
+          ]}
+          valueMs={settings.archiveGroupTtlMs ?? ARCHIVE_TTL_MS}
+          onChangeMs={(ms) => updateSettings({ archiveGroupTtlMs: ms })}
+        />
+
+        <SearchableSetting
+          title="Prune Archived Workspaces Now"
+          description="Run cleanup on demand or delete all archived workspaces immediately."
+          keywords={['prune', 'cleanup', 'archive', 'now', 'force', 'delete', 'all']}
+          className="flex items-center justify-between gap-4 px-1 py-2"
+        >
+          <div className="space-y-0.5">
+            <Label>Prune Now</Label>
+            <p className="text-xs text-muted-foreground">
+              Run cleanup now (respects the durations above), or prune every archived workspace
+              immediately.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleCleanupNow}>
+              Run cleanup now
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => setPruneAllOpen(true)}>
+              Prune all archived now
+            </Button>
+          </div>
+        </SearchableSetting>
       </section>
     ) : null,
     matchesSettingsSearch(searchQuery, GENERAL_EDITOR_SEARCH_ENTRIES) ? (
@@ -482,6 +673,54 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
           {section}
         </div>
       ))}
+
+      <Dialog
+        open={pruneAllOpen}
+        onOpenChange={(open) => {
+          if (!pruneBusy) {
+            setPruneAllOpen(open)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Prune all archived workspaces?</DialogTitle>
+            <DialogDescription className="text-xs">
+              Permanently delete every archived workspace and group right now, ignoring the
+              configured durations. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={pruneForce}
+            onClick={() => setPruneForce((prev) => !prev)}
+            className="flex items-center gap-2 rounded-sm px-1 py-1 text-xs text-foreground/80 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span
+              className={`flex size-4 items-center justify-center rounded-sm border transition-colors ${
+                pruneForce
+                  ? 'border-foreground bg-foreground text-background'
+                  : 'border-muted-foreground bg-transparent'
+              }`}
+            >
+              {pruneForce ? <Check className="size-3" strokeWidth={3} /> : null}
+            </span>
+            Also delete workspaces with uncommitted changes
+          </button>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPruneAllOpen(false)} disabled={pruneBusy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handlePruneAll} disabled={pruneBusy}>
+              {pruneBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 />}
+              {pruneBusy ? 'Pruning…' : 'Prune all'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
