@@ -1,6 +1,7 @@
 import * as React from 'react'
 import {
   CircleCheckBig,
+  Copy,
   FolderGit2,
   FolderTree,
   Globe,
@@ -13,10 +14,18 @@ import {
 } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
 import type { Step, StepConfig, StepKind } from '../../../../../shared/automations-types'
 import type { AvailableVariables } from '../../../lib/template-dry-run'
 import { isValidStepId } from '../../../lib/chain-editor-state'
+import { serializeStepForClipboard } from '../../../lib/chain-editor-clipboard'
 
 export type StepCardChromeProps = {
   step: Step
@@ -105,6 +114,20 @@ export function StepCardChrome(props: StepCardChromeProps): React.JSX.Element {
     onIdChange(idDraft)
   }, [draftValid, idDraft, step.id, onIdChange])
 
+  // Why: copy is self-contained — serialization is pure and secrets are cleared
+  // inside serializeStepForClipboard, so the chrome can own it without the modal
+  // threading a callback through every per-kind card. Routes through Electron's
+  // clipboard IPC like every other copy in the app (navigator.clipboard is
+  // flaky inside overlays).
+  const handleCopy = React.useCallback(() => {
+    void window.api.ui
+      .writeClipboardText(serializeStepForClipboard(step))
+      .then(() => toast.success('Node copied'))
+      .catch(() => {
+        /* best-effort */
+      })
+  }, [step])
+
   const timeoutEnabled = step.timeoutSeconds !== null
   const timeoutValue = step.timeoutSeconds ?? 0
 
@@ -130,56 +153,70 @@ export function StepCardChrome(props: StepCardChromeProps): React.JSX.Element {
       {...(dragEnabled ? attributes : {})}
       className="rounded-lg border border-border bg-card text-card-foreground shadow-xs"
     >
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        {dragEnabled ? (
-          <button
-            ref={setActivatorNodeRef}
-            type="button"
-            aria-label="Reorder step"
-            {...listeners}
-            className={cn(
-              'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
-              isDragging ? 'cursor-grabbing' : 'cursor-grab'
-            )}
-          >
-            <GripVertical aria-hidden className="size-4" />
-          </button>
-        ) : null}
-        <span
-          aria-label="Step kind"
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium"
-        >
-          <Icon className="size-3.5" />
-          {meta.label}
-        </span>
-        <input
-          aria-label="Step ID"
-          type="text"
-          value={idDraft}
-          onChange={(e) => setIdDraft(e.target.value)}
-          onBlur={commitIdDraft}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commitIdDraft()
-            } else if (e.key === 'Escape') {
-              setIdDraft(step.id)
-            }
-          }}
-          className={cn(
-            'min-w-0 flex-1 rounded-md border bg-background px-2 py-1 font-mono text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
-            draftValid ? 'border-input' : 'ring-1 ring-rose-500/60 border-rose-500/60'
-          )}
-        />
-        <button
-          type="button"
-          aria-label="Delete step"
-          onClick={onDelete}
-          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <Trash2 className="size-4" />
-        </button>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+            {dragEnabled ? (
+              <button
+                ref={setActivatorNodeRef}
+                type="button"
+                aria-label="Reorder step"
+                {...listeners}
+                className={cn(
+                  'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
+                  isDragging ? 'cursor-grabbing' : 'cursor-grab'
+                )}
+              >
+                <GripVertical aria-hidden className="size-4" />
+              </button>
+            ) : null}
+            <span
+              aria-label="Step kind"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium"
+            >
+              <Icon className="size-3.5" />
+              {meta.label}
+            </span>
+            <input
+              aria-label="Step ID"
+              type="text"
+              value={idDraft}
+              onChange={(e) => setIdDraft(e.target.value)}
+              onBlur={commitIdDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  commitIdDraft()
+                } else if (e.key === 'Escape') {
+                  setIdDraft(step.id)
+                }
+              }}
+              // Why: keep the native text context menu on the id field so
+              // right-click-to-copy the id text still works; the card's "Copy
+              // node" menu lives on the rest of the header.
+              onContextMenu={(e) => e.stopPropagation()}
+              className={cn(
+                'min-w-0 flex-1 rounded-md border bg-background px-2 py-1 font-mono text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
+                draftValid ? 'border-input' : 'ring-1 ring-rose-500/60 border-rose-500/60'
+              )}
+            />
+            <button
+              type="button"
+              aria-label="Delete step"
+              onClick={onDelete}
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          <ContextMenuItem onSelect={handleCopy}>
+            <Copy className="size-3.5" />
+            Copy node
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       <div className="px-3 py-3 space-y-2">{props.children}</div>
 
