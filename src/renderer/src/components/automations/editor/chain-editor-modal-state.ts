@@ -4,6 +4,7 @@ import type {
   CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
+  HttpConnection,
   HttpRequestStepConfig,
   RunCommandConfig,
   RunPromptConfig,
@@ -251,7 +252,11 @@ function repoFolderName(repoPath: string): string {
   return base.replace(/\.git$/, '')
 }
 
-export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEditorError[] {
+export function computeAllErrors(
+  draft: ChainDraft,
+  repos: Repo[] = [],
+  httpConnections: HttpConnection[] = []
+): ChainEditorError[] {
   const all: ChainEditorError[] = []
   const flat = flattenSteps(draft.steps)
   const seenStepIds = new Set<string>()
@@ -275,6 +280,29 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
         all.push({ ...err, stepId: step.id, field })
       }
     })
+    if (step.kind === 'http-request') {
+      const config = step.config as HttpRequestStepConfig
+      // Why: the step's downstream variables come only from a saved Test mapping, so
+      // block save until it has been tested with at least one enabled field.
+      if (config.sampleResponse === undefined || !config.fields.some((f) => f.enabled)) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' must be tested and have at least one enabled field before saving.`,
+          stepId: step.id,
+          field: 'fields'
+        })
+      }
+      if (config.connectionId && !httpConnections.some((c) => c.id === config.connectionId)) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' references a connection that no longer exists.`,
+          stepId: step.id,
+          field: 'connectionId'
+        })
+      }
+    }
   }
   // Parallel pane conflict: within a group, multiple steps targeting the same
   // paneRef would thrash a single pane with concurrent writes.
@@ -339,6 +367,20 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
         message: 'Schedule trigger has an invalid cron expression.',
         stepId: '',
         field: 'cron'
+      })
+    }
+    const triggerConnectionId = t.http?.connectionId
+    if (
+      t.source === 'http-endpoint' &&
+      triggerConnectionId &&
+      !httpConnections.some((c) => c.id === triggerConnectionId)
+    ) {
+      all.push({
+        path: `autoTriggers.${t.id}.connectionId`,
+        code: 'unknown-path',
+        message: 'HTTP trigger references a connection that no longer exists.',
+        stepId: '',
+        field: 'connectionId'
       })
     }
   }

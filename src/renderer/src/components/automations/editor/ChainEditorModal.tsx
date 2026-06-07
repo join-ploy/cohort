@@ -108,8 +108,8 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   // factor in chain shape (e.g. a create-workspace-group chain genuinely
   // doesn't need an upfront projectId — see chain-editor-modal-state).
   const errors = React.useMemo<ChainEditorError[]>(
-    () => computeAllErrors(draft, props.repos),
-    [draft, props.repos]
+    () => computeAllErrors(draft, props.repos, props.httpConnections),
+    [draft, props.repos, props.httpConnections]
   )
 
   const updateDraft = React.useCallback((patch: Partial<ChainDraft>) => {
