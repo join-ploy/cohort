@@ -120,8 +120,27 @@ export const GENERAL_EXTERNAL_TOOLS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const GENERAL_ARCHIVE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  {
+    title: 'Keep Archived Workspaces',
+    description: 'How long archived worktrees are kept before being permanently deleted.',
+    keywords: ['archive', 'prune', 'cleanup', 'retention', 'duration', 'worktree', 'delete', 'ttl']
+  },
+  {
+    title: 'Keep Archived Groups',
+    description: 'How long archived workspace groups are kept before being permanently deleted.',
+    keywords: ['archive', 'prune', 'cleanup', 'retention', 'duration', 'group', 'delete', 'ttl']
+  },
+  {
+    title: 'Prune Archived Workspaces Now',
+    description: 'Run cleanup on demand or delete all archived workspaces immediately.',
+    keywords: ['prune', 'cleanup', 'archive', 'now', 'force', 'delete', 'all']
+  }
+]
+
 export const GENERAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   ...GENERAL_WORKSPACE_SEARCH_ENTRIES,
+  ...GENERAL_ARCHIVE_SEARCH_ENTRIES,
   ...GENERAL_EDITOR_SEARCH_ENTRIES,
   ...GENERAL_CLI_SEARCH_ENTRIES,
   ...GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
