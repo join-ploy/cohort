@@ -697,6 +697,8 @@ app.whenReady().then(async () => {
   // Per-http-trigger interval clock, keyed by trigger id. In-memory like the
   // source watermarks above.
   const httpTriggerLastPoll = new Map<string, number>()
+  // Per-schedule-trigger next-fire instant; in-memory so it re-anchors each start.
+  const scheduleNextRun = new Map<string, number>()
   // Why: dispatchAutoRun lives on AutomationService but the engine needs it as
   // a ctor dep — late-bind via serviceRef so both can coexist. The engine's
   // start/stop lifecycle is owned by AutomationService.start()/stop() so the
@@ -734,6 +736,10 @@ app.whenReady().then(async () => {
     httpLastPoll: (triggerId) => httpTriggerLastPoll.get(triggerId) ?? 0,
     httpLastPollSet: (triggerId, value) => {
       httpTriggerLastPoll.set(triggerId, value)
+    },
+    scheduleNextRun: (id) => scheduleNextRun.get(id) ?? 0,
+    scheduleNextRunSet: (id, value) => {
+      scheduleNextRun.set(id, value)
     },
     hostId: AUTO_TRIGGER_HOST_ID,
     now: () => Date.now()
