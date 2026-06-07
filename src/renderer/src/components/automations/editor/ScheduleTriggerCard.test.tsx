@@ -2,9 +2,47 @@
 import * as React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { ScheduleTriggerCard } from './ScheduleTriggerCard'
 import { recurrenceFromCron } from '../../../../../shared/schedule-cron'
 import type { AutoTrigger } from '../../../../../shared/automations-types'
+
+// Why: Radix Popover + cmdk reach for ResizeObserver / hasPointerCapture /
+// scrollIntoView in jsdom — install minimal no-op polyfills so the searchable
+// timezone combobox can open during tests.
+type ROCallback = () => void
+class TestResizeObserver {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(_cb: ROCallback) {
+    /* no-op */
+  }
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
+}
+;(globalThis as unknown as { ResizeObserver: typeof TestResizeObserver }).ResizeObserver =
+  TestResizeObserver
+if (
+  typeof Element !== 'undefined' &&
+  typeof (Element.prototype as unknown as { hasPointerCapture?: unknown }).hasPointerCapture !==
+    'function'
+) {
+  ;(Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () =>
+    false
+}
+if (
+  typeof Element !== 'undefined' &&
+  typeof (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView !==
+    'function'
+) {
+  ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+}
 
 const mkTrigger = (over: Partial<AutoTrigger> = {}): AutoTrigger => ({
   id: 't1',
@@ -79,5 +117,52 @@ describe('ScheduleTriggerCard', () => {
 
     expect(screen.getByText('Enter a valid 5-field cron expression.')).toBeTruthy()
     expect(screen.queryByText('Next runs')).toBeNull()
+  })
+
+  it('toggling a weekday chip emits a cron carrying the new day set', () => {
+    const onEmit = vi.fn()
+    render(<Harness initial={mkTrigger()} onEmit={onEmit} />)
+
+    // Switch to weekly (seeds Mon–Fri), then turn Saturday on.
+    fireEvent.change(screen.getByLabelText('Repeat'), { target: { value: 'weekly' } })
+    fireEvent.click(screen.getByLabelText('Saturday'))
+
+    const last = onEmit.mock.calls.at(-1)?.[0] as AutoTrigger
+    const r = recurrenceFromCron(last.schedule!.cron)
+    expect(r).toEqual({ freq: 'weekly', days: [1, 2, 3, 4, 5, 6], hour: 9, minute: 0 })
+  })
+
+  it('selecting a timezone in the combobox emits the new zone with the cron unchanged', async () => {
+    const user = userEvent.setup()
+    const onEmit = vi.fn()
+    render(<Harness initial={mkTrigger()} onEmit={onEmit} />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Timezone' }))
+    await user.type(await screen.findByPlaceholderText('Search timezones...'), 'Tokyo')
+    await user.click(await screen.findByRole('option', { name: 'Asia/Tokyo' }))
+
+    const last = onEmit.mock.calls.at(-1)?.[0] as AutoTrigger
+    expect(last.schedule!.timezone).toBe('Asia/Tokyo')
+    // Changing the zone must not rewrite the schedule.
+    expect(last.schedule!.cron).toBe('0 9 * * *')
+  })
+
+  it('typing a valid cron in Advanced persists it through onChange', () => {
+    const onEmit = vi.fn()
+    render(<Harness initial={mkTrigger()} onEmit={onEmit} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    fireEvent.change(screen.getByLabelText('Cron expression'), {
+      target: { value: '15 14 * * 1' }
+    })
+
+    const last = onEmit.mock.calls.at(-1)?.[0] as AutoTrigger
+    expect(last.schedule!.cron).toBe('15 14 * * 1')
+    expect(recurrenceFromCron(last.schedule!.cron)).toEqual({
+      freq: 'weekly',
+      days: [1],
+      hour: 14,
+      minute: 15
+    })
   })
 })

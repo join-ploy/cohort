@@ -1,10 +1,10 @@
 import * as React from 'react'
-import { ChevronDown, Globe, Loader2, Lock, Plus, Trash2, Unlock, Zap } from 'lucide-react'
+import { Globe, Loader2, Lock, Plus, Trash2, Unlock, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
-import { cn } from '@/lib/utils'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
@@ -76,11 +76,6 @@ const INTERVAL_OPTIONS: { label: string; ms: number | undefined }[] = [
 // HTTP fields have no option lookups, so the conditions UI never fetches.
 const noopLoadOptions: LoadOptionsFn = () => Promise.resolve([])
 
-const SELECT_CLASS = cn(
-  'appearance-none rounded-md border border-input bg-background px-2 py-1 pr-7 text-xs transition-colors hover:bg-accent',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-)
-
 // Why: variableNames must be unique among ENABLED fields — the condition catalog
 // and downstream `trigger.http.<name>` resolution key on them, and
 // defaultVariableName can collapse distinct paths (e.g. `a.b` and `a_b`) to the
@@ -117,30 +112,6 @@ function SectionHeading({ children }: { children: React.ReactNode }): React.JSX.
     <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
       {children}
     </p>
-  )
-}
-
-type SelectShellProps = {
-  ariaLabel: string
-  value: string
-  onChange: (next: string) => void
-  className?: string
-  children: React.ReactNode
-}
-
-function SelectShell(props: SelectShellProps): React.JSX.Element {
-  return (
-    <div className="relative inline-flex">
-      <select
-        aria-label={props.ariaLabel}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        className={cn(SELECT_CLASS, props.className)}
-      >
-        {props.children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-    </div>
   )
 }
 
@@ -380,7 +351,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
         <div className="space-y-2">
           <SectionHeading>Request</SectionHeading>
           <div className="flex items-center gap-2">
-            <SelectShell
+            <NativeSelect
               ariaLabel="Method"
               value={request.method}
               onChange={(method) =>
@@ -392,7 +363,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                   {m}
                 </option>
               ))}
-            </SelectShell>
+            </NativeSelect>
             <Input
               aria-label="URL"
               value={request.url}
@@ -516,7 +487,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
           {sampleBody !== undefined ? (
             <div className="space-y-1.5">
               <p className="text-[11px] font-medium text-muted-foreground">Items</p>
-              <SelectShell ariaLabel="Items path" value={itemsToken} onChange={onItemsSelect}>
+              <NativeSelect ariaLabel="Items path" value={itemsToken} onChange={onItemsSelect}>
                 <option value="whole">Whole response is a single item</option>
                 {arrayCandidates.map((c) => (
                   <option key={c.path} value={`path:${c.path}`}>
@@ -526,7 +497,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                 {http.itemsPath !== null && !candidateTokens.has(itemsToken) ? (
                   <option value={itemsToken}>{http.itemsPath} (current)</option>
                 ) : null}
-              </SelectShell>
+              </NativeSelect>
               <div className="flex items-center gap-2">
                 <Input
                   aria-label="Manual items path"
@@ -634,7 +605,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Date gate</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Date gate field"
                     value={http.dateGateField ?? ''}
                     onChange={(v) => onChange(setDateGateField(trigger, v === '' ? null : v))}
@@ -645,7 +616,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
                 {http.dateGateField !== null ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -659,7 +630,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Poll interval</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Poll interval"
                     value={http.intervalMs === undefined ? '' : String(http.intervalMs)}
                     onChange={(v) =>
@@ -671,7 +642,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {opt.label}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
             </div>
@@ -687,7 +658,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Label field</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Label field"
                     value={http.labelField ?? ''}
                     onChange={(v) => onChange(setLabelField(trigger, v === '' ? undefined : v))}
@@ -698,13 +669,13 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Subtitle field</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Subtitle field"
                     value={http.subtitleField ?? ''}
                     onChange={(v) => onChange(setSubtitleField(trigger, v === '' ? undefined : v))}
@@ -715,7 +686,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
             </div>

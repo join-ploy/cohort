@@ -1,8 +1,17 @@
 import * as React from 'react'
-import { CalendarClock, ChevronDown, Trash2 } from 'lucide-react'
+import { CalendarClock, Check, ChevronDown, ChevronsUpDown, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList
+} from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
 import type { AutoTrigger, ScheduleConfig } from '../../../../../shared/automations-types'
@@ -36,58 +45,104 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-// Friendliest default for each freq when the user switches Repeat — 09:00 on
-// weekdays mirrors the seeded daily default.
-function defaultRecurrence(freq: Recurrence['freq']): Recurrence {
+// Carry the user's chosen time across a Repeat switch: fields the new freq lacks
+// are dropped, and fields it newly gains take a sensible default (09:00, Mon–Fri).
+function recurrenceForFreq(freq: Recurrence['freq'], prev: Recurrence | null): Recurrence {
+  const minute = prev?.minute ?? 0
+  const hour = prev && prev.freq !== 'hourly' ? prev.hour : 9
   switch (freq) {
     case 'hourly':
-      return { freq: 'hourly', minute: 0 }
+      return { freq: 'hourly', minute }
     case 'daily':
-      return { freq: 'daily', hour: 9, minute: 0 }
+      return { freq: 'daily', hour, minute }
     case 'weekly':
-      return { freq: 'weekly', days: [1, 2, 3, 4, 5], hour: 9, minute: 0 }
+      return {
+        freq: 'weekly',
+        days: prev?.freq === 'weekly' ? prev.days : [1, 2, 3, 4, 5],
+        hour,
+        minute
+      }
     case 'monthly':
-      return { freq: 'monthly', dayOfMonth: 1, hour: 9, minute: 0 }
+      return {
+        freq: 'monthly',
+        dayOfMonth: prev?.freq === 'monthly' ? prev.dayOfMonth : 1,
+        hour,
+        minute
+      }
   }
 }
 
-// The long IANA list as a native <select> source; fall back to just the current
-// zone if the runtime lacks supportedValuesOf, and keep the current zone present
-// even if it's not in the catalog so it stays selectable.
+// The long IANA list as the combobox source; fall back to just the current zone
+// if the runtime lacks supportedValuesOf, and keep the current zone present even
+// if it's not in the catalog so it stays selectable.
 function timezoneOptions(current: string): string[] {
   const all =
     typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [current]
   return all.includes(current) ? all : [current, ...all]
 }
 
-const SELECT_CLASS = cn(
-  'appearance-none rounded-md border border-input bg-background px-2 py-1 pr-7 text-xs transition-colors hover:bg-accent',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-)
-
-type SelectShellProps = {
-  ariaLabel: string
+type TimezoneComboboxProps = {
   value: string
   onChange: (next: string) => void
-  className?: string
-  children: React.ReactNode
 }
 
-// Native <select> styled to the tokens — mirrors HttpEndpointTriggerCard's
-// SelectShell so the two sibling trigger editors read as one design.
-function SelectShell(props: SelectShellProps): React.JSX.Element {
+// Searchable single-select over the ~400 IANA zones — patterned on
+// WorkspaceCombobox so the long list is filterable instead of a giant <select>.
+function TimezoneCombobox({ value, onChange }: TimezoneComboboxProps): React.JSX.Element {
+  const [open, setOpen] = React.useState(false)
+  const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const zones = React.useMemo(() => timezoneOptions(value), [value])
+
+  React.useEffect(() => {
+    if (!open) {
+      return
+    }
+    const frame = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
   return (
-    <div className="relative inline-flex">
-      <select
-        aria-label={props.ariaLabel}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        className={cn(SELECT_CLASS, props.className)}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-label="Timezone"
+          className="h-8 w-full justify-between px-3 text-xs font-normal"
+        >
+          <span className="truncate">{value}</span>
+          <ChevronsUpDown className="size-3.5 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0"
+        onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        {props.children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-    </div>
+        <Command>
+          <CommandInput ref={inputRef} placeholder="Search timezones..." className="text-xs" />
+          <CommandList className="max-h-72">
+            <CommandEmpty>No timezones found.</CommandEmpty>
+            {zones.map((tz) => (
+              <CommandItem
+                key={tz}
+                value={tz}
+                onSelect={() => {
+                  onChange(tz)
+                  setOpen(false)
+                }}
+                className="gap-2 px-3 py-1.5 text-xs"
+              >
+                <Check className={cn('size-3.5', value === tz ? 'opacity-100' : 'opacity-0')} />
+                <span className="truncate">{tz}</span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -118,6 +173,31 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
     }
   }, [cronValue])
 
+  const timezone = schedule?.timezone
+  const cronValid = isValidCron(cronDraft)
+
+  // Build the preview lazily: constructing the Intl formatter and reading the
+  // clock is wasted work for an invalid/empty schedule, so only do it when a
+  // valid cron + timezone actually yields runs.
+  const preview = React.useMemo(() => {
+    if (cronValue === undefined || timezone === undefined || !cronValid) {
+      return []
+    }
+    const runs = nextOccurrences(cronValue, timezone, Date.now(), 3)
+    if (runs.length === 0) {
+      return []
+    }
+    const fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone: timezone,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+    return runs.map((ms) => ({ ms, label: fmt.format(new Date(ms)) }))
+  }, [cronValue, timezone, cronValid])
+
   if (!schedule) {
     // Schedule triggers always carry a config; guard so a malformed trigger
     // degrades instead of crashing.
@@ -132,16 +212,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
   // A cron the builder can't model → Custom: force Advanced open and hide the
   // friendly controls so the raw expression is the only editor.
   const isCustom = recurrence === null
-  const cronValid = isValidCron(cronDraft)
-  const nextRuns = cronValid ? nextOccurrences(schedule.cron, schedule.timezone, Date.now(), 3) : []
-  const previewFmt = new Intl.DateTimeFormat(undefined, {
-    timeZone: schedule.timezone,
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  const cronErrorId = `cron-error-${trigger.id}`
 
   const writeSchedule = (next: ScheduleConfig): void => {
     onChange({ ...trigger, schedule: next })
@@ -151,7 +222,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
   }
 
   const onFreqChange = (freq: string): void => {
-    emit(defaultRecurrence(freq as Recurrence['freq']))
+    emit(recurrenceForFreq(freq as Recurrence['freq'], recurrence))
   }
   const setMinute = (minute: number): void => {
     if (recurrence) {
@@ -212,13 +283,13 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
           <>
             <div className="space-y-1.5">
               <FieldLabel>Repeat</FieldLabel>
-              <SelectShell ariaLabel="Repeat" value={recurrence.freq} onChange={onFreqChange}>
+              <NativeSelect ariaLabel="Repeat" value={recurrence.freq} onChange={onFreqChange}>
                 {FREQ_LABELS.map((f) => (
                   <option key={f.value} value={f.value}>
                     {f.label}
                   </option>
                 ))}
-              </SelectShell>
+              </NativeSelect>
             </div>
 
             {recurrence.freq === 'weekly' ? (
@@ -244,7 +315,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
             {recurrence.freq === 'monthly' ? (
               <div className="space-y-1.5">
                 <FieldLabel>Day of month</FieldLabel>
-                <SelectShell
+                <NativeSelect
                   ariaLabel="Day of month"
                   value={String(recurrence.dayOfMonth)}
                   onChange={(v) => setDayOfMonth(Number(v))}
@@ -254,7 +325,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
                       {d}
                     </option>
                   ))}
-                </SelectShell>
+                </NativeSelect>
               </div>
             ) : null}
 
@@ -262,7 +333,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
               <FieldLabel>{recurrence.freq === 'hourly' ? 'Minute' : 'Time'}</FieldLabel>
               <div className="flex items-center gap-2">
                 {recurrence.freq !== 'hourly' ? (
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Hour"
                     value={String(recurrence.hour)}
                     onChange={(v) => setHour(Number(v))}
@@ -272,12 +343,12 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
                         {pad2(h)}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 ) : null}
                 {recurrence.freq !== 'hourly' ? (
                   <span className="text-xs text-muted-foreground">:</span>
                 ) : null}
-                <SelectShell
+                <NativeSelect
                   ariaLabel="Minute"
                   value={String(recurrence.minute)}
                   onChange={(v) => setMinute(Number(v))}
@@ -287,7 +358,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
                       {pad2(m)}
                     </option>
                   ))}
-                </SelectShell>
+                </NativeSelect>
               </div>
             </div>
           </>
@@ -295,18 +366,7 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
 
         <div className="space-y-1.5">
           <FieldLabel>Timezone</FieldLabel>
-          <SelectShell
-            ariaLabel="Timezone"
-            value={schedule.timezone}
-            onChange={onTimezoneChange}
-            className="max-w-full"
-          >
-            {timezoneOptions(schedule.timezone).map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </SelectShell>
+          <TimezoneCombobox value={schedule.timezone} onChange={onTimezoneChange} />
         </div>
 
         <Collapsible open={advancedOpen || isCustom} onOpenChange={setAdvancedOpen}>
@@ -330,22 +390,25 @@ export function ScheduleTriggerCard(props: ScheduleTriggerCardProps): React.JSX.
               aria-label="Cron expression"
               value={cronDraft}
               aria-invalid={!cronValid}
+              aria-describedby={!cronValid ? cronErrorId : undefined}
               onChange={(e) => onCronInput(e.target.value)}
               className="h-8 font-mono text-xs"
             />
             {!cronValid ? (
-              <p className="text-[11px] text-destructive">Enter a valid 5-field cron expression.</p>
+              <p id={cronErrorId} className="text-[11px] text-destructive">
+                Enter a valid 5-field cron expression.
+              </p>
             ) : null}
           </CollapsibleContent>
         </Collapsible>
 
-        {nextRuns.length > 0 ? (
+        {preview.length > 0 ? (
           <div className="space-y-1.5">
             <FieldLabel>Next runs</FieldLabel>
             <ul className="space-y-1">
-              {nextRuns.map((ms) => (
-                <li key={ms} className="font-mono text-xs text-muted-foreground">
-                  {previewFmt.format(new Date(ms))}
+              {preview.map((run) => (
+                <li key={run.ms} className="font-mono text-xs text-muted-foreground">
+                  {run.label}
                 </li>
               ))}
             </ul>
