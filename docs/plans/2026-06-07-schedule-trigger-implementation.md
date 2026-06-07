@@ -957,3 +957,5 @@ Then use superpowers:requesting-code-review before merging.
 - No persisted next-run/catch-up — skip-missed is intentional.
 - "Every N minutes" and "last day of month" are omitted; the Advanced raw-cron field covers power cases. Add friendly controls later only if asked.
 - The old RRULE schedule system (`automation-schedules.ts`, the migration, `LEGACY_AUTOMATION_FIELDS`) is left untouched.
+- Sub-tick-granularity raw crons (e.g. `* * * * *` with a 60s+ poll interval) drop intermediate occurrences: the engine fires at most once per tick and advances from `now`. Consistent with skip-missed; the visual builder can't produce sub-hourly minute patterns, so this only affects hand-written Advanced crons.
+- Editing a live trigger's cron/timezone re-anchors strictly to the next future occurrence of the new schedule (no stray fire at the old instant); handled via a per-trigger anchor signature in the engine.
