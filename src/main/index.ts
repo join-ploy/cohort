@@ -699,6 +699,9 @@ app.whenReady().then(async () => {
   const httpTriggerLastPoll = new Map<string, number>()
   // Per-schedule-trigger next-fire instant; in-memory so it re-anchors each start.
   const scheduleNextRun = new Map<string, number>()
+  // Signature (cron|timezone) each anchor was computed for; lets the engine
+  // re-anchor when a trigger's schedule is edited instead of firing the stale instant.
+  const scheduleAnchorSig = new Map<string, string>()
   // Why: dispatchAutoRun lives on AutomationService but the engine needs it as
   // a ctor dep — late-bind via serviceRef so both can coexist. The engine's
   // start/stop lifecycle is owned by AutomationService.start()/stop() so the
@@ -740,6 +743,10 @@ app.whenReady().then(async () => {
     scheduleNextRun: (id) => scheduleNextRun.get(id) ?? 0,
     scheduleNextRunSet: (id, value) => {
       scheduleNextRun.set(id, value)
+    },
+    scheduleAnchorSig: (id) => scheduleAnchorSig.get(id) ?? '',
+    scheduleAnchorSigSet: (id, sig) => {
+      scheduleAnchorSig.set(id, sig)
     },
     hostId: AUTO_TRIGGER_HOST_ID,
     now: () => Date.now()

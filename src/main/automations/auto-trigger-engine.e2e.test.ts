@@ -164,6 +164,8 @@ async function setup(opts: SetupOpts): Promise<Harness> {
     httpLastPollSet: () => undefined,
     scheduleNextRun: () => 0,
     scheduleNextRunSet: () => undefined,
+    scheduleAnchorSig: () => '',
+    scheduleAnchorSigSet: () => undefined,
     hostId: 'test',
     now: () => Date.now()
   })
@@ -276,6 +278,8 @@ async function setupHttp(): Promise<HttpHarness> {
     },
     scheduleNextRun: () => 0,
     scheduleNextRunSet: () => undefined,
+    scheduleAnchorSig: () => '',
+    scheduleAnchorSigSet: () => undefined,
     hostId: 'test',
     now: () => HTTP_NOW
   })

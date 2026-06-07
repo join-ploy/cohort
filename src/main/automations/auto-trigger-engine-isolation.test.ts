@@ -101,6 +101,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       httpLastPollSet: () => undefined,
       scheduleNextRun: () => 0,
       scheduleNextRunSet: () => undefined,
+      scheduleAnchorSig: () => '',
+      scheduleAnchorSigSet: () => undefined,
       hostId: 'h',
       now: () => 5000,
       onError: (where) => {
@@ -157,6 +159,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       httpLastPollSet: () => undefined,
       scheduleNextRun: () => 0,
       scheduleNextRunSet: () => undefined,
+      scheduleAnchorSig: () => '',
+      scheduleAnchorSigSet: () => undefined,
       hostId: 'h',
       now: () => 5000,
       onError: (where) => {
@@ -235,6 +239,8 @@ describe('AutoTriggerEngine — mutex, error isolation, timer lifecycle', () => 
       httpLastPollSet: () => undefined,
       scheduleNextRun: () => 0,
       scheduleNextRunSet: () => undefined,
+      scheduleAnchorSig: () => '',
+      scheduleAnchorSigSet: () => undefined,
       hostId: 'h1',
       now: () => 5000,
       onError: (where) => {

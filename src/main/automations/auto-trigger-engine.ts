@@ -35,6 +35,10 @@ export type AutoTriggerEngineDeps = {
   // start, which is how skip-missed drops instants from while the app was closed).
   scheduleNextRun: (triggerId: string) => number
   scheduleNextRunSet: (triggerId: string, value: number) => void
+  // Signature (cron|timezone) the current anchor was computed for; lets the engine
+  // re-anchor when a trigger's schedule is edited instead of firing the stale instant.
+  scheduleAnchorSig: (triggerId: string) => string
+  scheduleAnchorSigSet: (triggerId: string, sig: string) => void
   hostId: string
   now: () => number
   /** Optional logger; defaults to console.warn for errors. */
@@ -285,9 +289,15 @@ export class AutoTriggerEngine {
     const { cron, timezone } = trigger.schedule
     const nowMs = this.deps.now()
     const nextRunAt = this.deps.scheduleNextRun(trigger.id)
+    const sig = `${cron}|${timezone}`
 
-    if (nextRunAt === 0) {
-      // First observation this process: anchor strictly in the future.
+    // Re-anchor on a fresh process (nextRunAt === 0) OR when the schedule config
+    // was edited (stored sig differs): both anchor strictly in the future so an
+    // edited cron/timezone fires the NEW schedule, never the stale OLD instant.
+    if (nextRunAt === 0 || this.deps.scheduleAnchorSig(trigger.id) !== sig) {
+      // Record the sig FIRST (regardless of anchor validity) so a changed-but-invalid
+      // cron is remembered and doesn't re-anchor every tick.
+      this.deps.scheduleAnchorSigSet(trigger.id, sig)
       // Anchoring strictly in the future means a trigger created in the ~1 tick before
       // its first occurrence will skip that occurrence — an accepted skip-missed cost.
       const anchor = nextOccurrenceAfter(cron, timezone, Math.max(nowMs, trigger.enabledAt))
