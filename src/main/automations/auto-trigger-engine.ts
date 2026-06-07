@@ -2,6 +2,11 @@ import type { Automation, AutoTrigger, Rule, TriggerSourceId } from '../../share
 import { firstMatch } from './rule-evaluator'
 import type { CandidateEvent, TriggerSource } from './trigger-sources/types'
 import type { TriggerSourceRegistry } from './trigger-sources/registry'
+import { nextOccurrenceAfter } from '../../shared/schedule-cron'
+
+// Fire an instant only if it came due within this window — longer than a tick so
+// jitter still fires, short enough that a closed/asleep/disabled gap is skipped.
+const SCHEDULE_MAX_LATENESS_MS = 5 * 60_000
 
 export type AutoTriggerEngineDeps = {
   registry: TriggerSourceRegistry
@@ -26,6 +31,14 @@ export type AutoTriggerEngineDeps = {
   // Per-http-trigger interval gate clock (in-memory, keyed by trigger id).
   httpLastPoll: (triggerId: string) => number
   httpLastPollSet: (triggerId: string, value: number) => void
+  // Per-schedule-trigger next-fire instant (in-memory; re-anchored each process
+  // start, which is how skip-missed drops instants from while the app was closed).
+  scheduleNextRun: (triggerId: string) => number
+  scheduleNextRunSet: (triggerId: string, value: number) => void
+  // Signature (cron|timezone) the current anchor was computed for; lets the engine
+  // re-anchor when a trigger's schedule is edited instead of firing the stale instant.
+  scheduleAnchorSig: (triggerId: string) => string
+  scheduleAnchorSigSet: (triggerId: string, sig: string) => void
   hostId: string
   now: () => number
   /** Optional logger; defaults to console.warn for errors. */
@@ -107,7 +120,12 @@ export class AutoTriggerEngine {
       const httpEntries = active.filter(
         (e) => e.trigger.source === 'http-endpoint' && (e.trigger.pollingEnabled ?? true)
       )
-      const sharedEntries = active.filter((e) => e.trigger.source !== 'http-endpoint')
+      // Why: schedule triggers are time-driven (the engine owns the fire instant),
+      // so they poll per-trigger like http and stay out of the shared grouped poll.
+      const scheduleEntries = active.filter((e) => e.trigger.source === 'schedule')
+      const sharedEntries = active.filter(
+        (e) => e.trigger.source !== 'http-endpoint' && e.trigger.source !== 'schedule'
+      )
 
       // Why: group active triggers by source so we poll each source once per
       // tick even when multiple automations share it.
@@ -123,6 +141,14 @@ export class AutoTriggerEngine {
           await this.pollHttpTrigger(entry)
         } catch (err) {
           this.reportError(`tick:http(${entry.trigger.id})`, err)
+        }
+      }
+
+      for (const entry of scheduleEntries) {
+        try {
+          await this.pollScheduleTrigger(entry)
+        } catch (err) {
+          this.reportError(`tick:schedule(${entry.trigger.id})`, err)
         }
       }
 
@@ -252,6 +278,85 @@ export class AutoTriggerEngine {
     }
   }
 
+  // Fire a single schedule trigger when its next instant elapses live. State is
+  // in-memory: a fresh process re-anchors to the next FUTURE occurrence, and the
+  // lateness guard drops instants missed while asleep/disabled — both "skip-missed".
+  private async pollScheduleTrigger(entry: ActiveEntry): Promise<void> {
+    const { automation, trigger } = entry
+    if (!trigger.schedule) {
+      return
+    }
+    const { cron, timezone } = trigger.schedule
+    const nowMs = this.deps.now()
+    const nextRunAt = this.deps.scheduleNextRun(trigger.id)
+    const sig = `${cron}|${timezone}`
+
+    // Re-anchor on a fresh process (nextRunAt === 0) OR when the schedule config
+    // was edited (stored sig differs): both anchor strictly in the future so an
+    // edited cron/timezone fires the NEW schedule, never the stale OLD instant.
+    if (nextRunAt === 0 || this.deps.scheduleAnchorSig(trigger.id) !== sig) {
+      // Record the sig FIRST (regardless of anchor validity) so a changed-but-invalid
+      // cron is remembered and doesn't re-anchor every tick.
+      this.deps.scheduleAnchorSigSet(trigger.id, sig)
+      // Anchoring strictly in the future means a trigger created in the ~1 tick before
+      // its first occurrence will skip that occurrence — an accepted skip-missed cost.
+      const anchor = nextOccurrenceAfter(cron, timezone, Math.max(nowMs, trigger.enabledAt))
+      if (anchor !== null) {
+        this.deps.scheduleNextRunSet(trigger.id, anchor)
+      }
+      return
+    }
+    if (nowMs < nextRunAt) {
+      return
+    }
+    if (nowMs - nextRunAt > SCHEDULE_MAX_LATENESS_MS) {
+      // Missed (sleep/disable/long tick gap): re-anchor without firing.
+      const next = nextOccurrenceAfter(cron, timezone, nowMs)
+      if (next !== null) {
+        this.deps.scheduleNextRunSet(trigger.id, next)
+      }
+      return
+    }
+
+    // Due and fresh: advance the clock BEFORE dispatch so a slow/failed dispatch
+    // can't re-fire this instant.
+    const next = nextOccurrenceAfter(cron, timezone, nowMs)
+    if (next !== null) {
+      this.deps.scheduleNextRunSet(trigger.id, next)
+    }
+
+    const source = this.deps.registry.get('schedule')
+    if (!source) {
+      return
+    }
+    for await (const event of source.poll({
+      since: nextRunAt,
+      now: nowMs,
+      hostId: this.deps.hostId,
+      schedule: trigger.schedule
+    })) {
+      try {
+        if (this.deps.dedupHas(automation.id, trigger.id, event.entityId)) {
+          continue
+        }
+        // No conditions: one implicit match targeting the automation's project.
+        const rule = { id: 'implicit', conditions: [], projectId: automation.projectId }
+        // Why: insert dedup BEFORE dispatch so a crash mid-dispatch can't re-fire.
+        this.deps.dedupInsert(
+          automation.id,
+          trigger.id,
+          trigger.source,
+          event.entityId,
+          event.entityIdentifier,
+          this.deps.now()
+        )
+        await this.deps.dispatchAutoRun({ automation, trigger, rule, event })
+      } catch (err) {
+        this.reportError(`tick:schedule-event(${trigger.id}:${event.entityId})`, err)
+      }
+    }
+  }
+
   /** Snapshot of current poll timing for each active source. */
   getPollStatus(): Map<TriggerSourceId, { lastPollAt: number; intervalMs: number }> {
     const result = new Map<TriggerSourceId, { lastPollAt: number; intervalMs: number }>()
@@ -271,6 +376,12 @@ export class AutoTriggerEngine {
           result.set(t.source, {
             lastPollAt: this.deps.httpLastPoll(t.id),
             intervalMs: t.http?.intervalMs ?? this.intervalMs
+          })
+        } else if (t.source === 'schedule') {
+          // Time-driven: surface the next fire instant rather than a last-poll time.
+          result.set(t.source, {
+            lastPollAt: this.deps.scheduleNextRun(t.id),
+            intervalMs: this.intervalMs
           })
         } else {
           result.set(t.source, {

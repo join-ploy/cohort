@@ -58,6 +58,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -74,6 +75,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -89,6 +91,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -110,6 +113,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -133,6 +137,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -154,6 +159,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -170,6 +176,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -186,6 +193,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
         chainProvidesProject
@@ -209,6 +217,7 @@ describe('AutoTriggerCard rendering', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -232,6 +241,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -257,6 +267,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -280,6 +291,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -300,6 +312,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -317,6 +330,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -334,6 +348,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -351,6 +366,7 @@ describe('AutoTriggerCard — github-pr watch-list', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -381,6 +397,7 @@ describe('AutoTriggerCard — http-endpoint branch', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />
@@ -402,6 +419,7 @@ describe('AutoTriggerCard — dedup footer wording', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         repos={repos}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
@@ -421,6 +439,7 @@ describe('AutoTriggerCard — dedup footer wording', () => {
         onChange={() => {}}
         onRemove={() => {}}
         projects={projects}
+        httpConnections={[]}
         fieldCatalog={fieldCatalog}
         loadOptions={noopLoadOptions}
       />

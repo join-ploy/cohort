@@ -1,6 +1,7 @@
 import type {
   ConditionOp,
   HttpEndpointConfig,
+  ScheduleConfig,
   TriggerSourceId
 } from '../../../shared/automations-types'
 
@@ -13,6 +14,11 @@ export type PollCtx = {
   // Set by the engine for the per-trigger http-endpoint source; ignored by
   // the global linear/github sources.
   http?: HttpEndpointConfig
+  // Set by the engine for the per-trigger schedule source; ignored by others.
+  schedule?: ScheduleConfig
+  // The fire instant ("now"), injected by the engine so the schedule source's
+  // event payload is deterministic in tests; ignored by other sources.
+  now?: number
 }
 
 export type FieldDescriptor = {

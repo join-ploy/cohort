@@ -2719,6 +2719,7 @@ const api = {
       request: HttpRequestConfig
       automationId?: string
       autoTriggerId?: string
+      connectionId?: string
     }): Promise<{ status: number; durationMs: number; body: unknown }> =>
       ipcRenderer.invoke('httpEndpoint:test', args),
     fetchItems: (args: {

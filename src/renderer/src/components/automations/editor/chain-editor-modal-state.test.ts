@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import type {
   AutoTrigger,
   CreateWorkspaceGroupConfig,
+  HttpConnection,
+  HttpRequestStepConfig,
   MappedField,
   Step,
   StepOrGroup
@@ -182,6 +184,65 @@ describe('getAvailableVariablesAtStep — group namespace', () => {
     const groupErrs = errs.filter((e) => e.path.startsWith('group.'))
     expect(groupErrs.length).toBeGreaterThan(0)
     expect(groupErrs[0]).toMatchObject({ code: 'unknown-path' })
+  })
+})
+
+describe('getAvailableVariablesAtStep — http-request step output schema', () => {
+  function httpRequestStep(id: string, fields: MappedField[]): Step {
+    return {
+      id,
+      kind: 'http-request',
+      config: {
+        request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+        itemsPath: null,
+        fields
+      },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('surfaces an earlier http-request step’s enabled fields as downstream steps.<id>.* vars', () => {
+    const draft = makeDraft([
+      httpRequestStep('s1', [
+        { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 1 },
+        { path: 'name', variableName: 'name', enabled: true, type: 'string', sampleValue: 'x' },
+        { path: 'skip', variableName: 'skip', enabled: false, type: 'string', sampleValue: 'y' }
+      ]),
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    // At the later run-prompt step, the http-request step's mapped fields are in scope.
+    const out = getAvailableVariablesAtStep(draft, 1, [])
+    expect(out.steps.s1).toEqual({ id: 'number', name: 'string' })
+    expect(out.steps.s1.skip).toBeUndefined()
+  })
+
+  it('lets computeAllErrors resolve a downstream {{steps.s1.id}} reference', () => {
+    const draft = makeDraft([
+      httpRequestStep('s1', [
+        { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 1 }
+      ]),
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: 'wt',
+          agentId: 'claude',
+          prompt: 'id={{steps.s1.id}}',
+          doneDebounceSeconds: 5
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    const stepErrs = computeAllErrors(draft, []).filter((e) => e.path.startsWith('steps.'))
+    expect(stepErrs).toEqual([])
   })
 })
 
@@ -445,5 +506,138 @@ describe('isProjectRequired + projectId gating', () => {
     expect(chainHasStep(draft, 'create-workspace-group')).toBe(true)
     expect(chainHasStep(draft, 'create-worktree')).toBe(false)
     void repos
+  })
+})
+
+describe('computeAllErrors — http-request test mapping + dangling connections', () => {
+  const enabledField: MappedField = {
+    path: 'id',
+    variableName: 'id',
+    enabled: true,
+    type: 'string',
+    sampleValue: 'a'
+  }
+
+  function httpStep(id: string, config: Partial<HttpRequestStepConfig>): Step {
+    const cfg: HttpRequestStepConfig = {
+      request: { method: 'GET', url: 'https://x', headers: [], query: [] },
+      itemsPath: null,
+      fields: [enabledField],
+      sampleResponse: { id: 'a' },
+      ...config
+    }
+    return { id, kind: 'http-request', config: cfg, onFailure: 'halt', timeoutSeconds: null }
+  }
+
+  function httpEndpointTrigger(connectionId?: string): AutoTrigger {
+    return {
+      id: 'h1',
+      source: 'http-endpoint',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      http: {
+        request: { method: 'GET', url: 'https://x', headers: [], query: [] },
+        connectionId,
+        itemsPath: null,
+        fields: [],
+        dedupeFields: [],
+        dateGateField: null
+      }
+    }
+  }
+
+  it('requires a Test mapping: flags an http-request step with no sampleResponse', () => {
+    const draft = makeDraft([httpStep('s1', { sampleResponse: undefined })])
+    const errs = computeAllErrors(draft, [], []).filter(
+      (e) => e.stepId === 's1' && e.field === 'fields'
+    )
+    expect(errs).toHaveLength(1)
+    expect(errs[0].message).toMatch(/tested/i)
+  })
+
+  it('requires a Test mapping: flags an http-request step with no enabled field', () => {
+    const draft = makeDraft([
+      httpStep('s1', {
+        fields: [{ ...enabledField, enabled: false }]
+      })
+    ])
+    const errs = computeAllErrors(draft, [], []).filter(
+      (e) => e.stepId === 's1' && e.field === 'fields'
+    )
+    expect(errs).toHaveLength(1)
+  })
+
+  it('does not flag an http-request step that has a sampleResponse and ≥1 enabled field', () => {
+    const draft = makeDraft([httpStep('s1', {})])
+    const errs = computeAllErrors(draft, [], []).filter(
+      (e) => e.stepId === 's1' && e.field === 'fields'
+    )
+    expect(errs).toEqual([])
+  })
+
+  it('flags an http-request step whose connectionId is not in the library', () => {
+    const draft = makeDraft([httpStep('s1', { connectionId: 'gone' })])
+    const errs = computeAllErrors(draft, [], []).filter(
+      (e) => e.stepId === 's1' && e.field === 'connectionId'
+    )
+    expect(errs).toHaveLength(1)
+    expect(errs[0].message).toMatch(/no longer exists/i)
+  })
+
+  it('does not flag an http-request step whose connectionId is present in the library', () => {
+    const connections: HttpConnection[] = [
+      { id: 'gone', displayName: 'API', baseUrl: 'https://x', headers: [] }
+    ]
+    const draft = makeDraft([httpStep('s1', { connectionId: 'gone' })])
+    const errs = computeAllErrors(draft, [], connections).filter(
+      (e) => e.stepId === 's1' && e.field === 'connectionId'
+    )
+    expect(errs).toEqual([])
+  })
+
+  it('flags an http-endpoint trigger whose connectionId is not in the library', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [httpEndpointTrigger('gone')] } as ChainDraft
+    const errs = computeAllErrors(draft, [], []).filter(
+      (e) => e.path === 'autoTriggers.h1.connectionId' && e.field === 'connectionId'
+    )
+    expect(errs).toHaveLength(1)
+    expect(errs[0].message).toMatch(/no longer exists/i)
+  })
+
+  it('does not flag an http-endpoint trigger whose connectionId is present in the library', () => {
+    const connections: HttpConnection[] = [
+      { id: 'gone', displayName: 'API', baseUrl: 'https://x', headers: [] }
+    ]
+    const draft = { ...makeDraft([]), autoTriggers: [httpEndpointTrigger('gone')] } as ChainDraft
+    const errs = computeAllErrors(draft, [], connections).filter((e) => e.field === 'connectionId')
+    expect(errs).toEqual([])
+  })
+})
+
+describe('computeAllErrors — schedule trigger cron validity', () => {
+  function scheduleTrigger(cron: string): AutoTrigger {
+    return {
+      id: 'sched-1',
+      source: 'schedule',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      schedule: { cron, timezone: 'UTC' }
+    }
+  }
+
+  it('flags a schedule trigger whose cron is invalid (editor not saveable)', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [scheduleTrigger('garbage')] } as ChainDraft
+    const errors = computeAllErrors(draft)
+    // Editor state is invalid: at least one error blocks save.
+    expect(errors.length).toBeGreaterThan(0)
+    expect(errors.filter((e) => e.field === 'cron')).toHaveLength(1)
+  })
+
+  it('does not flag a schedule trigger whose cron is valid (editor saveable)', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [scheduleTrigger('0 9 * * *')] } as ChainDraft
+    // Everything else is well-formed, so a valid cron leaves zero errors.
+    expect(computeAllErrors(draft)).toEqual([])
   })
 })

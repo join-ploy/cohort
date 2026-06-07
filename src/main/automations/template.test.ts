@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveTemplate, TemplateResolutionError } from './template'
+import { resolveTemplate, blankTemplates, TemplateResolutionError } from './template'
 
 describe('resolveTemplate', () => {
   it('returns the input when no template tokens are present', () => {
@@ -92,5 +92,27 @@ describe('resolveTemplate', () => {
     expect(() => resolveTemplate('{{steps.nonexistent.outputTail}}', context)).toThrow(
       TemplateResolutionError
     )
+  })
+})
+
+describe('blankTemplates', () => {
+  it('blanks a token surrounded by text', () => {
+    expect(blankTemplates('a/{{x}}/b')).toBe('a//b')
+  })
+
+  it('blanks a whole-string token to empty', () => {
+    expect(blankTemplates('{{trigger.http.id}}')).toBe('')
+  })
+
+  it('preserves an escaped brace as a literal (does not blank it)', () => {
+    expect(blankTemplates('\\{{x}}')).toBe('{{x}}')
+  })
+
+  it('blanks every token when multiple appear in one string', () => {
+    expect(blankTemplates('{{a}}-{{b}}')).toBe('-')
+  })
+
+  it('leaves plain strings unchanged', () => {
+    expect(blankTemplates('hello world')).toBe('hello world')
   })
 })

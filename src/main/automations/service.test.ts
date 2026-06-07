@@ -6,6 +6,7 @@ import type { Repo } from '../../shared/types'
 import type { AutoTrigger, Rule, Step } from '../../shared/automations-types'
 import type { CandidateEvent } from './trigger-sources/types'
 import { AutomationService } from './service'
+import { HttpRequestRunner } from './runners/http-request-runner'
 
 const testState = { dir: '' }
 
@@ -562,6 +563,59 @@ describe('AutomationService.dispatchAutoRun', () => {
     const trigCtx = run.context?.trigger as { http?: Record<string, unknown> }
     expect(trigCtx.http).toEqual({ id: 7, title: 'Widget' })
   })
+
+  it('schedule: targets the automation project and seeds trigger.schedule from the fire event', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    const automation = store.createAutomation({
+      name: 'Auto chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [makeChainStep()]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    const scheduleTrigger: AutoTrigger = {
+      id: 'at1',
+      source: 'schedule',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      schedule: { cron: '0 9 * * *', timezone: 'UTC' }
+    }
+    // The implicit rule carries automation.projectId — schedule has no external
+    // entity, so the run targets the automation's project.
+    const rule: Rule = { id: 'implicit', conditions: [], projectId: 'p1' }
+    const scheduledFor = Date.UTC(2026, 5, 7, 9, 0, 0)
+    const event: CandidateEvent = {
+      entityId: new Date(scheduledFor).toISOString(),
+      updatedAt: scheduledFor,
+      payload: {
+        schedule: { firedAt: scheduledFor + 500, scheduledFor, cron: '0 9 * * *', timezone: 'UTC' }
+      },
+      fields: {}
+    }
+    await service.dispatchAutoRun({ automation: stored, trigger: scheduleTrigger, rule, event })
+
+    const runs = store.listAutomationRuns(automation.id)
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    expect(run.triggerSource).toBe('schedule')
+    expect(run.triggerEntityId).toBe(event.entityId)
+    const automationCtx = run.context?.automation as { projectId: string }
+    expect(automationCtx.projectId).toBe('p1')
+    const trigCtx = run.context?.trigger as {
+      schedule?: { firedAt: number; scheduledFor: number; cron: string; timezone: string }
+    }
+    expect(trigCtx.schedule).toEqual(event.payload.schedule)
+  })
 })
 
 describe('AutomationService.restartRun', () => {
@@ -865,5 +919,14 @@ describe('AutomationService retry persisted-pane cleanup', () => {
     expect(closedPaneKeys).toContain('tab-A:pane-1')
     // Sibling 'b' is not being retried — its pane must stay alive.
     expect(closedPaneKeys).not.toContain('tab-B:pane-1')
+  })
+
+  it('resolves the http-request step kind to the HttpRequestRunner', async () => {
+    const store = await createStore()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    const runner = (service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner(
+      'http-request'
+    )
+    expect(runner).toBeInstanceOf(HttpRequestRunner)
   })
 })

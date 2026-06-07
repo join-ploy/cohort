@@ -66,6 +66,7 @@ import { TriggerSourceRegistry } from './automations/trigger-sources/registry'
 import { makeLinearIssueSource } from './automations/trigger-sources/linear-issue'
 import { makeGithubPrSource } from './automations/trigger-sources/github-pr'
 import { makeHttpEndpointSource } from './automations/trigger-sources/http-endpoint'
+import { makeScheduleSource } from './automations/trigger-sources/schedule'
 import { registerTriggerSourceHandlers } from './ipc/trigger-sources'
 import { getClient as getLinearClient } from './linear/client'
 import type { TriggerSourceId } from '../shared/automations-types'
@@ -703,7 +704,12 @@ app.whenReady().then(async () => {
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
   triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
-  triggerSourceRegistry.register(makeHttpEndpointSource())
+  triggerSourceRegistry.register(
+    makeHttpEndpointSource({
+      getConnection: (id) => storeRef.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+  )
+  triggerSourceRegistry.register(makeScheduleSource())
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.
   registerTriggerSourceHandlers(triggerSourceRegistry)
@@ -715,6 +721,11 @@ app.whenReady().then(async () => {
   // Per-http-trigger interval clock, keyed by trigger id. In-memory like the
   // source watermarks above.
   const httpTriggerLastPoll = new Map<string, number>()
+  // Per-schedule-trigger next-fire instant; in-memory so it re-anchors each start.
+  const scheduleNextRun = new Map<string, number>()
+  // Signature (cron|timezone) each anchor was computed for; lets the engine
+  // re-anchor when a trigger's schedule is edited instead of firing the stale instant.
+  const scheduleAnchorSig = new Map<string, string>()
   // Why: dispatchAutoRun lives on AutomationService but the engine needs it as
   // a ctor dep — late-bind via serviceRef so both can coexist. The engine's
   // start/stop lifecycle is owned by AutomationService.start()/stop() so the
@@ -752,6 +763,14 @@ app.whenReady().then(async () => {
     httpLastPoll: (triggerId) => httpTriggerLastPoll.get(triggerId) ?? 0,
     httpLastPollSet: (triggerId, value) => {
       httpTriggerLastPoll.set(triggerId, value)
+    },
+    scheduleNextRun: (id) => scheduleNextRun.get(id) ?? 0,
+    scheduleNextRunSet: (id, value) => {
+      scheduleNextRun.set(id, value)
+    },
+    scheduleAnchorSig: (id) => scheduleAnchorSig.get(id) ?? '',
+    scheduleAnchorSigSet: (id, sig) => {
+      scheduleAnchorSig.set(id, sig)
     },
     hostId: AUTO_TRIGGER_HOST_ID,
     now: () => Date.now()

@@ -29,5 +29,20 @@ export const AUTOMATIONS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
       'paused',
       'banner'
     ]
+  },
+  {
+    title: 'HTTP Connections',
+    description:
+      'Reusable HTTP base URL + headers (including secret auth) for HTTP triggers and request steps.',
+    keywords: [
+      'automation',
+      'http',
+      'connection',
+      'base url',
+      'header',
+      'secret',
+      'auth',
+      'reusable'
+    ]
   }
 ]

@@ -1461,6 +1461,8 @@ export type PreloadApi = {
       request: HttpRequestConfig
       automationId?: string
       autoTriggerId?: string
+      // Merges this reusable connection's base URL + headers before firing.
+      connectionId?: string
     }) => Promise<{ status: number; durationMs: number; body: unknown }>
     fetchItems: (args: {
       automationId: string

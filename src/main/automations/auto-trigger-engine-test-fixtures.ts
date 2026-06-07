@@ -102,6 +102,8 @@ export type EngineHarness = {
   dedup: Set<string>
   lastPollMap: Map<string, number>
   httpLastPollMap: Map<string, number>
+  scheduleNextRunMap: Map<string, number>
+  scheduleAnchorSigMap: Map<string, string>
 }
 
 export function makeEngine(opts: {
@@ -112,6 +114,8 @@ export function makeEngine(opts: {
   dispatched?: DispatchedRecord[]
   lastPollMap?: Map<string, number>
   httpLastPollMap?: Map<string, number>
+  scheduleNextRunMap?: Map<string, number>
+  scheduleAnchorSigMap?: Map<string, string>
   onError?: AutoTriggerEngineDeps['onError']
 }): EngineHarness {
   const registry = new TriggerSourceRegistry()
@@ -120,6 +124,8 @@ export function makeEngine(opts: {
   const dispatched = opts.dispatched ?? []
   const lastPollMap = opts.lastPollMap ?? new Map<string, number>()
   const httpLastPollMap = opts.httpLastPollMap ?? new Map<string, number>()
+  const scheduleNextRunMap = opts.scheduleNextRunMap ?? new Map<string, number>()
+  const scheduleAnchorSigMap = opts.scheduleAnchorSigMap ?? new Map<string, string>()
   const engine = new AutoTriggerEngine({
     registry,
     listAutomations: () => opts.automations,
@@ -138,9 +144,25 @@ export function makeEngine(opts: {
     httpLastPollSet: (id, v) => {
       httpLastPollMap.set(id, v)
     },
+    scheduleNextRun: (id) => scheduleNextRunMap.get(id) ?? 0,
+    scheduleNextRunSet: (id, v) => {
+      scheduleNextRunMap.set(id, v)
+    },
+    scheduleAnchorSig: (id) => scheduleAnchorSigMap.get(id) ?? '',
+    scheduleAnchorSigSet: (id, sig) => {
+      scheduleAnchorSigMap.set(id, sig)
+    },
     hostId: 'h1',
     now: () => opts.now ?? 2000,
     onError: opts.onError
   })
-  return { engine, dispatched, dedup, lastPollMap, httpLastPollMap }
+  return {
+    engine,
+    dispatched,
+    dedup,
+    lastPollMap,
+    httpLastPollMap,
+    scheduleNextRunMap,
+    scheduleAnchorSigMap
+  }
 }

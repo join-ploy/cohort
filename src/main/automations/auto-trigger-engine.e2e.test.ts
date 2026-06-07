@@ -162,6 +162,10 @@ async function setup(opts: SetupOpts): Promise<Harness> {
     lastPollSet: () => undefined,
     httpLastPoll: () => 0,
     httpLastPollSet: () => undefined,
+    scheduleNextRun: () => 0,
+    scheduleNextRunSet: () => undefined,
+    scheduleAnchorSig: () => '',
+    scheduleAnchorSigSet: () => undefined,
     hostId: 'test',
     now: () => Date.now()
   })
@@ -272,6 +276,10 @@ async function setupHttp(): Promise<HttpHarness> {
     httpLastPollSet: (id, v) => {
       httpLastPollMap.set(id, v)
     },
+    scheduleNextRun: () => 0,
+    scheduleNextRunSet: () => undefined,
+    scheduleAnchorSig: () => '',
+    scheduleAnchorSigSet: () => undefined,
     hostId: 'test',
     now: () => HTTP_NOW
   })

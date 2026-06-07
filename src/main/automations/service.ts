@@ -39,6 +39,7 @@ import {
 } from './runners/create-workspace-group-runner'
 import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
 import { CollectCiResultsRunner } from './runners/collect-ci-results-runner'
+import { HttpRequestRunner } from './runners/http-request-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
 import { getPRChecks, getPRComments, getPRForBranch } from '../github/client'
 import { gitExecFileAsync } from '../github/gh-utils'
@@ -47,7 +48,7 @@ import { splitWorktreeId } from '../../shared/worktree-id'
 import { hasPromptTargetChangesFromMain } from './prompt-target-main-changes'
 import { inferSidebarPromptAgent } from '../../shared/sidebar-prompt-agent'
 import { getEffectiveHooks } from '../hooks'
-import { maskAutoTriggers } from './http-endpoint-secrets'
+import { maskAutoTriggers, maskHttpRequestSteps } from './http-endpoint-secrets'
 
 // Why: duplicated from renderer's chain-editor-state because that module is
 // renderer-only. Kept inline to avoid a new shared runtime file for a one-liner.
@@ -183,6 +184,7 @@ export class AutomationService {
   private readonly createWorkspaceGroupRunner: CreateWorkspaceGroupRunner
   private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
   private readonly collectCiResultsRunner: CollectCiResultsRunner
+  private readonly httpRequestRunner: HttpRequestRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -458,6 +460,12 @@ export class AutomationService {
       now: () => Date.now()
     })
 
+    this.httpRequestRunner = new HttpRequestRunner({
+      // Why: resolve the referenced connection (sealed base URL + headers) from
+      // settings at run time; execute defaults to the real guarded executor.
+      getConnection: (id) => this.store.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+
     this.chainExecutor = new ChainExecutor({
       getRunner: (kind) => this.resolveRunner(kind),
       persistRun: (run) => {
@@ -658,6 +666,12 @@ export class AutomationService {
       // Why: event.payload already holds the mapped variables that become
       // run.context.trigger.http.*; the rule decides the target project.
       runPayload = { projectId: rule.projectId, http: event.payload }
+    } else if (trigger.source === 'schedule') {
+      // Why: schedule has no external entity — the run targets the automation's
+      // project (carried by the implicit rule) and payload.schedule is the
+      // fire-time context surfaced to chain steps.
+      const schedulePayload = (event.payload as { schedule?: RunNowPayload['schedule'] }).schedule
+      runPayload = { projectId: rule.projectId, schedule: schedulePayload }
     } else {
       runPayload = { projectId: rule.projectId }
     }
@@ -684,6 +698,9 @@ export class AutomationService {
     }
     if (payload?.http) {
       triggerContext.http = payload.http
+    }
+    if (payload?.schedule) {
+      triggerContext.schedule = payload.schedule
     }
     if (payload?.projectId) {
       // Why: validate the picked project up-front so the run fails fast with a
@@ -721,6 +738,9 @@ export class AutomationService {
     }
     if (kind === 'collect-ci-results') {
       return this.collectCiResultsRunner
+    }
+    if (kind === 'http-request') {
+      return this.httpRequestRunner
     }
     return undefined
   }
@@ -1161,10 +1181,14 @@ export class AutomationService {
       error: null
     })
     // Why: every automation crossing to the renderer must be masked — uphold the
-    // invariant structurally even though http triggers don't reach this legacy
-    // dispatch path today.
+    // invariant structurally even though http triggers/steps don't reach this
+    // legacy dispatch path today.
     const payload: AutomationDispatchRequest = {
-      automation: { ...automation, autoTriggers: maskAutoTriggers(automation.autoTriggers) },
+      automation: {
+        ...automation,
+        autoTriggers: maskAutoTriggers(automation.autoTriggers),
+        steps: maskHttpRequestSteps(automation.steps)
+      },
       run
     }
     webContents.send('automations:dispatchRequested', payload)

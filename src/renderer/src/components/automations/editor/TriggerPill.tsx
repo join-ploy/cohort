@@ -15,7 +15,8 @@ export type TriggerPillProps = {
 const SOURCE_LABEL: Record<TriggerSourceId, string> = {
   'linear-issue': 'Linear auto',
   'github-pr': 'GitHub PR auto',
-  'http-endpoint': 'HTTP auto'
+  'http-endpoint': 'HTTP auto',
+  schedule: 'Schedule auto'
 }
 
 function sourceLabelFor(source: TriggerSourceId): string {

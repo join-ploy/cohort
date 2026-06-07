@@ -1,5 +1,5 @@
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
-import type { AutoDedupEntry, Automation, AutomationRun } from './automations-types'
+import type { AutoDedupEntry, Automation, AutomationRun, HttpConnection } from './automations-types'
 import type { WorkspaceSource } from './telemetry-events'
 import type { GitHubProjectSettings } from './github-project-types'
 
@@ -1522,6 +1522,9 @@ export type GlobalSettings = {
    *  prompt to ~/.orca/prompts/<label>.md and opens a new central terminal
    *  tab running `<command> "$(cat <prompt-path>)"`. */
   reviewCommands: SidebarPromptCommand[]
+  /** Reusable HTTP connections (base URL + secret headers) selectable from
+   *  HTTP automation nodes. Secrets sealed/masked like trigger secrets. */
+  httpConnections: HttpConnection[]
   /** Right-sidebar Create PR dropdown entries. Same shape as
    *  `reviewCommands`; the button only renders when the active worktree's
    *  branch has no open PR cached. */

@@ -4,6 +4,8 @@ import type {
   CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
+  HttpConnection,
+  HttpRequestStepConfig,
   RunCommandConfig,
   RunPromptConfig,
   Step,
@@ -28,12 +30,14 @@ import {
 } from '../../../lib/template-dry-run'
 import {
   GITHUB_PR_TRIGGER_OVERLAY,
-  getOutputSchemaForKind,
+  getOutputSchemaForStep,
+  httpFieldsToSchema,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
   type NestedSchema,
   type OutputSchema
 } from '../../../../../shared/automation-step-schemas'
+import { isValidCron } from '../../../../../shared/schedule-cron'
 
 export type ChainEditorError = TemplateError & {
   stepId: string
@@ -47,7 +51,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
-  'collect-ci-results': 'Collect CI results'
+  'collect-ci-results': 'Collect CI results',
+  'http-request': 'HTTP request'
 }
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
@@ -59,6 +64,7 @@ export const STEP_KIND_ORDER: StepKind[] = [
   'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
+  'http-request',
   'collect-ci-results',
   'update-linear-issue'
 ]
@@ -109,13 +115,7 @@ export function buildTriggerSchema(
   // Only an enabled trigger contributes its overlay, mirroring the github-pr guard.
   const httpTrigger = autoTriggers.find((t) => t.enabled && t.source === 'http-endpoint' && t.http)
   if (httpTrigger?.http) {
-    const httpSchema: OutputSchema = {}
-    for (const f of httpTrigger.http.fields) {
-      if (f.enabled) {
-        httpSchema[f.variableName] = f.type === 'number' ? 'number' : 'string'
-      }
-    }
-    base.http = httpSchema
+    base.http = httpFieldsToSchema(httpTrigger.http.fields)
   }
   return base
 }
@@ -163,7 +163,7 @@ export function getAvailableVariablesAtStep(
   stepIndex: number,
   repos: Repo[] = []
 ): AvailableVariables {
-  const stepsSchema: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  const stepsSchema: Record<string, OutputSchema> = {}
   // Why: the picker keys a step output's description off the step's kind, so we
   // carry the id→kind map alongside the schemas.
   const stepKinds: Record<string, StepKind> = {}
@@ -175,7 +175,7 @@ export function getAvailableVariablesAtStep(
     const item = draft.steps[i]
     const members = Array.isArray(item) ? item : [item]
     for (const s of members) {
-      stepsSchema[s.id] = getOutputSchemaForKind(s.kind)
+      stepsSchema[s.id] = getOutputSchemaForStep(s)
       stepKinds[s.id] = s.kind
       // Why: any earlier create-workspace-group step injects the top-level
       // `group.*` namespace. If multiple exist (rare), the latest wins —
@@ -252,7 +252,11 @@ function repoFolderName(repoPath: string): string {
   return base.replace(/\.git$/, '')
 }
 
-export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEditorError[] {
+export function computeAllErrors(
+  draft: ChainDraft,
+  repos: Repo[] = [],
+  httpConnections: HttpConnection[] = []
+): ChainEditorError[] {
   const all: ChainEditorError[] = []
   const flat = flattenSteps(draft.steps)
   const seenStepIds = new Set<string>()
@@ -276,6 +280,29 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
         all.push({ ...err, stepId: step.id, field })
       }
     })
+    if (step.kind === 'http-request') {
+      const config = step.config as HttpRequestStepConfig
+      // Why: the step's downstream variables come only from a saved Test mapping, so
+      // block save until it has been tested with at least one enabled field.
+      if (config.sampleResponse === undefined || !config.fields.some((f) => f.enabled)) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' must be tested and have at least one enabled field before saving.`,
+          stepId: step.id,
+          field: 'fields'
+        })
+      }
+      if (config.connectionId && !httpConnections.some((c) => c.id === config.connectionId)) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' references a connection that no longer exists.`,
+          stepId: step.id,
+          field: 'connectionId'
+        })
+      }
+    }
   }
   // Parallel pane conflict: within a group, multiple steps targeting the same
   // paneRef would thrash a single pane with concurrent writes.
@@ -329,6 +356,33 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
       stepId: '',
       field: 'projectId'
     })
+  }
+  // A schedule trigger only fires on a valid cron, so a malformed expression
+  // must block save just like the github-pr/http-endpoint sources gate theirs.
+  for (const t of draft.autoTriggers ?? []) {
+    if (t.source === 'schedule' && !(t.schedule && isValidCron(t.schedule.cron))) {
+      all.push({
+        path: `autoTriggers.${t.id}.cron`,
+        code: 'unknown-path',
+        message: 'Schedule trigger has an invalid cron expression.',
+        stepId: '',
+        field: 'cron'
+      })
+    }
+    const triggerConnectionId = t.http?.connectionId
+    if (
+      t.source === 'http-endpoint' &&
+      triggerConnectionId &&
+      !httpConnections.some((c) => c.id === triggerConnectionId)
+    ) {
+      all.push({
+        path: `autoTriggers.${t.id}.connectionId`,
+        code: 'unknown-path',
+        message: 'HTTP trigger references a connection that no longer exists.',
+        stepId: '',
+        field: 'connectionId'
+      })
+    }
   }
   return all
 }
@@ -505,6 +559,14 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         worktreeRef: '',
         pollIntervalSeconds: 30,
         includeComments: true
+      }
+      return cfg
+    }
+    case 'http-request': {
+      const cfg: HttpRequestStepConfig = {
+        request: { method: 'GET', url: '', headers: [], query: [] },
+        itemsPath: null,
+        fields: []
       }
       return cfg
     }

@@ -1,43 +1,22 @@
 import * as React from 'react'
-import { ChevronDown, Globe, Loader2, Lock, Plus, Trash2, Unlock, Zap } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { Globe, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator'
-import { cn } from '@/lib/utils'
 import {
-  HTTP_SECRET_MASK,
   type AutoTrigger,
-  type HttpKeyValue,
-  type HttpMethod,
-  type MappedField
+  type HttpConnection,
+  type HttpRequestConfig
 } from '../../../../../shared/automations-types'
+import { parseDateValue } from '../../../../../shared/http-endpoint-mapping'
 import {
-  detectArrayPaths,
-  flattenItem,
-  parseDateValue,
-  resolveItems
-} from '../../../../../shared/http-endpoint-mapping'
-import {
-  addQuery,
-  addHeader,
-  applyTestMapping,
-  removeHeader,
-  removeQuery,
-  renameField,
   setDateGateField,
   setDedupeFields,
   setIntervalMs,
   setLabelField,
   setManualEnabled,
   setPollingEnabled,
-  setRequestField,
-  setSubtitleField,
-  toggleBodySecret,
-  toggleFieldEnabled,
-  toggleHeaderSecret,
-  updateHeader,
-  updateQuery
+  setSubtitleField
 } from './http-endpoint-card-state'
 import { httpFieldsToCatalog } from './http-endpoint-field-catalog'
 import {
@@ -51,6 +30,9 @@ import {
 } from './AutoTriggerCard'
 import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
+import { HttpRequestEditor } from './HttpRequestEditor'
+import { type HttpRequestEditorValue } from './http-request-editor-state'
+import { SectionHeading } from './SectionHeading'
 
 export type HttpEndpointTriggerCardProps = {
   trigger: AutoTrigger
@@ -61,9 +43,10 @@ export type HttpEndpointTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker in the conditions section. */
   projects: { id: string; displayName: string }[]
+  /** Reusable connection library — the picker references one by id; when set, the
+   *  URL field becomes a path joined to the connection's base URL. */
+  httpConnections: HttpConnection[]
 }
-
-const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 const INTERVAL_OPTIONS: { label: string; ms: number | undefined }[] = [
   { label: 'Default', ms: undefined },
@@ -75,145 +58,6 @@ const INTERVAL_OPTIONS: { label: string; ms: number | undefined }[] = [
 
 // HTTP fields have no option lookups, so the conditions UI never fetches.
 const noopLoadOptions: LoadOptionsFn = () => Promise.resolve([])
-
-const SELECT_CLASS = cn(
-  'appearance-none rounded-md border border-input bg-background px-2 py-1 pr-7 text-xs transition-colors hover:bg-accent',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
-)
-
-// Why: variableNames must be unique among ENABLED fields — the condition catalog
-// and downstream `trigger.http.<name>` resolution key on them, and
-// defaultVariableName can collapse distinct paths (e.g. `a.b` and `a_b`) to the
-// same name. Returns the names that collide so the card can flag them.
-export function findDuplicateVariableNames(fields: MappedField[]): string[] {
-  const counts = new Map<string, number>()
-  for (const f of fields) {
-    if (!f.enabled) {
-      continue
-    }
-    counts.set(f.variableName, (counts.get(f.variableName) ?? 0) + 1)
-  }
-  return [...counts.entries()].filter(([, n]) => n > 1).map(([name]) => name)
-}
-
-function formatSample(value: unknown): string {
-  if (value === null) {
-    return 'null'
-  }
-  if (value === undefined) {
-    return '—'
-  }
-  if (typeof value === 'string') {
-    return value
-  }
-  if (typeof value === 'object') {
-    return JSON.stringify(value)
-  }
-  return String(value)
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-      {children}
-    </p>
-  )
-}
-
-type SelectShellProps = {
-  ariaLabel: string
-  value: string
-  onChange: (next: string) => void
-  className?: string
-  children: React.ReactNode
-}
-
-function SelectShell(props: SelectShellProps): React.JSX.Element {
-  return (
-    <div className="relative inline-flex">
-      <select
-        aria-label={props.ariaLabel}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        className={cn(SELECT_CLASS, props.className)}
-      >
-        {props.children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-    </div>
-  )
-}
-
-type KeyValueRowProps = {
-  pair: HttpKeyValue
-  rowLabel: string
-  onKeyChange: (key: string) => void
-  onValueChange: (value: string) => void
-  onRemove: () => void
-  onToggleSecret?: () => void
-}
-
-function KeyValueRow(props: KeyValueRowProps): React.JSX.Element {
-  const { pair, rowLabel } = props
-  // Why: a sealed secret arrives from main as the mask sentinel — show it as
-  // "set" and disabled so the user can't silently overwrite it by tabbing
-  // through; an explicit Replace clears it back to an editable field.
-  const masked = pair.secret === true && pair.value === HTTP_SECRET_MASK
-  return (
-    <div className="flex items-center gap-2">
-      <Input
-        aria-label={`${rowLabel} key`}
-        value={pair.key}
-        placeholder="Key"
-        onChange={(e) => props.onKeyChange(e.target.value)}
-        className="h-8 flex-1 text-xs"
-      />
-      {masked ? (
-        <div className="flex h-8 flex-1 items-center gap-2 rounded-md border border-input bg-muted/30 px-3 text-xs text-muted-foreground">
-          <Lock className="size-3" />
-          <span className="flex-1">•••• (set)</span>
-          <button
-            type="button"
-            className="cursor-pointer font-medium text-foreground hover:underline"
-            onClick={() => props.onValueChange('')}
-          >
-            Replace
-          </button>
-        </div>
-      ) : (
-        <Input
-          aria-label={`${rowLabel} value`}
-          value={pair.value}
-          placeholder={pair.secret ? 'Secret value' : 'Value'}
-          onChange={(e) => props.onValueChange(e.target.value)}
-          className="h-8 flex-1 text-xs"
-        />
-      )}
-      {props.onToggleSecret ? (
-        <Button
-          type="button"
-          variant={pair.secret ? 'secondary' : 'ghost'}
-          size="icon-xs"
-          aria-label={`Toggle ${rowLabel} secret`}
-          aria-pressed={pair.secret ?? false}
-          title={pair.secret ? 'Secret — encrypted at rest' : 'Mark as secret'}
-          onClick={props.onToggleSecret}
-        >
-          {pair.secret ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
-        </Button>
-      ) : null}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Remove ${rowLabel}`}
-        onClick={props.onRemove}
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
-    </div>
-  )
-}
 
 type CapabilitySwitchProps = {
   label: string
@@ -237,31 +81,10 @@ function CapabilitySwitch(props: CapabilitySwitchProps): React.JSX.Element {
 }
 
 export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): React.JSX.Element {
-  const { trigger, onChange, onRemove, automationId, projects } = props
+  const { trigger, onChange, onRemove, automationId, projects, httpConnections } = props
   const http = trigger.http
 
-  // Why: persisted sample drives the items dropdown + remapping offline, so
-  // seed from it; a fresh Test overwrites it. Status badge tracks only the live
-  // request so a reopened card doesn't show a stale "200".
-  const [sampleBody, setSampleBody] = React.useState<unknown>(http?.sampleResponse)
-  const [lastTest, setLastTest] = React.useState<{
-    status: number
-    durationMs: number
-  } | null>(null)
-  const [testing, setTesting] = React.useState(false)
-  const [testError, setTestError] = React.useState<string | null>(null)
-  const [manualPath, setManualPath] = React.useState('')
-
-  const arrayCandidates = React.useMemo(
-    () => (sampleBody === undefined ? [] : detectArrayPaths(sampleBody)),
-    [sampleBody]
-  )
   const fieldCatalog = React.useMemo(() => (http ? httpFieldsToCatalog(http.fields) : []), [http])
-  const duplicateNames = React.useMemo(
-    () => (http ? findDuplicateVariableNames(http.fields) : []),
-    [http]
-  )
-  const duplicateSet = React.useMemo(() => new Set(duplicateNames), [duplicateNames])
 
   if (!http) {
     // Why: this card only renders for http-endpoint triggers, which always carry
@@ -273,57 +96,43 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
     )
   }
 
-  const request = http.request
   // Why: the whole-item + array outputs (json) are usable as variables but not as
   // dedupe keys, date gates, or picker labels — those need scalar leaf fields.
   const scalarFields = http.fields.filter((f) => f.enabled && f.type !== 'json')
 
-  const onTest = async (): Promise<void> => {
-    setTesting(true)
-    setTestError(null)
-    try {
-      const res = await window.api.httpEndpoint.test({
-        request,
-        automationId,
-        autoTriggerId: trigger.id
-      })
-      setSampleBody(res.body)
-      setLastTest({ status: res.status, durationMs: res.durationMs })
-    } catch (err) {
-      setTestError(err instanceof Error ? err.message : String(err))
-      // Why: a failed Test must not leave a stale success badge next to the error.
-      setLastTest(null)
-    } finally {
-      setTesting(false)
-    }
+  // The shared editor owns the request/connection/Test/mapping slice; the
+  // write-back preserves the trigger-only http fields (dedupe, gates, etc.).
+  const editorValue: HttpRequestEditorValue = {
+    connectionId: http.connectionId,
+    request: http.request,
+    itemsPath: http.itemsPath,
+    fields: http.fields,
+    sampleResponse: http.sampleResponse
+  }
+  const onEditorChange = (next: HttpRequestEditorValue): void => {
+    onChange({
+      ...trigger,
+      http: {
+        ...http,
+        connectionId: next.connectionId,
+        request: next.request,
+        itemsPath: next.itemsPath,
+        fields: next.fields,
+        sampleResponse: next.sampleResponse
+      }
+    })
   }
 
-  // Why: re-flatten the chosen item and let applyTestMapping merge it against the
-  // prior fields so existing enable/rename choices survive a re-Test (drift).
-  const applyItemsPath = (itemsPath: string | null): void => {
-    if (sampleBody === undefined) {
-      return
-    }
-    const items = resolveItems(sampleBody, itemsPath)
-    const discovered = flattenItem(items[0] ?? sampleBody)
-    onChange(
-      applyTestMapping(trigger, {
-        itemsPath,
-        fields: discovered,
-        sampleResponse: sampleBody
-      })
-    )
-  }
-
-  const itemsToken = http.itemsPath === null ? 'whole' : `path:${http.itemsPath}`
-  const candidateTokens = new Set(arrayCandidates.map((c) => `path:${c.path}`))
-  const onItemsSelect = (token: string): void => {
-    if (token === 'whole') {
-      applyItemsPath(null)
-    } else if (token.startsWith('path:')) {
-      applyItemsPath(token.slice('path:'.length))
-    }
-  }
+  // Why: the trigger Test must scope to this trigger so main can decrypt its
+  // sealed secrets; connectionId lets the picker's selection affect the Test.
+  const onTest = ({
+    request,
+    connectionId
+  }: {
+    request: HttpRequestConfig
+    connectionId?: string
+  }): Promise<{ status: number; durationMs: number; body: unknown }> =>
+    window.api.httpEndpoint.test({ request, automationId, autoTriggerId: trigger.id, connectionId })
 
   const toggleDedupe = (path: string): void => {
     const next = http.dedupeFields.includes(path)
@@ -376,226 +185,13 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
 
         <Separator />
 
-        {/* 2. Request */}
-        <div className="space-y-2">
-          <SectionHeading>Request</SectionHeading>
-          <div className="flex items-center gap-2">
-            <SelectShell
-              ariaLabel="Method"
-              value={request.method}
-              onChange={(method) =>
-                onChange(setRequestField(trigger, { method: method as HttpMethod }))
-              }
-            >
-              {HTTP_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </SelectShell>
-            <Input
-              aria-label="URL"
-              value={request.url}
-              placeholder="https://api.example.com/items"
-              onChange={(e) => onChange(setRequestField(trigger, { url: e.target.value }))}
-              className="h-8 flex-1 text-xs"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            {/* Why: block label (not inline span) so the Add button below doesn't
-                collapse onto the label's line when there are no rows yet. */}
-            <p className="text-[11px] font-medium text-muted-foreground">Headers</p>
-            {request.headers.map((h, i) => (
-              <KeyValueRow
-                key={i}
-                pair={h}
-                rowLabel="Header"
-                onKeyChange={(key) => onChange(updateHeader(trigger, i, { key }))}
-                onValueChange={(value) => onChange(updateHeader(trigger, i, { value }))}
-                onToggleSecret={() => onChange(toggleHeaderSecret(trigger, i))}
-                onRemove={() => onChange(removeHeader(trigger, i))}
-              />
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={() => onChange(addHeader(trigger))}
-            >
-              <Plus className="size-3" />
-              Add header
-            </Button>
-          </div>
-
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-muted-foreground">Query parameters</p>
-            {request.query.map((q, i) => (
-              <KeyValueRow
-                key={i}
-                pair={q}
-                rowLabel="Query"
-                onKeyChange={(key) => onChange(updateQuery(trigger, i, { key }))}
-                onValueChange={(value) => onChange(updateQuery(trigger, i, { value }))}
-                onRemove={() => onChange(removeQuery(trigger, i))}
-              />
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={() => onChange(addQuery(trigger))}
-            >
-              <Plus className="size-3" />
-              Add query parameter
-            </Button>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-medium text-muted-foreground">Body (optional)</p>
-              <Button
-                type="button"
-                variant={request.bodySecret ? 'secondary' : 'ghost'}
-                size="xs"
-                aria-label="Toggle body secret"
-                aria-pressed={request.bodySecret ?? false}
-                onClick={() => onChange(toggleBodySecret(trigger))}
-              >
-                {request.bodySecret ? <Lock className="size-3" /> : <Unlock className="size-3" />}
-                Secret
-              </Button>
-            </div>
-            {request.bodySecret && request.body === HTTP_SECRET_MASK ? (
-              <div className="flex items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                <Lock className="size-3" />
-                <span className="flex-1">•••• (set)</span>
-                <button
-                  type="button"
-                  className="cursor-pointer font-medium text-foreground hover:underline"
-                  onClick={() => onChange(setRequestField(trigger, { body: '' }))}
-                >
-                  Replace
-                </button>
-              </div>
-            ) : (
-              <textarea
-                aria-label="Body"
-                value={request.body ?? ''}
-                placeholder='{"key": "value"}'
-                rows={3}
-                onChange={(e) => onChange(setRequestField(trigger, { body: e.target.value }))}
-                className="w-full min-w-0 resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              />
-            )}
-          </div>
-        </div>
-
-        <Separator />
-
-        {/* 3. Test */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" size="xs" disabled={testing} onClick={onTest}>
-              {testing ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
-              Test
-            </Button>
-            {lastTest ? (
-              <Badge
-                variant={
-                  lastTest.status >= 200 && lastTest.status < 300 ? 'secondary' : 'destructive'
-                }
-                className="font-normal"
-              >
-                {lastTest.status} · {lastTest.durationMs}ms
-              </Badge>
-            ) : null}
-          </div>
-          {testError ? <p className="text-xs text-destructive">{testError}</p> : null}
-
-          {sampleBody !== undefined ? (
-            <div className="space-y-1.5">
-              <p className="text-[11px] font-medium text-muted-foreground">Items</p>
-              <SelectShell ariaLabel="Items path" value={itemsToken} onChange={onItemsSelect}>
-                <option value="whole">Whole response is a single item</option>
-                {arrayCandidates.map((c) => (
-                  <option key={c.path} value={`path:${c.path}`}>
-                    {c.path === '' ? '(top-level array)' : c.path} · {c.length} items
-                  </option>
-                ))}
-                {http.itemsPath !== null && !candidateTokens.has(itemsToken) ? (
-                  <option value={itemsToken}>{http.itemsPath} (current)</option>
-                ) : null}
-              </SelectShell>
-              <div className="flex items-center gap-2">
-                <Input
-                  aria-label="Manual items path"
-                  value={manualPath}
-                  placeholder="Or enter a dot-path, e.g. data.results"
-                  onChange={(e) => setManualPath(e.target.value)}
-                  className="h-8 flex-1 text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  disabled={manualPath === ''}
-                  onClick={() => applyItemsPath(manualPath)}
-                >
-                  Apply
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {/* 4. Field mapping checklist */}
-        {http.fields.length > 0 ? (
-          <>
-            <Separator />
-            <div className="space-y-2">
-              <SectionHeading>Fields</SectionHeading>
-              {duplicateNames.length > 0 ? (
-                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  Duplicate variable name
-                  {duplicateNames.length === 1 ? '' : 's'}: {duplicateNames.join(', ')}. Each
-                  enabled field needs a unique name.
-                </p>
-              ) : null}
-              <ul className="space-y-1.5">
-                {http.fields.map((field) => {
-                  const isDuplicate = field.enabled && duplicateSet.has(field.variableName)
-                  return (
-                    <li key={field.path} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        aria-label={`Enable ${field.path}`}
-                        checked={field.enabled}
-                        onChange={() => onChange(toggleFieldEnabled(trigger, field.path))}
-                        className="size-4 cursor-pointer rounded border-input"
-                      />
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-mono text-xs">
-                          {field.path === '' ? '(whole item)' : field.path}
-                        </span>
-                        <span className="truncate text-[11px] text-muted-foreground">
-                          {formatSample(field.sampleValue)}
-                        </span>
-                      </div>
-                      <Input
-                        aria-label={`Variable name for ${field.path}`}
-                        value={field.variableName}
-                        aria-invalid={isDuplicate}
-                        onChange={(e) => onChange(renameField(trigger, field.path, e.target.value))}
-                        className="h-8 w-40 text-xs"
-                      />
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          </>
-        ) : null}
+        {/* 2-4. Shared request builder + Test + field mapping */}
+        <HttpRequestEditor
+          value={editorValue}
+          onChange={onEditorChange}
+          httpConnections={httpConnections}
+          onTest={onTest}
+        />
 
         {/* 5. Poll settings */}
         {trigger.pollingEnabled ? (
@@ -634,7 +230,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Date gate</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Date gate field"
                     value={http.dateGateField ?? ''}
                     onChange={(v) => onChange(setDateGateField(trigger, v === '' ? null : v))}
@@ -645,7 +241,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
                 {http.dateGateField !== null ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -659,7 +255,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Poll interval</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Poll interval"
                     value={http.intervalMs === undefined ? '' : String(http.intervalMs)}
                     onChange={(v) =>
@@ -671,7 +267,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {opt.label}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
             </div>
@@ -687,7 +283,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Label field</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Label field"
                     value={http.labelField ?? ''}
                     onChange={(v) => onChange(setLabelField(trigger, v === '' ? undefined : v))}
@@ -698,13 +294,13 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Subtitle field</p>
                 <div>
-                  <SelectShell
+                  <NativeSelect
                     ariaLabel="Subtitle field"
                     value={http.subtitleField ?? ''}
                     onChange={(v) => onChange(setSubtitleField(trigger, v === '' ? undefined : v))}
@@ -715,7 +311,7 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                         {field.path}
                       </option>
                     ))}
-                  </SelectShell>
+                  </NativeSelect>
                 </div>
               </div>
             </div>

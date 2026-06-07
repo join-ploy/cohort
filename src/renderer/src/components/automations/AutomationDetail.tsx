@@ -15,6 +15,7 @@ import type {
   ConditionOp,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
+  HttpRequestStepConfig,
   LinearIssuePayload,
   Rule,
   RunCommandConfig,
@@ -31,6 +32,7 @@ import type {
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
+import { describeCron } from '../../../../shared/schedule-cron'
 import {
   isMemberScopedRef,
   parseMemberScopedRef
@@ -480,17 +482,31 @@ function AutoTriggersSummary({
                 </div>
                 <div className="flex items-center gap-2">
                   {trig.enabled && poll ? (
-                    <TriggerPollCountdown
-                      lastPollAt={poll.lastPollAt}
-                      intervalMs={poll.intervalMs}
-                    />
+                    // Schedule's getPollStatus puts the next-fire instant in
+                    // lastPollAt (not a past poll), so show the next run rather
+                    // than a "next poll in Xs" countdown.
+                    trig.source === 'schedule' ? (
+                      <ScheduleNextRun lastPollAt={poll.lastPollAt} />
+                    ) : (
+                      <TriggerPollCountdown
+                        lastPollAt={poll.lastPollAt}
+                        intervalMs={poll.intervalMs}
+                      />
+                    )
                   ) : null}
                   <Badge variant={trig.enabled ? 'outline' : 'secondary'}>
                     {trig.enabled ? 'Active' : 'Disabled'}
                   </Badge>
                 </div>
               </div>
-              {trig.rules.length === 0 ? (
+              {trig.source === 'schedule' ? (
+                // Schedule triggers always have empty rules by design but DO
+                // fire on their cron, so describe the recurrence instead of the
+                // misleading "never fires".
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {trig.schedule ? describeCron(trig.schedule.cron) : 'Schedule not configured'}
+                </div>
+              ) : trig.rules.length === 0 ? (
                 <div className="mt-1 text-xs text-muted-foreground">No rules — never fires.</div>
               ) : (
                 <ul className="mt-2 space-y-1.5">
@@ -536,6 +552,28 @@ function TriggerPollCountdown({
   )
 }
 
+/** Next scheduled fire time for a schedule trigger. `lastPollAt` carries the
+ *  FUTURE next-run instant for this source (see auto-trigger-engine
+ *  getPollStatus), so render it as a wall-clock time rather than a countdown.
+ *  Exported so the schedule-trigger summary test can assert it directly — the
+ *  poll status that feeds it is fetched in an effect that static-markup renders
+ *  don't run. */
+export function ScheduleNextRun({ lastPollAt }: { lastPollAt: number }): React.JSX.Element | null {
+  // 0/unset means the engine hasn't anchored this trigger yet; render nothing
+  // rather than formatting the Unix epoch.
+  if (!lastPollAt) {
+    return null
+  }
+  const label = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(lastPollAt))
+  return <span className="text-[11px] tabular-nums text-muted-foreground">Next run {label}</span>
+}
+
 /** Fetches trigger poll status on mount and re-fetches every 5s while any
  *  trigger is enabled — keeps the countdown accurate between main-process
  *  broadcasts. */
@@ -578,7 +616,8 @@ const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
-  'collect-ci-results': 'Collect CI results'
+  'collect-ci-results': 'Collect CI results',
+  'http-request': 'HTTP request'
 }
 
 function firstNonEmptyLine(value: string): string {
@@ -653,6 +692,11 @@ function describeStepConfig(step: Step): string {
         parts.push('comments')
       }
       return `Collect ${parts.join(' + ')}`
+    }
+    case 'http-request': {
+      const config = step.config as HttpRequestStepConfig
+      const url = config.request.url.trim()
+      return url ? `${config.request.method} ${url}` : config.request.method
     }
   }
 }

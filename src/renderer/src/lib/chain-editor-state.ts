@@ -284,6 +284,13 @@ export function walkStepConfigStrings(
       }
       break
     }
+    // Deferred no-op (mirrors rewriteConfigStrings): visiting the request step's
+    // url/headers[].value/query[].value/body would let dry-run + id-rename see its
+    // templates. Safe to defer — the editor has no template autocomplete for these
+    // fields yet, and the runner resolves them loudly at run time (a bad ref fails
+    // the step). Wire both visitors when step-request template autocomplete lands.
+    case 'http-request':
+      break
   }
 }
 
@@ -364,6 +371,11 @@ function rewriteConfigStrings(
         worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef
       }
     }
+    case 'http-request':
+      // Deferred (mirrors walkStepConfigStrings): id-rename rewriting of the
+      // request step's template fields lands when step-request template
+      // autocomplete does. Returned untouched for now.
+      return config
   }
 }
 

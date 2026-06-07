@@ -2,14 +2,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { HttpEndpointTriggerCard, findDuplicateVariableNames } from './HttpEndpointTriggerCard'
+import { HttpEndpointTriggerCard } from './HttpEndpointTriggerCard'
+import { findDuplicateVariableNames } from './HttpRequestEditor'
 import type {
   AutoTrigger,
+  HttpConnection,
   HttpEndpointConfig,
   MappedField
 } from '../../../../../shared/automations-types'
 
 const projects = [{ id: 'p1', displayName: 'orca-repo' }]
+
+const connections: HttpConnection[] = [
+  { id: 'c1', displayName: 'Acme', baseUrl: 'https://api.acme.dev', headers: [] }
+]
 
 const mkField = (over: Partial<MappedField> = {}): MappedField => ({
   path: 'id',
@@ -91,6 +97,7 @@ describe('HttpEndpointTriggerCard rendering', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     expect(html).toContain('HTTP endpoint')
@@ -109,6 +116,7 @@ describe('HttpEndpointTriggerCard rendering', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     expect(on).toContain('Poll settings')
@@ -119,6 +127,7 @@ describe('HttpEndpointTriggerCard rendering', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     expect(off).not.toContain('Poll settings')
@@ -138,6 +147,7 @@ describe('HttpEndpointTriggerCard rendering', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     expect(html).toContain('Duplicate variable name')
@@ -169,6 +179,7 @@ describe('HttpEndpointTriggerCard interactions', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     fireEvent.click(screen.getByLabelText('Poll automatically'))
@@ -185,6 +196,7 @@ describe('HttpEndpointTriggerCard interactions', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     fireEvent.click(screen.getByLabelText('Allow manual run'))
@@ -201,6 +213,7 @@ describe('HttpEndpointTriggerCard interactions', () => {
         onRemove={() => {}}
         automationId="auto-1"
         projects={projects}
+        httpConnections={[]}
       />
     )
     // Items dropdown is absent until a sample exists.
@@ -227,6 +240,7 @@ describe('HttpEndpointTriggerCard interactions', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     const testButton = screen.getByRole('button', { name: 'Test' })
@@ -254,6 +268,7 @@ describe('HttpEndpointTriggerCard interactions', () => {
         onRemove={() => {}}
         automationId=""
         projects={projects}
+        httpConnections={[]}
       />
     )
     const select = screen.getByLabelText('Items path') as HTMLSelectElement
@@ -266,5 +281,58 @@ describe('HttpEndpointTriggerCard interactions', () => {
     // (path '').
     expect(next.http?.fields.map((f) => f.path).sort()).toEqual(['', 'id', 'name'])
     expect(next.http?.fields.find((f) => f.path === '')?.variableName).toBe('item')
+  })
+})
+
+describe('HttpEndpointTriggerCard connection picker', () => {
+  it('sets http.connectionId when a connection is selected', () => {
+    const onChange = vi.fn()
+    render(
+      <HttpEndpointTriggerCard
+        trigger={mkTrigger()}
+        onChange={onChange}
+        onRemove={() => {}}
+        automationId=""
+        projects={projects}
+        httpConnections={connections}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Connection'), { target: { value: 'c1' } })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect((onChange.mock.calls[0][0] as AutoTrigger).http?.connectionId).toBe('c1')
+  })
+
+  it('labels the URL field as Path and shows the base-URL hint when a connection resolves', () => {
+    render(
+      <HttpEndpointTriggerCard
+        trigger={mkTrigger({ connectionId: 'c1' })}
+        onChange={() => {}}
+        onRemove={() => {}}
+        automationId=""
+        projects={projects}
+        httpConnections={connections}
+      />
+    )
+    expect(screen.getByLabelText('Path')).toBeTruthy()
+    expect(screen.queryByLabelText('URL')).toBeNull()
+    // The hint names the connection's base URL so the user sees what Path joins to.
+    expect(screen.getByText(/api\.acme\.dev/)).toBeTruthy()
+  })
+
+  it('clears http.connectionId when the picker is reset to None', () => {
+    const onChange = vi.fn()
+    render(
+      <HttpEndpointTriggerCard
+        trigger={mkTrigger({ connectionId: 'c1' })}
+        onChange={onChange}
+        onRemove={() => {}}
+        automationId=""
+        projects={projects}
+        httpConnections={connections}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Connection'), { target: { value: '' } })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect((onChange.mock.calls[0][0] as AutoTrigger).http?.connectionId).toBeUndefined()
   })
 })

@@ -6,6 +6,7 @@ import { previewGhosttyImport } from '../ghostty/index'
 import { rebuildAppMenu } from '../menu/register-app-menu'
 import { track } from '../telemetry/client'
 import { SETTINGS_CHANGED_WHITELIST, type SettingsChangedKey } from '../../shared/telemetry-events'
+import { sealHttpConnections, maskHttpConnections } from '../automations/http-endpoint-secrets'
 
 // Why: the whitelist is the source-of-truth for which keys we emit on. Casting
 // to a Set once at module load lets the IPC handler's per-key membership
@@ -23,12 +24,26 @@ const APPEARANCE_MENU_KEYS: readonly (keyof GlobalSettings)[] = [
 
 export function registerSettingsHandlers(store: Store): void {
   ipcMain.handle('settings:get', () => {
-    return store.getSettings()
+    const settings = store.getSettings()
+    // Why: connection secrets masked before they reach the renderer; copy so the
+    // stored settings object is never mutated.
+    return { ...settings, httpConnections: maskHttpConnections(settings.httpConnections ?? []) }
   })
 
   ipcMain.handle('settings:set', (_event, args: Partial<GlobalSettings>) => {
     if (args.theme) {
       nativeTheme.themeSource = args.theme
+    }
+    // Why: connection secrets sealed before persist — freshly typed values are
+    // encrypted and masked (unchanged) ones reuse the current stored ciphertext.
+    if ('httpConnections' in args && args.httpConnections) {
+      args = {
+        ...args,
+        httpConnections: sealHttpConnections(
+          args.httpConnections,
+          store.getSettings().httpConnections ?? []
+        )
+      }
     }
     // Why: capture the pre-update value so we only emit when the value
     // actually changes. The settings UI sometimes re-saves the same value
@@ -67,7 +82,10 @@ export function registerSettingsHandlers(store: Store): void {
       })
     }
 
-    return result
+    // Why: connection secret ciphertext must not cross the IPC boundary even
+    // though the renderer slice ignores the set-return; copy so the stored
+    // settings object is never mutated.
+    return { ...result, httpConnections: maskHttpConnections(result.httpConnections ?? []) }
   })
 
   ipcMain.handle('settings:listFonts', () => {

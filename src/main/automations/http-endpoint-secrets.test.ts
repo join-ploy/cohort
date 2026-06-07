@@ -7,16 +7,25 @@ vi.mock('electron', () => ({
 import {
   sealHttpKeyValues,
   maskHttpKeyValues,
+  decryptHttpKeyValues,
   decryptHttpRequest,
   resolveDraftRequestSecrets,
   sealAutoTriggers,
-  maskAutoTriggers
+  maskAutoTriggers,
+  sealHttpConnections,
+  maskHttpConnections,
+  sealHttpRequestSteps,
+  maskHttpRequestSteps
 } from './http-endpoint-secrets'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
+  type HttpConnection,
   type HttpEndpointConfig,
-  type HttpRequestConfig
+  type HttpRequestConfig,
+  type HttpRequestStepConfig,
+  type Step,
+  type StepOrGroup
 } from '../../shared/automations-types'
 
 const secret = (value: string) => ({ key: 'Authorization', value, secret: true as const })
@@ -104,6 +113,15 @@ describe('maskHttpKeyValues', () => {
     const out = maskHttpKeyValues([{ id: 'a', key: 'Auth', value: 'CIPHER', secret: true }])
     expect(out[0].id).toBe('a')
     expect(out[0].value).toBe(HTTP_SECRET_MASK)
+  })
+})
+
+describe('decryptHttpKeyValues', () => {
+  it('decrypts a secret kv and leaves a non-secret kv untouched', () => {
+    const out = decryptHttpKeyValues([secret('CIPHER'), { key: 'X', value: 'plain' }])
+    expect(out[0].value).toBe('CIPHER') // identity decryption in test
+    expect(out[0].secret).toBe(true)
+    expect(out[1]).toEqual({ key: 'X', value: 'plain' })
   })
 })
 
@@ -337,5 +355,210 @@ describe('sealAutoTriggers / maskAutoTriggers', () => {
     expect(masked?.[0].http?.request.body).toBe('{"page":1}')
     const sealed = sealAutoTriggers([httpTrigger('t1', cfg)], [])
     expect(sealed?.[0].http?.request.body).toBe('{"page":1}')
+  })
+})
+
+describe('sealHttpConnections', () => {
+  it('seals fresh connection secrets and reuses ciphertext for masked ones by id', () => {
+    // Decoy prior at index 0 with different ciphertext: positional matching
+    // would grab 'WRONG', so a passing assertion proves id correlation.
+    const prior: HttpConnection[] = [
+      {
+        id: 'c0',
+        displayName: 'Z',
+        baseUrl: 'https://z',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'WRONG', secret: true }]
+      },
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'CIPHER', secret: true }]
+      }
+    ]
+    const incoming: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: HTTP_SECRET_MASK, secret: true }]
+      }
+    ]
+    const sealed = sealHttpConnections(incoming, prior)
+    expect(sealed[0].headers[0].value).toBe('CIPHER')
+  })
+
+  it('encrypts a freshly typed connection secret', () => {
+    const incoming: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'plaintext', secret: true }]
+      }
+    ]
+    const sealed = sealHttpConnections(incoming, [])
+    // identity encryption in test -> value is the plaintext, still flagged secret
+    expect(sealed[0].headers[0].secret).toBe(true)
+    expect(sealed[0].headers[0].value).toBe('plaintext')
+  })
+})
+
+describe('maskHttpConnections', () => {
+  it('masks all connection secrets for the renderer', () => {
+    const sealed: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'CIPHER', secret: true }]
+      }
+    ]
+    const masked = maskHttpConnections(sealed)
+    expect(masked[0].headers[0].value).toBe(HTTP_SECRET_MASK)
+  })
+
+  it('leaves non-secret headers untouched when masking', () => {
+    const sealed: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Plain', value: 'visible' }]
+      }
+    ]
+    expect(maskHttpConnections(sealed)[0].headers[0].value).toBe('visible')
+  })
+})
+
+const httpStep = (id: string, request: Partial<HttpRequestConfig> = {}): Step => ({
+  id,
+  kind: 'http-request',
+  config: {
+    request: { method: 'GET', url: '/x', headers: [], query: [], ...request },
+    itemsPath: null,
+    fields: []
+  },
+  onFailure: 'halt',
+  timeoutSeconds: null
+})
+
+const runCommandStep = (id: string): Step => ({
+  id,
+  kind: 'run-command',
+  config: { worktreeRef: 'main', source: 'custom', customCommand: 'ls', captureStdout: true },
+  onFailure: 'halt',
+  timeoutSeconds: null
+})
+
+const stepConfig = (step: Step): HttpRequestStepConfig => step.config as HttpRequestStepConfig
+
+describe('sealHttpRequestSteps', () => {
+  it('returns undefined input unchanged', () => {
+    expect(sealHttpRequestSteps(undefined, undefined)).toBeUndefined()
+  })
+
+  it('reuses prior ciphertext for a masked secret matched by step id (decoy proves id, not position)', () => {
+    // Decoy prior at index 0 carries different ciphertext under the SAME header id,
+    // so positional step matching would seal 'WRONG' — a 'CIPHER' result proves id correlation.
+    const prior: StepOrGroup[] = [
+      httpStep('s0', {
+        headers: [{ id: 'h1', key: 'Authorization', value: 'WRONG', secret: true }]
+      }),
+      httpStep('s1', {
+        headers: [{ id: 'h1', key: 'Authorization', value: 'CIPHER', secret: true }]
+      })
+    ]
+    const next: StepOrGroup[] = [
+      httpStep('s1', {
+        headers: [{ id: 'h1', key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+      })
+    ]
+    const sealed = sealHttpRequestSteps(next, prior) as Step[]
+    expect(stepConfig(sealed[0]).request.headers[0].value).toBe('CIPHER')
+  })
+
+  it('encrypts a freshly typed step secret (plaintext stays secret)', () => {
+    const next: StepOrGroup[] = [
+      httpStep('s1', {
+        headers: [{ id: 'h1', key: 'Authorization', value: 'Bearer abc', secret: true }],
+        query: [{ id: 'q1', key: 'token', value: 'qsecret', secret: true }],
+        body: '{"token":"abc"}',
+        bodySecret: true
+      })
+    ]
+    const sealed = sealHttpRequestSteps(next, undefined) as Step[]
+    const cfg = stepConfig(sealed[0])
+    // identity encryption in test → ciphertext equals plaintext, still flagged secret
+    expect(cfg.request.headers[0].value).toBe('Bearer abc')
+    expect(cfg.request.headers[0].secret).toBe(true)
+    expect(cfg.request.query[0].value).toBe('qsecret')
+    expect(cfg.request.body).toBe('{"token":"abc"}')
+  })
+
+  it('walks parallel groups, sealing an http-request step inside a Step[] group', () => {
+    const prior: StepOrGroup[] = [
+      [
+        httpStep('s1', {
+          headers: [{ id: 'h1', key: 'Authorization', value: 'CIPHER', secret: true }]
+        })
+      ]
+    ]
+    const next: StepOrGroup[] = [
+      [
+        httpStep('s1', {
+          headers: [{ id: 'h1', key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+        })
+      ]
+    ]
+    const sealed = sealHttpRequestSteps(next, prior) as StepOrGroup[]
+    const group = sealed[0] as Step[]
+    expect(stepConfig(group[0]).request.headers[0].value).toBe('CIPHER')
+  })
+
+  it('leaves a non-http-request step untouched', () => {
+    const step = runCommandStep('r1')
+    const sealed = sealHttpRequestSteps([step], undefined) as Step[]
+    expect(sealed[0]).toBe(step)
+  })
+})
+
+describe('maskHttpRequestSteps', () => {
+  it('returns undefined input unchanged', () => {
+    expect(maskHttpRequestSteps(undefined)).toBeUndefined()
+  })
+
+  it('masks a secret header and secret body, leaves non-secret + non-http steps intact', () => {
+    const nonHttp = runCommandStep('r1')
+    const steps: StepOrGroup[] = [
+      httpStep('s1', {
+        headers: [
+          { id: 'h1', key: 'Authorization', value: 'CIPHER', secret: true },
+          { id: 'h2', key: 'X-Plain', value: 'visible' }
+        ],
+        body: 'BCIPHER',
+        bodySecret: true
+      }),
+      nonHttp
+    ]
+    const masked = maskHttpRequestSteps(steps) as Step[]
+    const cfg = stepConfig(masked[0])
+    expect(cfg.request.headers[0].value).toBe(HTTP_SECRET_MASK)
+    expect(cfg.request.headers[1].value).toBe('visible')
+    expect(cfg.request.body).toBe(HTTP_SECRET_MASK)
+    expect(masked[1]).toBe(nonHttp)
+  })
+
+  it('masks an http-request step inside a parallel group', () => {
+    const steps: StepOrGroup[] = [
+      [
+        httpStep('s1', {
+          headers: [{ id: 'h1', key: 'Authorization', value: 'CIPHER', secret: true }]
+        })
+      ]
+    ]
+    const masked = maskHttpRequestSteps(steps) as StepOrGroup[]
+    const group = masked[0] as Step[]
+    expect(stepConfig(group[0]).request.headers[0].value).toBe(HTTP_SECRET_MASK)
   })
 })

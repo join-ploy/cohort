@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { GitPullRequest, Globe, History, Plus, Trash2, Zap } from 'lucide-react'
+import { CalendarClock, GitPullRequest, Globe, History, Plus, Trash2, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type {
@@ -7,6 +7,7 @@ import type {
   AutoTrigger,
   Condition,
   ConditionOp,
+  HttpConnection,
   Rule,
   SerializableFieldDescriptor,
   TriggerSourceId
@@ -17,6 +18,7 @@ import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
 import { HttpEndpointTriggerCard } from './HttpEndpointTriggerCard'
+import { ScheduleTriggerCard } from './ScheduleTriggerCard'
 
 export type AutoTriggerCardProps = {
   trigger: AutoTrigger
@@ -27,6 +29,8 @@ export type AutoTriggerCardProps = {
   automationId: string
   /** Used for the per-rule project picker. */
   projects: { id: string; displayName: string }[]
+  /** Reusable connection library — forwarded to the http-endpoint card's picker. */
+  httpConnections: HttpConnection[]
   /** Repo catalog for the github-pr watch-list combobox. Optional so legacy /
    *  linear-only call sites stay unchanged; defaults to an empty list. */
   repos?: Repo[]
@@ -50,7 +54,8 @@ const SOURCE_META: Record<
 > = {
   'linear-issue': { label: 'Linear issue', icon: Zap },
   'github-pr': { label: 'GitHub PR', icon: GitPullRequest },
-  'http-endpoint': { label: 'HTTP endpoint', icon: Globe }
+  'http-endpoint': { label: 'HTTP endpoint', icon: Globe },
+  schedule: { label: 'Schedule', icon: CalendarClock }
 }
 
 // Pure helpers — exported so they can be unit-tested without rendering. The
@@ -171,8 +176,14 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
         onRemove={props.onRemove}
         automationId={props.automationId}
         projects={props.projects}
+        httpConnections={props.httpConnections}
       />
     )
+  }
+  // Why: schedule has its own builder + cron editor and no conditions by design,
+  // so dispatch before the shared rules/repo-watch-list UI renders.
+  if (props.trigger.source === 'schedule') {
+    return <ScheduleTriggerCard {...props} />
   }
   return <RuleBasedTriggerCard {...props} />
 }

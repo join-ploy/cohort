@@ -66,6 +66,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -81,6 +82,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -98,6 +100,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -113,6 +116,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -130,6 +134,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -145,6 +150,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -160,6 +166,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
         onRunNow={vi.fn()}
@@ -178,6 +185,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -193,6 +201,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -224,6 +233,7 @@ describe('ChainEditorModal', () => {
         repos={repos}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -241,6 +251,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -257,6 +268,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -274,6 +286,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -295,6 +308,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -322,6 +336,7 @@ describe('ChainEditorModal', () => {
         repos={repos}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -339,6 +354,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -361,6 +377,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -377,6 +394,7 @@ describe('ChainEditorModal', () => {
         repos={[]}
         reviewCommands={[]}
         createPrCommands={[]}
+        httpConnections={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
