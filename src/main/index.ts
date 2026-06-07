@@ -615,21 +615,21 @@ app.whenReady().then(async () => {
       : undefined
   archiveCleanup = createCleanupService({
     store: storeRef,
-    runRemoval: async (worktreeId) => {
+    runRemoval: async (worktreeId, opts) => {
       const window = mainWindow
       if (!window || window.isDestroyed()) {
         return
       }
       // Why: skipArchive=true so we never auto-execute the repo's orca.yaml
-      // `archive` hook from unsupervised cleanup. The user wasn't around to
-      // confirm the hook-trust prompt 3 days earlier, and a collaborator
-      // could have added a malicious script in the interim.
+      // `archive` hook from unsupervised cleanup. force (off by default) is set
+      // only by the user's explicit "Prune all archived now" with the
+      // uncommitted-changes option checked.
       await runWorktreeRemoval(
-        { worktreeId, force: false, skipArchive: true },
+        { worktreeId, force: opts?.force ?? false, skipArchive: true },
         { store: storeRef, runtime: runtimeRef, mainWindow: window }
       )
     },
-    runGroupRemoval: async (groupId) => {
+    runGroupRemoval: async (groupId, opts) => {
       const window = mainWindow
       if (!window || window.isDestroyed()) {
         return
@@ -648,7 +648,7 @@ app.whenReady().then(async () => {
           continue
         }
         await runWorktreeRemoval(
-          { worktreeId: memberWorktreeId, force: false, skipArchive: true },
+          { worktreeId: memberWorktreeId, force: opts?.force ?? false, skipArchive: true },
           { store: storeRef, runtime: runtimeRef, mainWindow: window }
         )
       }
@@ -661,6 +661,16 @@ app.whenReady().then(async () => {
       notifyWorkspaceGroupsChanged(window)
     },
     ...(archiveTtlOverride !== undefined ? { ttlMs: archiveTtlOverride } : {})
+  })
+  // Why: user-facing on-demand archive cleanup from Settings. cleanupArchivedNow
+  // respects the configured per-type durations (same as the hourly tick);
+  // pruneAllArchivedNow ignores them and deletes every archived item now,
+  // optionally force-deleting worktrees with uncommitted changes.
+  ipcMain.handle('worktrees:cleanupArchivedNow', async () => {
+    await archiveCleanup?.runOnce()
+  })
+  ipcMain.handle('worktrees:pruneAllArchivedNow', async (_event, force: boolean) => {
+    await archiveCleanup?.runOnce({ ignoreTtl: true, force: !!force })
   })
   // Why: archiveCleanup.start() is deferred until after openMainWindow() runs
   // (below) so the immediate runOnce() inside start() sees a live mainWindow.
