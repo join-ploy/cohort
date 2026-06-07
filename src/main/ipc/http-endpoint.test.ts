@@ -21,6 +21,7 @@ import {
   type AutomationCreateInput,
   type AutomationUpdateInput,
   type AutoTrigger,
+  type HttpConnection,
   type HttpEndpointConfig,
   type HttpRequestConfig
 } from '../../shared/automations-types'
@@ -214,6 +215,139 @@ describe('runTest', () => {
     // Old key-based resolution cross-matched query→header ciphertext; positional keeps them distinct.
     expect(seen?.headers[0].value).toBe('HCIPHER')
     expect(seen?.query[0].value).toBe('QCIPHER')
+  })
+
+  it('merges a referenced connection (base + decrypted headers) and blanks templates', async () => {
+    const conn: HttpConnection = {
+      id: 'c1',
+      displayName: 'A',
+      baseUrl: 'https://api.acme.dev',
+      headers: [{ id: 'h1', key: 'Authorization', value: 'Bearer xyz', secret: true }]
+    }
+    const store = {
+      getSettings: () => ({ httpConnections: [conn] }),
+      listAutomations: () => []
+    } as unknown as Store
+    let final: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      final = req
+      return { status: 200, durationMs: 1, body: { ok: true } }
+    })
+    const request: HttpRequestConfig = {
+      method: 'GET',
+      url: '/users/{{trigger.http.id}}',
+      headers: [],
+      query: [{ key: 'q', value: '{{trigger.http.q}}' }],
+      body: undefined
+    }
+    const res = await runTest({ store, execute }, { request, connectionId: 'c1' })
+
+    if (!final) {
+      throw new Error('execute was not called')
+    }
+    // Base joined; the {{…}} path segment blanked to ''.
+    expect(final.url).toBe('https://api.acme.dev/users/')
+    // Connection secret header merged + decrypted (identity decrypt in test).
+    expect(final.headers).toContainEqual({
+      id: 'h1',
+      key: 'Authorization',
+      value: 'Bearer xyz',
+      secret: true
+    })
+    // Template in the query value blanked.
+    expect(final.query).toEqual([{ key: 'q', value: '' }])
+    // No secret echo in the response.
+    expect(res).toEqual({ status: 200, durationMs: 1, body: { ok: true } })
+  })
+
+  it('blanks a templated URL with no connection (node url verbatim, no base prepended)', async () => {
+    const store = {
+      getSettings: () => ({ httpConnections: [] }),
+      listAutomations: () => []
+    } as unknown as Store
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body: {} }
+    })
+    const request: HttpRequestConfig = {
+      method: 'GET',
+      url: 'https://x/{{a}}',
+      headers: [],
+      query: []
+    }
+    await runTest({ store, execute }, { request })
+    expect(seen?.url).toBe('https://x/')
+  })
+
+  it('blanks templates in a non-secret body but passes a secret body through untouched', async () => {
+    const store = {
+      getSettings: () => ({ httpConnections: [] }),
+      listAutomations: () => []
+    } as unknown as Store
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body: {} }
+    })
+    const base: HttpRequestConfig = { method: 'POST', url: 'https://x', headers: [], query: [] }
+
+    await runTest(
+      { store, execute },
+      { request: { ...base, body: '{"id":"{{trigger.http.id}}"}' } }
+    )
+    expect(seen?.body).toBe('{"id":""}')
+
+    // A secret body is resolved separately, never blanked — its literal survives.
+    await runTest(
+      { store, execute },
+      { request: { ...base, body: '{{looks-like-token}}', bodySecret: true } }
+    )
+    expect(seen?.body).toBe('{{looks-like-token}}')
+  })
+
+  it('does not blank a secret header value even when it contains a {{…}} literal', async () => {
+    const store = {
+      getSettings: () => ({ httpConnections: [] }),
+      listAutomations: () => []
+    } as unknown as Store
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body: {} }
+    })
+    // Freshly typed (non-mask) secret passes resolveDraftRequest through unchanged;
+    // blanking must skip secret values so the literal survives to execution.
+    const request: HttpRequestConfig = {
+      method: 'GET',
+      url: 'https://x',
+      headers: [{ key: 'X-Tok', value: '{{not-a-template}}', secret: true }],
+      query: []
+    }
+    await runTest({ store, execute }, { request })
+    expect(seen?.headers).toEqual([{ key: 'X-Tok', value: '{{not-a-template}}', secret: true }])
+  })
+
+  it('proceeds unmerged when connectionId is set but the connection is not found', async () => {
+    const store = {
+      getSettings: () => ({ httpConnections: [] }),
+      listAutomations: () => []
+    } as unknown as Store
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body: {} }
+    })
+    const request: HttpRequestConfig = {
+      method: 'GET',
+      url: 'https://x/y',
+      headers: [],
+      query: []
+    }
+    await runTest({ store, execute }, { request, connectionId: 'missing' })
+    // No base prepended, no headers merged — the node request fires as-is.
+    expect(seen?.url).toBe('https://x/y')
+    expect(seen?.headers).toEqual([])
   })
 })
 

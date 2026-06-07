@@ -52,6 +52,12 @@ export function resolveTemplate(input: string, context: Record<string, unknown>)
   })
 }
 
+// Replace every {{token}} with '' (and unescape \{{ to {{). Used to fire a Test
+// request before any run context exists, so unresolved upstream refs don't throw.
+export function blankTemplates(input: string): string {
+  return input.replace(TOKEN, (match) => (match === '\\{{' ? '{{' : ''))
+}
+
 function lookup(
   ctx: Record<string, unknown>,
   path: string

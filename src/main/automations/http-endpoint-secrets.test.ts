@@ -7,6 +7,7 @@ vi.mock('electron', () => ({
 import {
   sealHttpKeyValues,
   maskHttpKeyValues,
+  decryptHttpKeyValues,
   decryptHttpRequest,
   resolveDraftRequestSecrets,
   sealAutoTriggers,
@@ -107,6 +108,15 @@ describe('maskHttpKeyValues', () => {
     const out = maskHttpKeyValues([{ id: 'a', key: 'Auth', value: 'CIPHER', secret: true }])
     expect(out[0].id).toBe('a')
     expect(out[0].value).toBe(HTTP_SECRET_MASK)
+  })
+})
+
+describe('decryptHttpKeyValues', () => {
+  it('decrypts a secret kv and leaves a non-secret kv untouched', () => {
+    const out = decryptHttpKeyValues([secret('CIPHER'), { key: 'X', value: 'plain' }])
+    expect(out[0].value).toBe('CIPHER') // identity decryption in test
+    expect(out[0].secret).toBe(true)
+    expect(out[1]).toEqual({ key: 'X', value: 'plain' })
   })
 })
 

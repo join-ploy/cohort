@@ -75,12 +75,18 @@ export function resolveDraftRequestSecrets(
   }
 }
 
+// Decrypt a key/value list's secret values to plaintext (connection headers are
+// ciphertext at rest and must be decrypted before merging into a node request).
+export function decryptHttpKeyValues(values: HttpKeyValue[]): HttpKeyValue[] {
+  return values.map((kv) => (kv.secret ? { ...kv, value: decryptSecret(kv.value) } : kv))
+}
+
 // In-main, just before a request: turn ciphertext back into plaintext.
 export function decryptHttpRequest(request: HttpRequestConfig): HttpRequestConfig {
   return {
     ...request,
-    headers: request.headers.map((h) => (h.secret ? { ...h, value: decryptSecret(h.value) } : h)),
-    query: request.query.map((q) => (q.secret ? { ...q, value: decryptSecret(q.value) } : q)),
+    headers: decryptHttpKeyValues(request.headers),
+    query: decryptHttpKeyValues(request.query),
     body: request.bodySecret && request.body ? decryptSecret(request.body) : request.body
   }
 }

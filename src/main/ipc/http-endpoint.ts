@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import {
+  decryptHttpKeyValues,
   decryptHttpRequest,
   resolveDraftRequestSecrets
 } from '../automations/http-endpoint-secrets'
@@ -8,13 +9,19 @@ import {
   executeHttpEndpointRequest,
   type HttpEndpointResponse
 } from '../automations/http-endpoint-request'
+import { mergeConnectionRequest } from '../automations/http-connection-merge'
+import { blankTemplates } from '../automations/template'
 import {
   resolveItems,
   mapItemToVariables,
   buildDedupKey,
   getByPath
 } from '../../shared/http-endpoint-mapping'
-import { type HttpEndpointItem, type HttpRequestConfig } from '../../shared/automations-types'
+import {
+  type HttpEndpointItem,
+  type HttpKeyValue,
+  type HttpRequestConfig
+} from '../../shared/automations-types'
 
 export type HttpEndpointIpcDeps = {
   store: Store
@@ -40,18 +47,52 @@ export function resolveDraftRequest(
   return resolveDraftRequestSecrets(request, savedRequest)
 }
 
+// Blank unresolved templates in the parts a Test fires with. Secret values are
+// left alone (they're resolved separately and never contain templates).
+function blankRequestTemplates(request: HttpRequestConfig): HttpRequestConfig {
+  const blankKv = (list: HttpKeyValue[]): HttpKeyValue[] =>
+    list.map((kv) => (kv.secret ? kv : { ...kv, value: blankTemplates(kv.value) }))
+  return {
+    ...request,
+    url: blankTemplates(request.url),
+    headers: blankKv(request.headers),
+    query: blankKv(request.query),
+    body:
+      request.bodySecret || request.body === undefined ? request.body : blankTemplates(request.body)
+  }
+}
+
 export async function runTest(
   deps: HttpEndpointIpcDeps,
-  args: { request: HttpRequestConfig; automationId?: string; autoTriggerId?: string }
+  args: {
+    request: HttpRequestConfig
+    automationId?: string
+    autoTriggerId?: string
+    connectionId?: string
+  }
 ): Promise<HttpEndpointResponse> {
   const execute = deps.execute ?? executeHttpEndpointRequest
-  const resolved = resolveDraftRequest(
+  // Blank unresolved {{…}} first so upstream refs don't throw or leak literal tokens.
+  const blanked = blankRequestTemplates(args.request)
+  // Node's OWN secrets → plaintext (masked sentinels resolved against the saved trigger).
+  const resolvedNode = resolveDraftRequest(
     deps.store,
-    args.request,
+    blanked,
     args.automationId,
     args.autoTriggerId
   )
-  const res = await execute(resolved)
+  let final = resolvedNode
+  if (args.connectionId) {
+    const conn = deps.store.getSettings().httpConnections?.find((c) => c.id === args.connectionId)
+    // Why: connection headers are ciphertext at rest — decrypt them SEPARATELY and
+    // merge AFTER the node is already plaintext, so we never double-decrypt either side.
+    // A dangling connectionId (not found) proceeds unmerged; validation is task D7.
+    if (conn) {
+      const decryptedConn = { ...conn, headers: decryptHttpKeyValues(conn.headers) }
+      final = mergeConnectionRequest(resolvedNode, decryptedConn)
+    }
+  }
+  const res = await execute(final)
   // Why: never echo request secrets back — return only the response triple.
   return { status: res.status, durationMs: res.durationMs, body: res.body }
 }
@@ -93,7 +134,12 @@ export function registerHttpEndpointHandlers(deps: HttpEndpointIpcDeps): void {
     'httpEndpoint:test',
     (
       _e,
-      args: { request: HttpRequestConfig; automationId?: string; autoTriggerId?: string }
+      args: {
+        request: HttpRequestConfig
+        automationId?: string
+        autoTriggerId?: string
+        connectionId?: string
+      }
     ): Promise<HttpEndpointResponse> => runTest(deps, args)
   )
   ipcMain.handle(
