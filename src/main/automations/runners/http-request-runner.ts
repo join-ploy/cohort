@@ -82,6 +82,15 @@ export class HttpRequestRunner implements StepRunner {
     // decrypt pass covers both the step's own and the connection's secrets
     // (no double-decrypt). mergeConnectionRequest is a no-op with no connection.
     const connection = config.connectionId ? getConnection(config.connectionId) : undefined
+    if (config.connectionId && !connection) {
+      // Why: an already-saved step can reference a connection deleted later; warn
+      // (parity with the trigger paths) so a silent bare-path request is
+      // debuggable on headless/SSH hosts — editor validation can't catch a
+      // post-save deletion.
+      console.warn(
+        `[http-request-runner] step references missing connection '${config.connectionId}'; firing the path without a base URL.`
+      )
+    }
     const merged = mergeConnectionRequest(resolved, connection)
     const final = decryptHttpRequest(merged)
 

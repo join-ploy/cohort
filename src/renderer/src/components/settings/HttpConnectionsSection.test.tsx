@@ -69,6 +69,20 @@ describe('HttpConnectionsSection', () => {
     ])
   })
 
+  it('clears the mask sentinel when a sealed header is un-secreted (no literal mask persisted)', () => {
+    const onChange = vi.fn()
+    const existing = conn({
+      headers: [{ id: 'h1', key: 'Authorization', value: HTTP_SECRET_MASK, secret: true }]
+    })
+    render(<HttpConnectionsSection httpConnections={[existing]} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle Header secret' }))
+    // Why: un-secreting must NOT persist value '••••••••' as a non-secret — that
+    // would destroy the ciphertext and send the sentinel as a real header.
+    expect(onChange).toHaveBeenCalledWith([
+      { ...existing, headers: [{ ...existing.headers[0], secret: false, value: '' }] }
+    ])
+  })
+
   it('removes a connection when its delete button is clicked', () => {
     const onChange = vi.fn()
     const existing = conn({ displayName: 'Prod API' })

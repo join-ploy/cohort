@@ -292,7 +292,17 @@ function HeaderRow({ pair, onChange, onRemove }: HeaderRowProps): React.JSX.Elem
         aria-label="Toggle Header secret"
         aria-pressed={pair.secret ?? false}
         title={pair.secret ? 'Secret — encrypted at rest' : 'Mark as secret'}
-        onClick={() => onChange({ ...current, secret: !(pair.secret ?? false) })}
+        onClick={() => {
+          const secret = !(pair.secret ?? false)
+          // Why: un-secreting a sealed header must clear the mask sentinel — else
+          // it persists as a literal non-secret value (real ciphertext lost, and
+          // `••••••••` is sent as the header). Mirrors toggleHeaderSecret.
+          onChange(
+            !secret && current.value === HTTP_SECRET_MASK
+              ? { ...current, secret, value: '' }
+              : { ...current, secret }
+          )
+        }}
       >
         {pair.secret ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
       </Button>
