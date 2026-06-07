@@ -447,3 +447,30 @@ describe('isProjectRequired + projectId gating', () => {
     void repos
   })
 })
+
+describe('computeAllErrors — schedule trigger cron validity', () => {
+  function scheduleTrigger(cron: string): AutoTrigger {
+    return {
+      id: 'sched-1',
+      source: 'schedule',
+      enabled: true,
+      enabledAt: 0,
+      rules: [],
+      schedule: { cron, timezone: 'UTC' }
+    }
+  }
+
+  it('flags a schedule trigger whose cron is invalid (editor not saveable)', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [scheduleTrigger('garbage')] } as ChainDraft
+    const errors = computeAllErrors(draft)
+    // Editor state is invalid: at least one error blocks save.
+    expect(errors.length).toBeGreaterThan(0)
+    expect(errors.filter((e) => e.field === 'cron')).toHaveLength(1)
+  })
+
+  it('does not flag a schedule trigger whose cron is valid (editor saveable)', () => {
+    const draft = { ...makeDraft([]), autoTriggers: [scheduleTrigger('0 9 * * *')] } as ChainDraft
+    // Everything else is well-formed, so a valid cron leaves zero errors.
+    expect(computeAllErrors(draft)).toEqual([])
+  })
+})

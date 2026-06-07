@@ -34,6 +34,7 @@ import {
   type NestedSchema,
   type OutputSchema
 } from '../../../../../shared/automation-step-schemas'
+import { isValidCron } from '../../../../../shared/schedule-cron'
 
 export type ChainEditorError = TemplateError & {
   stepId: string
@@ -329,6 +330,19 @@ export function computeAllErrors(draft: ChainDraft, repos: Repo[] = []): ChainEd
       stepId: '',
       field: 'projectId'
     })
+  }
+  // A schedule trigger only fires on a valid cron, so a malformed expression
+  // must block save just like the github-pr/http-endpoint sources gate theirs.
+  for (const t of draft.autoTriggers ?? []) {
+    if (t.source === 'schedule' && !(t.schedule && isValidCron(t.schedule.cron))) {
+      all.push({
+        path: `autoTriggers.${t.id}.cron`,
+        code: 'unknown-path',
+        message: 'Schedule trigger has an invalid cron expression.',
+        stepId: '',
+        field: 'cron'
+      })
+    }
   }
   return all
 }
