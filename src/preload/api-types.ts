@@ -503,6 +503,15 @@ export type PreloadApi = {
      *  archive cleanup tick synchronously so specs can assert TTL behaviour
      *  without waiting for the hourly setInterval. */
     _archiveCleanupNow?: () => Promise<void>
+    /** Run the archive cleanup pass on demand, honoring the configured per-type
+     *  durations (same as the hourly tick). Resolves with how many archived
+     *  items were removed vs. left blocked. */
+    cleanupArchivedNow: () => Promise<{ removed: number; failed: number }>
+    /** Immediately delete every archived worktree and group, ignoring the
+     *  configured durations. force=true also removes worktrees with
+     *  uncommitted/untracked changes (git worktree remove --force). Resolves with
+     *  how many archived items were removed vs. left blocked. */
+    pruneAllArchivedNow: (force: boolean) => Promise<{ removed: number; failed: number }>
     updateMeta: (args: { worktreeId: string; updates: Partial<WorktreeMeta> }) => Promise<Worktree>
     persistSortOrder: (args: { orderedIds: string[] }) => Promise<void>
     onChanged: (callback: (data: { repoId: string }) => void) => () => void

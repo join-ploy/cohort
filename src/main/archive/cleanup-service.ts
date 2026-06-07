@@ -1,35 +1,79 @@
 import { ARCHIVE_CLEANUP_INTERVAL_MS, ARCHIVE_TTL_MS } from '../../shared/archive-constants'
+import { MIN_ARCHIVE_TTL_MS } from '../../shared/archive-duration'
 import type { Store } from '../persistence'
 
 export type CleanupServiceDeps = {
   store: Store
   // Why: injected so tests can avoid the real worktree-removal pipeline; the
   // production wiring passes a thunk that calls runWorktreeRemoval.
-  runRemoval: (worktreeId: string) => Promise<void>
+  runRemoval: (worktreeId: string, opts?: { force?: boolean }) => Promise<void>
   // Why: archived workspace-group RECORDS aren't worktree meta, so they need
   // their own teardown (remove members + group folder + record). Without this,
   // archived groups linger in the Archived view forever past their TTL.
-  runGroupRemoval: (groupId: string) => Promise<void>
+  runGroupRemoval: (groupId: string, opts?: { force?: boolean }) => Promise<void>
   intervalMs?: number
   ttlMs?: number
   now?: () => number
 }
 
+// Why: on-demand callers (the Settings "Run cleanup now" / "Prune all" buttons)
+// need to know what actually happened — doRunOnce swallows per-item failures
+// into archiveCleanupError, so without a summary a blocked removal would still
+// look like success to the user.
+export type CleanupSummary = { removed: number; failed: number }
+
 export type CleanupService = {
-  runOnce: () => Promise<void>
+  runOnce: (options?: { ignoreTtl?: boolean; force?: boolean }) => Promise<CleanupSummary>
   start: () => void
   stop: () => void
 }
 
 export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
-  const ttl = deps.ttlMs ?? ARCHIVE_TTL_MS
   const interval = deps.intervalMs ?? ARCHIVE_CLEANUP_INTERVAL_MS
   const now = deps.now ?? Date.now
   let timer: ReturnType<typeof setInterval> | null = null
+  // Why: serialize ticks so an on-demand prune from Settings can't overlap the
+  // hourly/startup tick and double-remove the same archived id — the second
+  // removal would fail and re-materialize a phantom "Cleanup blocked" record.
+  let tail: Promise<void> = Promise.resolve()
 
-  async function runOnce(): Promise<void> {
+  function runOnce(options?: { ignoreTtl?: boolean; force?: boolean }): Promise<CleanupSummary> {
+    const run = tail.then(
+      () => doRunOnce(options),
+      () => doRunOnce(options)
+    )
+    // Why: swallow errors on the chain pointer (not the returned promise) so one
+    // failed run doesn't poison every subsequent caller.
+    tail = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
+
+  async function doRunOnce(options?: {
+    ignoreTtl?: boolean
+    force?: boolean
+  }): Promise<CleanupSummary> {
+    const ignoreTtl = options?.ignoreTtl ?? false
+    const force = options?.force ?? false
+    // Why: resolve TTLs per-tick (not at construction) so a settings change takes
+    // effect on the next cleanup without an app restart. deps.ttlMs is the
+    // test/E2E hard override and wins over settings for both types. Settings
+    // values are clamped to MIN_ARCHIVE_TTL_MS so a corrupt profile writing 0
+    // can't turn the silent hourly tick into an unprompted "prune everything".
+    const settings = deps.store.getSettings()
+    const worktreeTtl =
+      deps.ttlMs ?? Math.max(MIN_ARCHIVE_TTL_MS, settings.archiveWorktreeTtlMs ?? ARCHIVE_TTL_MS)
+    const groupTtl =
+      deps.ttlMs ?? Math.max(MIN_ARCHIVE_TTL_MS, settings.archiveGroupTtlMs ?? ARCHIVE_TTL_MS)
+    const currentNow = now()
+    // Why: ignoreTtl ("Prune all now") treats every archived item as expired by
+    // pinning the threshold to now — archivedAt is always <= now.
+    const worktreeThreshold = ignoreTtl ? currentNow : currentNow - worktreeTtl
+    const groupThreshold = ignoreTtl ? currentNow : currentNow - groupTtl
+
     const allMeta = deps.store.getAllWorktreeMeta()
-    const threshold = now() - ttl
     const candidates: string[] = []
     for (const [worktreeId, meta] of Object.entries(allMeta)) {
       if (!meta.isArchived) {
@@ -38,15 +82,19 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
       if (typeof meta.archivedAt !== 'number') {
         continue
       }
-      if (meta.archivedAt > threshold) {
+      if (meta.archivedAt > worktreeThreshold) {
         continue
       }
       candidates.push(worktreeId)
     }
+    let removed = 0
+    let failed = 0
     for (const id of candidates) {
       try {
-        await deps.runRemoval(id)
+        await deps.runRemoval(id, { force })
+        removed++
       } catch (err) {
+        failed++
         const message = err instanceof Error ? err.message : String(err)
         // Why: stay archived and keep archivedAt set so the next tick still
         // considers this worktree past TTL and retries on its own.
@@ -66,15 +114,17 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
       if (typeof group.archivedAt !== 'number') {
         continue
       }
-      if (group.archivedAt > threshold) {
+      if (group.archivedAt > groupThreshold) {
         continue
       }
       groupCandidates.push(group.id)
     }
     for (const id of groupCandidates) {
       try {
-        await deps.runGroupRemoval(id)
+        await deps.runGroupRemoval(id, { force })
+        removed++
       } catch (err) {
+        failed++
         const message = err instanceof Error ? err.message : String(err)
         // Why: keep the group archived (mirrors the worktree path) so the next
         // tick retries; surface the reason on the record for the Archived view's
@@ -85,6 +135,8 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         }
       }
     }
+
+    return { removed, failed }
   }
 
   function start(): void {
@@ -96,7 +148,7 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         console.error('[archive-cleanup] tick failed:', err)
       })
     }, interval)
-    // Why: also fire immediately on startup so a user who quit Orca for weeks
+    // Why: also fire immediately on startup so a user who quit Orca for days
     // sees expired worktrees cleaned up without waiting a full interval.
     runOnce().catch((err) => {
       console.error('[archive-cleanup] startup tick failed:', err)

@@ -225,4 +225,216 @@ describe('archive cleanup service', () => {
     expect(group?.archivedAt).toBe(archivedAt)
     expect(group?.archiveCleanupError).toContain('uncommitted changes')
   })
+
+  it('uses per-type TTLs from settings (worktree vs group)', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    // Worktree TTL short (1h), group TTL long (1 week).
+    store.updateSettings({
+      archiveWorktreeTtlMs: 60 * 60 * 1000,
+      archiveGroupTtlMs: 7 * 24 * 60 * 60 * 1000
+    })
+    const wtId = 'repo1::/path/wt'
+    store.setWorktreeMeta(wtId, { isArchived: true, archivedAt: now - 2 * 60 * 60 * 1000 }) // 2h old > 1h
+    store.setWorkspaceGroup(makeGroup('group:young', true, now - 2 * 60 * 60 * 1000)) // 2h old < 1 week
+
+    const removed: string[] = []
+    const removedGroups: string[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async (id) => {
+        removed.push(id)
+      },
+      runGroupRemoval: async (id) => {
+        removedGroups.push(id)
+      }
+    })
+
+    await service.runOnce()
+
+    expect(removed).toEqual([wtId])
+    expect(removedGroups).toEqual([])
+  })
+
+  it('reads TTL settings live on each tick', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    const wtId = 'repo1::/path/wt'
+    store.setWorktreeMeta(wtId, { isArchived: true, archivedAt: now - 2 * 60 * 60 * 1000 }) // 2h old
+    store.updateSettings({ archiveWorktreeTtlMs: 24 * 60 * 60 * 1000 }) // 1 day -> not expired
+
+    const removed: string[] = []
+    const service = createCleanupService({
+      store,
+      runGroupRemoval: async () => {},
+      runRemoval: async (id) => {
+        removed.push(id)
+      }
+    })
+
+    await service.runOnce()
+    expect(removed).toEqual([]) // within 1-day TTL
+
+    store.updateSettings({ archiveWorktreeTtlMs: 60 * 60 * 1000 }) // now 1h -> expired
+    await service.runOnce()
+    expect(removed).toEqual([wtId])
+  })
+
+  it('ignoreTtl removes freshly-archived items regardless of duration', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    const wtId = 'repo1::/path/fresh'
+    store.setWorktreeMeta(wtId, { isArchived: true, archivedAt: now }) // just archived
+    store.setWorkspaceGroup(makeGroup('group:fresh', true, now))
+
+    const removed: string[] = []
+    const removedGroups: string[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async (id) => {
+        removed.push(id)
+      },
+      runGroupRemoval: async (id) => {
+        removedGroups.push(id)
+      }
+    })
+
+    await service.runOnce({ ignoreTtl: true })
+
+    expect(removed).toEqual([wtId])
+    expect(removedGroups).toEqual(['group:fresh'])
+  })
+
+  it('threads force through to the removal callbacks', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorktreeMeta('repo1::/path/wt', { isArchived: true, archivedAt: now })
+    store.setWorkspaceGroup(makeGroup('group:g', true, now))
+
+    const wtForce: (boolean | undefined)[] = []
+    const groupForce: (boolean | undefined)[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async (_id, opts) => {
+        wtForce.push(opts?.force)
+      },
+      runGroupRemoval: async (_id, opts) => {
+        groupForce.push(opts?.force)
+      }
+    })
+
+    await service.runOnce({ ignoreTtl: true, force: true })
+    expect(wtForce).toEqual([true])
+    expect(groupForce).toEqual([true])
+  })
+
+  it('passes force=false by default (ignoreTtl does not imply force)', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorktreeMeta('repo1::/path/wt', { isArchived: true, archivedAt: now })
+    store.setWorkspaceGroup(makeGroup('group:g', true, now))
+
+    const wtForce: (boolean | undefined)[] = []
+    const groupForce: (boolean | undefined)[] = []
+    const service = createCleanupService({
+      store,
+      runRemoval: async (_id, opts) => {
+        wtForce.push(opts?.force)
+      },
+      runGroupRemoval: async (_id, opts) => {
+        groupForce.push(opts?.force)
+      }
+    })
+
+    await service.runOnce({ ignoreTtl: true })
+    expect(wtForce).toEqual([false])
+    expect(groupForce).toEqual([false])
+  })
+
+  it('serializes overlapping runs so an id is not removed twice', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const id = 'repo1::/path/wt'
+    store.setWorktreeMeta(id, { isArchived: true, archivedAt: Date.now() })
+
+    let calls = 0
+    const service = createCleanupService({
+      store,
+      runGroupRemoval: async () => {},
+      runRemoval: async (toRemove) => {
+        calls++
+        // Why: yield so a non-serialized second run could snapshot the same id
+        // before this run drops its meta — the guard must prevent that.
+        await Promise.resolve()
+        store.removeWorktreeMeta(toRemove)
+      }
+    })
+
+    // Fire two overlapping prune-all runs without awaiting the first.
+    await Promise.all([service.runOnce({ ignoreTtl: true }), service.runOnce({ ignoreTtl: true })])
+
+    expect(calls).toBe(1)
+    expect(store.getWorktreeMeta(id)).toBeUndefined()
+  })
+
+  it('returns a {removed, failed} summary counting worktrees and groups', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    store.setWorktreeMeta('repo1::/path/ok', { isArchived: true, archivedAt: now })
+    store.setWorktreeMeta('repo1::/path/blocked', { isArchived: true, archivedAt: now })
+    store.setWorkspaceGroup(makeGroup('group:ok', true, now))
+
+    const service = createCleanupService({
+      store,
+      runRemoval: async (id) => {
+        if (id.endsWith('blocked')) {
+          throw new Error('worktree has uncommitted changes')
+        }
+        store.removeWorktreeMeta(id)
+      },
+      runGroupRemoval: async (id) => {
+        store.removeWorkspaceGroup(id)
+      }
+    })
+
+    const summary = await service.runOnce({ ignoreTtl: true })
+    // 1 worktree + 1 group removed; 1 worktree blocked.
+    expect(summary).toEqual({ removed: 2, failed: 1 })
+  })
+
+  it('deps.ttlMs override wins over settings for both types', async () => {
+    const store = await createStore()
+    const { createCleanupService } = await loadCleanupService()
+    const now = Date.now()
+    // Settings say "never expire soon" (1 week) but the override forces 0ms.
+    store.updateSettings({
+      archiveWorktreeTtlMs: 7 * 24 * 60 * 60 * 1000,
+      archiveGroupTtlMs: 7 * 24 * 60 * 60 * 1000
+    })
+    store.setWorktreeMeta('repo1::/path/wt', { isArchived: true, archivedAt: now - 1000 })
+    store.setWorkspaceGroup(makeGroup('group:g', true, now - 1000))
+
+    const removed: string[] = []
+    const removedGroups: string[] = []
+    const service = createCleanupService({
+      store,
+      ttlMs: 0,
+      runRemoval: async (id) => {
+        removed.push(id)
+      },
+      runGroupRemoval: async (id) => {
+        removedGroups.push(id)
+      }
+    })
+
+    await service.runOnce()
+    expect(removed).toEqual(['repo1::/path/wt'])
+    expect(removedGroups).toEqual(['group:g'])
+  })
 })

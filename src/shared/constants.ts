@@ -12,6 +12,7 @@ import type {
   WorktreeCardProperty
 } from './types'
 import { DEFAULT_TERMINAL_FONT_WEIGHT } from './terminal-fonts'
+import { ARCHIVE_TTL_MS } from './archive-constants'
 
 export const SCHEMA_VERSION = 1
 export const DEFAULT_APP_FONT_FAMILY = 'Geist'
@@ -285,6 +286,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     diffDefaultView: 'inline',
     promptCacheTimerEnabled: false,
     promptCacheTtlMs: 300_000,
+    archiveWorktreeTtlMs: ARCHIVE_TTL_MS,
+    archiveGroupTtlMs: ARCHIVE_TTL_MS,
     codexManagedAccounts: [],
     activeCodexManagedAccountId: null,
     codexTrustCreatedWorkspaces: false,

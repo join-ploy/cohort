@@ -1403,6 +1403,13 @@ export type GlobalSettings = {
    *  300 000 (5 min, the standard Anthropic API / Bedrock TTL) and
    *  3 600 000 (1 hr, for extended-TTL plans). */
   promptCacheTtlMs: number
+  /** Auto-prune duration (ms) for archived normal worktrees. Archived worktrees
+   *  older than this are permanently deleted by the cleanup service. Defaults to
+   *  ARCHIVE_TTL_MS. */
+  archiveWorktreeTtlMs?: number
+  /** Auto-prune duration (ms) for archived workspace groups. Defaults to
+   *  ARCHIVE_TTL_MS. */
+  archiveGroupTtlMs?: number
   /** Why: Codex rate-limit account routing is a durable app preference owned by
    *  the main process, not transient UI state. Persisting the selected managed
    *  auth here lets Orca prepare shared ~/.codex before the renderer hydrates,
