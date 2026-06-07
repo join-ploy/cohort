@@ -24,4 +24,11 @@ describe('archive-duration', () => {
     expect(durationPartsToMs(-5, 'days')).toBe(MIN_ARCHIVE_TTL_MS)
     expect(msToDurationParts(1000)).toEqual({ value: 1, unit: 'hours' })
   })
+
+  it('treats non-finite input as the minimum', () => {
+    expect(durationPartsToMs(NaN, 'hours')).toBe(MIN_ARCHIVE_TTL_MS)
+    expect(durationPartsToMs(Infinity, 'days')).toBe(MIN_ARCHIVE_TTL_MS)
+    expect(msToDurationParts(NaN)).toEqual({ value: 1, unit: 'hours' })
+    expect(msToDurationParts(Infinity)).toEqual({ value: 1, unit: 'hours' })
+  })
 })

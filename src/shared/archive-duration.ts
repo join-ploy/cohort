@@ -13,12 +13,17 @@ export const DURATION_UNIT_MS: Record<DurationUnit, number> = {
 export const MIN_ARCHIVE_TTL_MS = DURATION_UNIT_MS.hours
 
 export function durationPartsToMs(value: number, unit: DurationUnit): number {
+  // Why: Math.max doesn't catch NaN/Infinity — guard here, the canonical
+  // conversion point, so a non-finite input can never be persisted as a TTL.
+  if (!Number.isFinite(value)) {
+    return MIN_ARCHIVE_TTL_MS
+  }
   const ms = Math.round(value) * DURATION_UNIT_MS[unit]
   return Math.max(MIN_ARCHIVE_TTL_MS, ms)
 }
 
 export function msToDurationParts(ms: number): { value: number; unit: DurationUnit } {
-  const clamped = Math.max(MIN_ARCHIVE_TTL_MS, ms)
+  const clamped = Number.isFinite(ms) ? Math.max(MIN_ARCHIVE_TTL_MS, ms) : MIN_ARCHIVE_TTL_MS
   for (const unit of ['weeks', 'days', 'hours'] as DurationUnit[]) {
     const unitMs = DURATION_UNIT_MS[unit]
     if (clamped % unitMs === 0) {
