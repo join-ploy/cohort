@@ -367,6 +367,12 @@ export class AutoTriggerEngine {
             lastPollAt: this.deps.httpLastPoll(t.id),
             intervalMs: t.http?.intervalMs ?? this.intervalMs
           })
+        } else if (t.source === 'schedule') {
+          // Time-driven: surface the next fire instant rather than a last-poll time.
+          result.set(t.source, {
+            lastPollAt: this.deps.scheduleNextRun(t.id),
+            intervalMs: this.intervalMs
+          })
         } else {
           result.set(t.source, {
             lastPollAt: this.deps.lastPoll(t.source, this.deps.hostId),

@@ -859,4 +859,19 @@ describe('AutoTriggerEngine — schedule trigger', () => {
     // First 09:00 strictly after enabledAt (10 Jun), not after now (7 Jun).
     expect(scheduleNextRunMap.get('at1')).toBe(Date.UTC(2026, 5, 10, 9, 0, 0))
   })
+
+  it('reports the next fire instant + engine interval for schedule triggers in getPollStatus', () => {
+    // Time-driven: lastPollAt surfaces the seeded next-run instant, not a poll clock.
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      scheduleNextRunMap
+    })
+    // Engine not started, so this.intervalMs is its 0 default — like the http case.
+    expect(engine.getPollStatus().get('schedule')).toEqual({
+      lastPollAt: NINE_AM,
+      intervalMs: 0
+    })
+  })
 })
