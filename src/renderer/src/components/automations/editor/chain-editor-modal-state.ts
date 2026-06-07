@@ -4,6 +4,7 @@ import type {
   CollectCiResultsConfig,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
+  HttpRequestStepConfig,
   RunCommandConfig,
   RunPromptConfig,
   Step,
@@ -48,7 +49,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
-  'collect-ci-results': 'Collect CI results'
+  'collect-ci-results': 'Collect CI results',
+  'http-request': 'HTTP request'
 }
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
@@ -60,6 +62,7 @@ export const STEP_KIND_ORDER: StepKind[] = [
   'create-workspace-group',
   'wait-for-setup',
   'run-prompt',
+  'http-request',
   'collect-ci-results',
   'update-linear-issue'
 ]
@@ -519,6 +522,14 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         worktreeRef: '',
         pollIntervalSeconds: 30,
         includeComments: true
+      }
+      return cfg
+    }
+    case 'http-request': {
+      const cfg: HttpRequestStepConfig = {
+        request: { method: 'GET', url: '', headers: [], query: [] },
+        itemsPath: null,
+        fields: []
       }
       return cfg
     }

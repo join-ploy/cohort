@@ -15,6 +15,7 @@ import type {
   ConditionOp,
   CreateWorkspaceGroupConfig,
   CreateWorktreeConfig,
+  HttpRequestStepConfig,
   LinearIssuePayload,
   Rule,
   RunCommandConfig,
@@ -615,7 +616,8 @@ const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'run-prompt': 'Run prompt',
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
-  'collect-ci-results': 'Collect CI results'
+  'collect-ci-results': 'Collect CI results',
+  'http-request': 'HTTP request'
 }
 
 function firstNonEmptyLine(value: string): string {
@@ -690,6 +692,11 @@ function describeStepConfig(step: Step): string {
         parts.push('comments')
       }
       return `Collect ${parts.join(' + ')}`
+    }
+    case 'http-request': {
+      const config = step.config as HttpRequestStepConfig
+      const url = config.request.url.trim()
+      return url ? `${config.request.method} ${url}` : config.request.method
     }
   }
 }

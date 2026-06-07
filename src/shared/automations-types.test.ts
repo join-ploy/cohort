@@ -17,6 +17,7 @@ import type {
   WaitForSetupConfig,
   RunCommandConfig,
   UpdateLinearIssueConfig,
+  HttpRequestStepConfig,
   LinearIssuePayload,
   TriggerSourceId,
   ScheduleConfig,
@@ -65,7 +66,7 @@ describe('chain types', () => {
 })
 
 describe('Phase 2 step configs', () => {
-  it('StepKind covers all 7 kinds', () => {
+  it('StepKind covers all 8 kinds', () => {
     expectTypeOf<StepKind>().toEqualTypeOf<
       | 'run-prompt'
       | 'create-worktree'
@@ -74,6 +75,7 @@ describe('Phase 2 step configs', () => {
       | 'run-command'
       | 'update-linear-issue'
       | 'collect-ci-results'
+      | 'http-request'
     >()
   })
 
@@ -251,6 +253,23 @@ describe('HttpConnection', () => {
     expect(c.baseUrl).toBe('https://api.acme.dev')
     const cfg: Pick<HttpEndpointConfig, 'connectionId'> = { connectionId: 'c1' }
     expect(cfg.connectionId).toBe('c1')
+  })
+})
+
+describe('http-request step kind', () => {
+  it("'http-request' is a StepKind and HttpRequestStepConfig has the expected shape", () => {
+    const kind: StepKind = 'http-request'
+    expect(kind).toBe('http-request')
+    const cfg: HttpRequestStepConfig = {
+      connectionId: 'c1',
+      request: { method: 'GET', url: '/x', headers: [], query: [] },
+      itemsPath: null,
+      fields: [],
+      sampleResponse: { ok: true }
+    }
+    // assignable into the StepConfig union
+    const asStepConfig: StepConfig = cfg
+    expect((asStepConfig as HttpRequestStepConfig).itemsPath).toBeNull()
   })
 })
 

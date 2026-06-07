@@ -366,6 +366,7 @@ export type StepKind =
   | 'run-command'
   | 'update-linear-issue'
   | 'collect-ci-results'
+  | 'http-request'
 
 export type RunPromptConfig = {
   worktreeRef: string
@@ -490,6 +491,18 @@ export type CollectCiResultsConfig = {
   includeComments: boolean
 }
 
+// In-chain "Make HTTP request" step. A strict subset of HttpEndpointConfig — no
+// poll/dedup/picker fields — reusing the trigger's request builder + Test mapping.
+export type HttpRequestStepConfig = {
+  connectionId?: string
+  request: HttpRequestConfig
+  itemsPath: string | null
+  fields: MappedField[]
+  // Last Test response, persisted so the mapping panel works offline and the
+  // editor can require a Test before save (see D7).
+  sampleResponse?: unknown
+}
+
 export type StepConfig =
   | RunPromptConfig
   | CreateWorktreeConfig
@@ -498,6 +511,7 @@ export type StepConfig =
   | RunCommandConfig
   | UpdateLinearIssueConfig
   | CollectCiResultsConfig
+  | HttpRequestStepConfig
 
 export type Step = {
   id: string

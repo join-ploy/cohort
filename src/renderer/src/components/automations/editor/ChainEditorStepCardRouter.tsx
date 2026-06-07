@@ -9,6 +9,7 @@ import { RunPromptStepCard } from './RunPromptStepCard'
 import { RunCommandStepCard } from './RunCommandStepCard'
 import { UpdateLinearIssueStepCard } from './UpdateLinearIssueStepCard'
 import { CollectCiResultsStepCard } from './CollectCiResultsStepCard'
+import { StepCardChrome } from './StepCardChrome'
 
 export type ChainEditorStepCardRouterProps = {
   step: Step
@@ -83,5 +84,12 @@ export function ChainEditorStepCardRouter(
       return <UpdateLinearIssueStepCard {...common} onConfigChange={props.onConfigChange} />
     case 'collect-ci-results':
       return <CollectCiResultsStepCard {...common} onConfigChange={props.onConfigChange} />
+    case 'http-request':
+      // Interim placeholder; the real HttpRequestStepCard lands in Task D6.
+      return (
+        <StepCardChrome {...common} onConfigChange={props.onConfigChange}>
+          <p className="text-xs text-muted-foreground">HTTP request — editor coming soon.</p>
+        </StepCardChrome>
+      )
   }
 }

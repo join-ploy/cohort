@@ -284,6 +284,10 @@ export function walkStepConfigStrings(
       }
       break
     }
+    // Interim no-op (mirrors rewriteConfigStrings): D6 must visit the request
+    // step's url/headers[].value/query[].value/body so dry-run + id-rename see them.
+    case 'http-request':
+      break
   }
 }
 
@@ -364,6 +368,10 @@ function rewriteConfigStrings(
         worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef
       }
     }
+    case 'http-request':
+      // Template-string rewriting for the http-request config lands in D6,
+      // alongside its walkStepConfigStrings visitor; returned untouched for now.
+      return config
   }
 }
 

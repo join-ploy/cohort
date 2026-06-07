@@ -61,6 +61,11 @@ export const COLLECT_CI_RESULTS_OUTPUT_SCHEMA: OutputSchema = {
   prCount: 'number'
 }
 
+// Placeholder: the http-request step's real output schema is computed dynamically
+// from its mapped fields (see getOutputSchemaForStep in D5), not from this static
+// map. The empty entry only keeps SCHEMA_BY_KIND exhaustive.
+export const HTTP_REQUEST_OUTPUT_SCHEMA: OutputSchema = {}
+
 export const MANUAL_TRIGGER_SCHEMA: OutputSchema = {
   firedAt: 'number',
   actorEmail: 'string'
@@ -110,7 +115,8 @@ const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
   'run-prompt': RUN_PROMPT_OUTPUT_SCHEMA,
   'run-command': RUN_COMMAND_OUTPUT_SCHEMA,
   'update-linear-issue': UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
-  'collect-ci-results': COLLECT_CI_RESULTS_OUTPUT_SCHEMA
+  'collect-ci-results': COLLECT_CI_RESULTS_OUTPUT_SCHEMA,
+  'http-request': HTTP_REQUEST_OUTPUT_SCHEMA
 }
 
 export function getOutputSchemaForKind(kind: StepKind): OutputSchema {
