@@ -605,7 +605,7 @@ app.whenReady().then(async () => {
   // work; the changed-notify is just a UI hint that the next list refresh
   // picks up anyway.
   // Why: E2E specs need a way to make a freshly-archived worktree immediately
-  // past TTL without waiting 30 days or mutating persisted state by hand. The
+  // past TTL without waiting 3 days or mutating persisted state by hand. The
   // override is a positive number (not 0) so the gt-threshold comparison still
   // captures the just-archived row deterministically.
   const archiveTtlOverrideRaw = process.env.ORCA_ARCHIVE_TTL_MS_OVERRIDE
@@ -622,7 +622,7 @@ app.whenReady().then(async () => {
       }
       // Why: skipArchive=true so we never auto-execute the repo's orca.yaml
       // `archive` hook from unsupervised cleanup. The user wasn't around to
-      // confirm the hook-trust prompt 30 days earlier, and a collaborator
+      // confirm the hook-trust prompt 3 days earlier, and a collaborator
       // could have added a malicious script in the interim.
       await runWorktreeRemoval(
         { worktreeId, force: false, skipArchive: true },
@@ -665,7 +665,7 @@ app.whenReady().then(async () => {
   // Why: archiveCleanup.start() is deferred until after openMainWindow() runs
   // (below) so the immediate runOnce() inside start() sees a live mainWindow.
   // Starting here would short-circuit every candidate via the runRemoval
-  // null-window guard, defeating the "user quit Orca for 30+ days" tick.
+  // null-window guard, defeating the "user quit Orca for 3+ days" tick.
   // Why: E2E specs trigger the cleanup tick on demand to assert TTL behaviour
   // without waiting for the hourly setInterval. Guarded by ORCA_E2E so the
   // handler is never registered in shipping builds.
@@ -1042,7 +1042,7 @@ app.whenReady().then(async () => {
 
   // Why: start archive cleanup now that mainWindow is assigned — the
   // immediate runOnce() inside start() needs a live window so the
-  // 30-day-quit cleanup tick actually fires on launch (not waiting an
+  // long-quit cleanup tick actually fires on launch (not waiting an
   // extra hour for the next setInterval pass).
   archiveCleanup.start()
 

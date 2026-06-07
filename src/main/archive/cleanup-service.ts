@@ -96,7 +96,7 @@ export function createCleanupService(deps: CleanupServiceDeps): CleanupService {
         console.error('[archive-cleanup] tick failed:', err)
       })
     }, interval)
-    // Why: also fire immediately on startup so a user who quit Orca for weeks
+    // Why: also fire immediately on startup so a user who quit Orca for days
     // sees expired worktrees cleaned up without waiting a full interval.
     runOnce().catch((err) => {
       console.error('[archive-cleanup] startup tick failed:', err)
