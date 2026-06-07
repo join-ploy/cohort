@@ -1,4 +1,4 @@
-import type { StepKind } from './automations-types'
+import type { HttpRequestStepConfig, MappedField, Step, StepKind } from './automations-types'
 
 export type SchemaLeafType = 'string' | 'number' | 'boolean'
 export type OutputSchema = Record<string, SchemaLeafType>
@@ -121,4 +121,27 @@ const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
 
 export function getOutputSchemaForKind(kind: StepKind): OutputSchema {
   return SCHEMA_BY_KIND[kind]
+}
+
+// Flatten enabled Test-mapped fields into a leaf schema. Single source of the
+// `number → 'number'`, everything-else → `'string'` rule shared by the http
+// trigger overlay and the http-request step output.
+export function httpFieldsToSchema(fields: MappedField[]): OutputSchema {
+  const schema: OutputSchema = {}
+  for (const f of fields) {
+    if (f.enabled) {
+      schema[f.variableName] = f.type === 'number' ? 'number' : 'string'
+    }
+  }
+  return schema
+}
+
+// Why: the http-request step's downstream variables come from its Test-discovered
+// mapped fields (mirroring the http trigger), so its schema is computed from config
+// — SCHEMA_BY_KIND's entry is an empty placeholder. Every other kind is static.
+export function getOutputSchemaForStep(step: Step): OutputSchema {
+  if (step.kind === 'http-request') {
+    return httpFieldsToSchema((step.config as HttpRequestStepConfig).fields)
+  }
+  return getOutputSchemaForKind(step.kind)
 }

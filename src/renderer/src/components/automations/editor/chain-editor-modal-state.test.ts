@@ -185,6 +185,65 @@ describe('getAvailableVariablesAtStep — group namespace', () => {
   })
 })
 
+describe('getAvailableVariablesAtStep — http-request step output schema', () => {
+  function httpRequestStep(id: string, fields: MappedField[]): Step {
+    return {
+      id,
+      kind: 'http-request',
+      config: {
+        request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
+        itemsPath: null,
+        fields
+      },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('surfaces an earlier http-request step’s enabled fields as downstream steps.<id>.* vars', () => {
+    const draft = makeDraft([
+      httpRequestStep('s1', [
+        { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 1 },
+        { path: 'name', variableName: 'name', enabled: true, type: 'string', sampleValue: 'x' },
+        { path: 'skip', variableName: 'skip', enabled: false, type: 'string', sampleValue: 'y' }
+      ]),
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    // At the later run-prompt step, the http-request step's mapped fields are in scope.
+    const out = getAvailableVariablesAtStep(draft, 1, [])
+    expect(out.steps.s1).toEqual({ id: 'number', name: 'string' })
+    expect(out.steps.s1.skip).toBeUndefined()
+  })
+
+  it('lets computeAllErrors resolve a downstream {{steps.s1.id}} reference', () => {
+    const draft = makeDraft([
+      httpRequestStep('s1', [
+        { path: 'id', variableName: 'id', enabled: true, type: 'number', sampleValue: 1 }
+      ]),
+      {
+        id: 'rp',
+        kind: 'run-prompt',
+        config: {
+          worktreeRef: 'wt',
+          agentId: 'claude',
+          prompt: 'id={{steps.s1.id}}',
+          doneDebounceSeconds: 5
+        },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    const stepErrs = computeAllErrors(draft, []).filter((e) => e.path.startsWith('steps.'))
+    expect(stepErrs).toEqual([])
+  })
+})
+
 describe('getAvailableVariablesAtStep — github.pr overlay', () => {
   it('overlays github.pr.* when an enabled github-pr auto-trigger exists', () => {
     const draft = {

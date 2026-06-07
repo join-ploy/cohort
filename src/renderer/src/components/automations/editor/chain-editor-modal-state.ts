@@ -29,7 +29,8 @@ import {
 } from '../../../lib/template-dry-run'
 import {
   GITHUB_PR_TRIGGER_OVERLAY,
-  getOutputSchemaForKind,
+  getOutputSchemaForStep,
+  httpFieldsToSchema,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
   type NestedSchema,
@@ -113,13 +114,7 @@ export function buildTriggerSchema(
   // Only an enabled trigger contributes its overlay, mirroring the github-pr guard.
   const httpTrigger = autoTriggers.find((t) => t.enabled && t.source === 'http-endpoint' && t.http)
   if (httpTrigger?.http) {
-    const httpSchema: OutputSchema = {}
-    for (const f of httpTrigger.http.fields) {
-      if (f.enabled) {
-        httpSchema[f.variableName] = f.type === 'number' ? 'number' : 'string'
-      }
-    }
-    base.http = httpSchema
+    base.http = httpFieldsToSchema(httpTrigger.http.fields)
   }
   return base
 }
@@ -167,7 +162,7 @@ export function getAvailableVariablesAtStep(
   stepIndex: number,
   repos: Repo[] = []
 ): AvailableVariables {
-  const stepsSchema: Record<string, ReturnType<typeof getOutputSchemaForKind>> = {}
+  const stepsSchema: Record<string, OutputSchema> = {}
   // Why: the picker keys a step output's description off the step's kind, so we
   // carry the id→kind map alongside the schemas.
   const stepKinds: Record<string, StepKind> = {}
@@ -179,7 +174,7 @@ export function getAvailableVariablesAtStep(
     const item = draft.steps[i]
     const members = Array.isArray(item) ? item : [item]
     for (const s of members) {
-      stepsSchema[s.id] = getOutputSchemaForKind(s.kind)
+      stepsSchema[s.id] = getOutputSchemaForStep(s)
       stepKinds[s.id] = s.kind
       // Why: any earlier create-workspace-group step injects the top-level
       // `group.*` namespace. If multiple exist (rare), the latest wins —

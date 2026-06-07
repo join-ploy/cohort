@@ -1,6 +1,8 @@
 import { describe, it, expect, expectTypeOf } from 'vitest'
+import type { HttpRequestStepConfig, MappedField, Step } from './automations-types'
 import {
   getOutputSchemaForKind,
+  getOutputSchemaForStep,
   GITHUB_PR_TRIGGER_OVERLAY,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
@@ -11,6 +13,15 @@ import {
   UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
   type SchemaLeafType
 } from './automation-step-schemas'
+
+function makeHttpRequestStep(fields: MappedField[]): Step {
+  const config: HttpRequestStepConfig = {
+    request: { method: 'GET', url: '', headers: [], query: [] },
+    itemsPath: null,
+    fields
+  }
+  return { id: 's1', kind: 'http-request', config, onFailure: 'halt', timeoutSeconds: null }
+}
 
 describe('automation step schemas', () => {
   it('SchemaLeafType is the union of supported primitives', () => {
@@ -79,6 +90,37 @@ describe('automation step schemas', () => {
     expect(getOutputSchemaForKind('run-prompt')).toBe(RUN_PROMPT_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('run-command')).toBe(RUN_COMMAND_OUTPUT_SCHEMA)
     expect(getOutputSchemaForKind('update-linear-issue')).toBe(UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA)
+  })
+})
+
+describe('getOutputSchemaForStep', () => {
+  it('computes an http-request step schema from its enabled mapped fields', () => {
+    const step = makeHttpRequestStep([
+      { variableName: 'id', type: 'number', enabled: true, path: 'id', sampleValue: 0 },
+      { variableName: 'name', type: 'string', enabled: true, path: 'name', sampleValue: '' },
+      { variableName: 'skip', type: 'string', enabled: false, path: 'skip', sampleValue: '' }
+    ])
+    // Disabled `skip` is excluded; number maps to 'number', everything else 'string'.
+    expect(getOutputSchemaForStep(step)).toEqual({ id: 'number', name: 'string' })
+  })
+
+  it('maps non-number, non-string field types to string (mirrors the trigger)', () => {
+    const step = makeHttpRequestStep([
+      { variableName: 'open', type: 'boolean', enabled: true, path: 'open', sampleValue: true },
+      { variableName: 'meta', type: 'json', enabled: true, path: 'meta', sampleValue: {} }
+    ])
+    expect(getOutputSchemaForStep(step)).toEqual({ open: 'string', meta: 'string' })
+  })
+
+  it('delegates to getOutputSchemaForKind for a non-http-request step', () => {
+    const step: Step = {
+      id: 'cw',
+      kind: 'create-worktree',
+      config: { baseBranch: 'main', branchName: 'x', displayName: '', linkLinearIssue: false },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    expect(getOutputSchemaForStep(step)).toEqual(getOutputSchemaForKind('create-worktree'))
   })
 })
 
