@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { makeHttpEndpointSource } from './http-endpoint'
-import type { HttpEndpointConfig } from '../../../shared/automations-types'
+import type { HttpEndpointConfig, HttpRequestConfig } from '../../../shared/automations-types'
 
 const cfg = (over: Partial<HttpEndpointConfig> = {}): HttpEndpointConfig => ({
   request: { method: 'GET', url: 'https://api.test/items', headers: [], query: [] },
@@ -111,6 +111,40 @@ describe('http-endpoint source', () => {
       })
     )
     expect(events.map((e) => e.entityId)).toEqual(['[1]', '[3]'])
+  })
+
+  it('merges a referenced connection (base URL + headers) before polling', async () => {
+    const conn = {
+      id: 'c1',
+      displayName: 'A',
+      baseUrl: 'https://api.acme.dev',
+      headers: [{ key: 'Authorization', value: 'Bearer xyz', secret: true }]
+    }
+    let seen: HttpRequestConfig | undefined
+    const source = makeHttpEndpointSource({
+      execute: async (req) => {
+        seen = req
+        return { status: 200, durationMs: 1, body: { data: [] } }
+      },
+      getConnection: (id) => (id === 'c1' ? conn : undefined),
+      now: () => Date.parse('2026-06-06T00:00:00Z')
+    })
+    await collect(
+      source.poll({
+        since: 0,
+        hostId: 'local',
+        http: cfg({
+          connectionId: 'c1',
+          request: { method: 'GET', url: '/items', headers: [], query: [] }
+        })
+      })
+    )
+    expect(seen?.url).toBe('https://api.acme.dev/items')
+    expect(seen?.headers).toContainEqual({
+      key: 'Authorization',
+      value: 'Bearer xyz',
+      secret: true
+    })
   })
 
   it('throws on non-2xx so the engine logs + skips dispatch', async () => {

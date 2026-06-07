@@ -473,6 +473,41 @@ describe('runFetchItems', () => {
     }
   })
 
+  it('merges a referenced connection (base URL + decrypted headers) before executing', async () => {
+    const conn: HttpConnection = {
+      id: 'c1',
+      displayName: 'A',
+      baseUrl: 'https://api.acme.dev',
+      headers: [{ key: 'Authorization', value: 'Bearer xyz', secret: true }]
+    }
+    const auto = automation({
+      autoTriggers: [
+        httpTrigger({
+          connectionId: 'c1',
+          request: { method: 'GET', url: '/items', headers: [], query: [] }
+        })
+      ]
+    })
+    const store = {
+      listAutomations: () => [auto],
+      getSettings: () => ({ httpConnections: [conn] })
+    } as unknown as Store
+    const body = { data: [{ id: 7, title: 'First', author: 'Ada' }] }
+    let seen: HttpRequestConfig | undefined
+    const execute = vi.fn(async (req: HttpRequestConfig): Promise<HttpEndpointResponse> => {
+      seen = req
+      return { status: 200, durationMs: 1, body }
+    })
+    await runFetchItems({ store, execute }, { automationId: 'a1', autoTriggerId: 't1' })
+    expect(seen?.url).toBe('https://api.acme.dev/items')
+    // Connection secret header merged + decrypted (identity decrypt in test).
+    expect(seen?.headers).toContainEqual({
+      key: 'Authorization',
+      value: 'Bearer xyz',
+      secret: true
+    })
+  })
+
   it('throws on a non-2xx response', async () => {
     const execute = vi.fn(
       async (): Promise<HttpEndpointResponse> => ({ status: 503, durationMs: 1, body: 'down' })

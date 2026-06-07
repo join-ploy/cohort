@@ -684,7 +684,11 @@ app.whenReady().then(async () => {
   const triggerSourceRegistry = new TriggerSourceRegistry()
   triggerSourceRegistry.register(makeLinearIssueSource({ getClient: () => getLinearClient() }))
   triggerSourceRegistry.register(makeGithubPrSource({ getRepos: () => storeRef.getRepos() }))
-  triggerSourceRegistry.register(makeHttpEndpointSource())
+  triggerSourceRegistry.register(
+    makeHttpEndpointSource({
+      getConnection: (id) => storeRef.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+  )
   triggerSourceRegistry.register(makeScheduleSource())
   // Why: bridge the source catalog + fetchOptions to the renderer before any
   // window is opened so the first TriggersModal mount has the handlers ready.

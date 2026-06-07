@@ -110,7 +110,19 @@ export async function runFetchItems(
   if (!cfg) {
     return []
   }
-  const res = await execute(decryptHttpRequest(cfg.request))
+  // Why: merge the connection BEFORE decrypt so node + connection secrets (both
+  // ciphertext at rest) are decrypted uniformly, exactly once.
+  const connection = cfg.connectionId
+    ? deps.store.getSettings().httpConnections?.find((c) => c.id === cfg.connectionId)
+    : undefined
+  if (cfg.connectionId && !connection) {
+    // Why: warn on a dangling reference (connection deleted after save) so the
+    // manual fetch's bare-path request is debuggable rather than silently wrong.
+    console.warn(
+      `[http-endpoint] trigger references missing connection '${cfg.connectionId}'; fetching the path without a base URL.`
+    )
+  }
+  const res = await execute(decryptHttpRequest(mergeConnectionRequest(cfg.request, connection)))
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`HTTP ${res.status}`)
   }
