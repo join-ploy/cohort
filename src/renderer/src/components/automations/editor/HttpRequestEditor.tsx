@@ -18,6 +18,8 @@ import {
   flattenItem,
   resolveItems
 } from '../../../../../shared/http-endpoint-mapping'
+import type { AvailableVariables } from '../../../lib/template-dry-run'
+import { TemplateInput } from './TemplateInput'
 import {
   addHeader,
   addQuery,
@@ -59,6 +61,10 @@ export type HttpRequestEditorProps = {
   value: HttpRequestEditorValue
   onChange: (next: HttpRequestEditorValue) => void
   httpConnections: HttpConnection[]
+  // When provided (step context), the path/URL field becomes a TemplateInput with
+  // the {{…}} variable picker so previous-step outputs can be referenced. Omitted
+  // in the trigger context, where no prior steps exist to template from.
+  available?: AvailableVariables
   // Decoupled Test: the trigger supplies a wrapper around window.api.httpEndpoint.test
   // that adds automationId/autoTriggerId; the step will supply its own.
   onTest: (args: { request: HttpRequestConfig; connectionId?: string }) => Promise<HttpTestResult>
@@ -154,7 +160,7 @@ function KeyValueRow(props: KeyValueRowProps): React.JSX.Element {
 }
 
 export function HttpRequestEditor(props: HttpRequestEditorProps): React.JSX.Element {
-  const { value, onChange, httpConnections } = props
+  const { value, onChange, httpConnections, available } = props
   const request = value.request
 
   // Why: persisted sample drives the items dropdown + remapping offline, so
@@ -262,13 +268,24 @@ export function HttpRequestEditor(props: HttpRequestEditorProps): React.JSX.Elem
               </option>
             ))}
           </NativeSelect>
-          <Input
-            aria-label={connection ? 'Path' : 'URL'}
-            value={request.url}
-            placeholder={connection ? '/items' : 'https://api.example.com/items'}
-            onChange={(e) => onChange(setRequestField(value, { url: e.target.value }))}
-            className="h-8 flex-1 text-xs"
-          />
+          {available ? (
+            <TemplateInput
+              ariaLabel={connection ? 'Path' : 'URL'}
+              value={request.url}
+              placeholder={connection ? '/items' : 'https://api.example.com/items'}
+              onChange={(url) => onChange(setRequestField(value, { url }))}
+              available={available}
+              className="flex-1"
+            />
+          ) : (
+            <Input
+              aria-label={connection ? 'Path' : 'URL'}
+              value={request.url}
+              placeholder={connection ? '/items' : 'https://api.example.com/items'}
+              onChange={(e) => onChange(setRequestField(value, { url: e.target.value }))}
+              className="h-8 flex-1 text-xs"
+            />
+          )}
         </div>
         {connection ? (
           <p className="text-[11px] text-muted-foreground">
