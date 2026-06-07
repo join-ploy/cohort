@@ -136,22 +136,29 @@ export function TriggersModal(props: TriggersModalProps): React.JSX.Element | nu
     }
     // Why: http-endpoint needs a per-trigger request/mapping config seeded up
     // front so its editor card has something to render; polling is the default
-    // capability. Other sources keep the bare default.
-    const next: AutoTrigger =
-      source === 'http-endpoint'
-        ? {
-            ...base,
-            pollingEnabled: true,
-            manualEnabled: false,
-            http: {
-              request: { method: 'GET', url: '', headers: [], query: [] },
-              itemsPath: null,
-              fields: [],
-              dedupeFields: [],
-              dateGateField: null
-            }
-          }
-        : base
+    // capability. schedule seeds a friendly daily 09:00 recurrence in the user's
+    // zone. Other sources keep the bare default.
+    let next: AutoTrigger = base
+    if (source === 'http-endpoint') {
+      next = {
+        ...base,
+        pollingEnabled: true,
+        manualEnabled: false,
+        http: {
+          request: { method: 'GET', url: '', headers: [], query: [] },
+          itemsPath: null,
+          fields: [],
+          dedupeFields: [],
+          dateGateField: null
+        }
+      }
+    } else if (source === 'schedule') {
+      // schedule: daily 09:00 in the user's zone is the friendliest default.
+      next = {
+        ...base,
+        schedule: { cron: '0 9 * * *', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+      }
+    }
     setDraftAutoTriggers((list) => [...list, next])
   }
 

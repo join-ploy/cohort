@@ -17,6 +17,7 @@ import { AutoTriggerRuleRow } from './AutoTriggerRuleRow'
 import type { LoadOptionsFn } from './ConditionRow'
 import { DedupListPopover } from './DedupListPopover'
 import { HttpEndpointTriggerCard } from './HttpEndpointTriggerCard'
+import { ScheduleTriggerCard } from './ScheduleTriggerCard'
 
 export type AutoTriggerCardProps = {
   trigger: AutoTrigger
@@ -174,6 +175,11 @@ export function AutoTriggerCard(props: AutoTriggerCardProps): React.JSX.Element 
         projects={props.projects}
       />
     )
+  }
+  // Why: schedule has its own builder + cron editor and no conditions by design,
+  // so dispatch before the shared rules/repo-watch-list UI renders.
+  if (props.trigger.source === 'schedule') {
+    return <ScheduleTriggerCard {...props} />
   }
   return <RuleBasedTriggerCard {...props} />
 }
