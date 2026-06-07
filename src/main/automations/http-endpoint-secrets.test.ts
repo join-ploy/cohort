@@ -10,11 +10,14 @@ import {
   decryptHttpRequest,
   resolveDraftRequestSecrets,
   sealAutoTriggers,
-  maskAutoTriggers
+  maskAutoTriggers,
+  sealHttpConnections,
+  maskHttpConnections
 } from './http-endpoint-secrets'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
+  type HttpConnection,
   type HttpEndpointConfig,
   type HttpRequestConfig
 } from '../../shared/automations-types'
@@ -337,5 +340,78 @@ describe('sealAutoTriggers / maskAutoTriggers', () => {
     expect(masked?.[0].http?.request.body).toBe('{"page":1}')
     const sealed = sealAutoTriggers([httpTrigger('t1', cfg)], [])
     expect(sealed?.[0].http?.request.body).toBe('{"page":1}')
+  })
+})
+
+describe('sealHttpConnections', () => {
+  it('seals fresh connection secrets and reuses ciphertext for masked ones by id', () => {
+    // Decoy prior at index 0 with different ciphertext: positional matching
+    // would grab 'WRONG', so a passing assertion proves id correlation.
+    const prior: HttpConnection[] = [
+      {
+        id: 'c0',
+        displayName: 'Z',
+        baseUrl: 'https://z',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'WRONG', secret: true }]
+      },
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'CIPHER', secret: true }]
+      }
+    ]
+    const incoming: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: HTTP_SECRET_MASK, secret: true }]
+      }
+    ]
+    const sealed = sealHttpConnections(incoming, prior)
+    expect(sealed[0].headers[0].value).toBe('CIPHER')
+  })
+
+  it('encrypts a freshly typed connection secret', () => {
+    const incoming: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'plaintext', secret: true }]
+      }
+    ]
+    const sealed = sealHttpConnections(incoming, [])
+    // identity encryption in test -> value is the plaintext, still flagged secret
+    expect(sealed[0].headers[0].secret).toBe(true)
+    expect(sealed[0].headers[0].value).toBe('plaintext')
+  })
+})
+
+describe('maskHttpConnections', () => {
+  it('masks all connection secrets for the renderer', () => {
+    const sealed: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Key', value: 'CIPHER', secret: true }]
+      }
+    ]
+    const masked = maskHttpConnections(sealed)
+    expect(masked[0].headers[0].value).toBe(HTTP_SECRET_MASK)
+  })
+
+  it('leaves non-secret headers untouched when masking', () => {
+    const sealed: HttpConnection[] = [
+      {
+        id: 'c1',
+        displayName: 'A',
+        baseUrl: 'https://a',
+        headers: [{ id: 'h1', key: 'X-Plain', value: 'visible' }]
+      }
+    ]
+    expect(maskHttpConnections(sealed)[0].headers[0].value).toBe('visible')
   })
 })

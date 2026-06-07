@@ -2,6 +2,7 @@ import { encryptSecret, decryptSecret } from '../secret-encryption'
 import {
   HTTP_SECRET_MASK,
   type AutoTrigger,
+  type HttpConnection,
   type HttpKeyValue,
   type HttpRequestConfig
 } from '../../shared/automations-types'
@@ -153,4 +154,21 @@ export function maskAutoTriggers(triggers: AutoTrigger[] | undefined): AutoTrigg
       }
     }
   })
+}
+
+// Seal each connection's header secrets against the prior saved connections
+// (matched by connection id) so unchanged masked values keep their ciphertext.
+export function sealHttpConnections(
+  incoming: HttpConnection[],
+  existing: HttpConnection[]
+): HttpConnection[] {
+  return incoming.map((conn) => {
+    const priorHeaders = existing.find((c) => c.id === conn.id)?.headers ?? []
+    return { ...conn, headers: sealHttpKeyValues(conn.headers, priorHeaders) }
+  })
+}
+
+// On read for the renderer: never expose connection secret ciphertext.
+export function maskHttpConnections(connections: HttpConnection[]): HttpConnection[] {
+  return connections.map((conn) => ({ ...conn, headers: maskHttpKeyValues(conn.headers) }))
 }
