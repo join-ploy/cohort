@@ -9,6 +9,7 @@ import {
 import { AutoTriggerEngine } from './auto-trigger-engine'
 import { TriggerSourceRegistry } from './trigger-sources/registry'
 import { makeHttpEndpointSource } from './trigger-sources/http-endpoint'
+import { makeScheduleSource } from './trigger-sources/schedule'
 import type { HttpEndpointConfig } from '../../shared/automations-types'
 
 const httpCfg = (over: Partial<HttpEndpointConfig> = {}): HttpEndpointConfig => ({
@@ -539,6 +540,8 @@ describe('AutoTriggerEngine — per-trigger http polling', () => {
       lastPollSet: () => undefined,
       httpLastPoll: () => 0,
       httpLastPollSet: () => undefined,
+      scheduleNextRun: () => 0,
+      scheduleNextRunSet: () => undefined,
       hostId: 'h1',
       now: () => 5000,
       onError: (where) => {
@@ -609,5 +612,140 @@ describe('AutoTriggerEngine — per-trigger http polling', () => {
       lastPollAt: 777_000,
       intervalMs: 30_000
     })
+  })
+})
+
+describe('AutoTriggerEngine — schedule trigger', () => {
+  // Daily at 09:00 UTC.
+  const CRON = '0 9 * * *'
+  const NINE_AM = Date.UTC(2026, 5, 7, 9, 0, 0)
+  const NEXT_NINE_AM = Date.UTC(2026, 5, 8, 9, 0, 0)
+
+  const scheduleAutomation = (): ReturnType<typeof makeAutomation> =>
+    makeAutomation({
+      autoTriggers: [
+        {
+          id: 'at1',
+          source: 'schedule',
+          enabled: true,
+          enabledAt: 0,
+          rules: [],
+          schedule: { cron: CRON, timezone: 'UTC' }
+        }
+      ]
+    })
+
+  it('anchors to the next future occurrence on first tick without firing', async () => {
+    const scheduleNextRunMap = new Map<string, number>()
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: Date.UTC(2026, 5, 7, 8, 30, 0),
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    expect(scheduleNextRunMap.get('at1')).toBe(NINE_AM)
+  })
+
+  it('fires exactly once when the instant elapses live, then advances', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM + 10_000, // 10s late, within the grace window
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([
+      {
+        automationId: 'a1',
+        ruleId: 'implicit',
+        entityId: new Date(NINE_AM).toISOString()
+      }
+    ])
+    expect(scheduleNextRunMap.get('at1')).toBe(NEXT_NINE_AM)
+  })
+
+  it('targets the automation project via the implicit rule', async () => {
+    const automation = scheduleAutomation()
+    let firedProjectId: string | undefined
+    const registry = new TriggerSourceRegistry()
+    registry.register(makeScheduleSource())
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const engine = new AutoTriggerEngine({
+      registry,
+      listAutomations: () => [automation],
+      dispatchAutoRun: ({ rule }) => {
+        firedProjectId = rule.projectId
+      },
+      dedupHas: () => false,
+      dedupInsert: () => undefined,
+      lastPoll: () => 0,
+      lastPollSet: () => undefined,
+      httpLastPoll: () => 0,
+      httpLastPollSet: () => undefined,
+      scheduleNextRun: (id) => scheduleNextRunMap.get(id) ?? 0,
+      scheduleNextRunSet: (id, v) => {
+        scheduleNextRunMap.set(id, v)
+      },
+      hostId: 'h1',
+      now: () => NINE_AM + 10_000
+    })
+    await engine.tick()
+    expect(firedProjectId).toBe(automation.projectId)
+  })
+
+  it('does not fire when the instant is not due yet', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM - 60_000,
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    expect(scheduleNextRunMap.get('at1')).toBe(NINE_AM)
+  })
+
+  it('is idempotent under a double tick at the same instant', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: NINE_AM + 10_000,
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    await engine.tick()
+    expect(dispatched).toHaveLength(1)
+  })
+
+  it('skips an instant missed by more than the grace window (re-anchors, no fire)', async () => {
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [scheduleAutomation()],
+      now: Date.UTC(2026, 5, 7, 12, 0, 0), // 3h late, beyond the grace window
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
+    expect(scheduleNextRunMap.get('at1')).toBe(NEXT_NINE_AM)
+  })
+
+  it('does not fire for a paused automation', async () => {
+    const automation = scheduleAutomation()
+    automation.enabled = false
+    const scheduleNextRunMap = new Map<string, number>([['at1', NINE_AM]])
+    const { engine, dispatched } = makeEngine({
+      source: makeScheduleSource(),
+      automations: [automation],
+      now: NINE_AM + 10_000,
+      scheduleNextRunMap
+    })
+    await engine.tick()
+    expect(dispatched).toEqual([])
   })
 })
