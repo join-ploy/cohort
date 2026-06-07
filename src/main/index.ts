@@ -621,9 +621,11 @@ app.whenReady().then(async () => {
         return
       }
       // Why: skipArchive=true so we never auto-execute the repo's orca.yaml
-      // `archive` hook from unsupervised cleanup. force (off by default) is set
-      // only by the user's explicit "Prune all archived now" with the
-      // uncommitted-changes option checked.
+      // `archive` hook from unsupervised cleanup. The user wasn't around to
+      // confirm the hook-trust prompt 3 days earlier, and a collaborator
+      // could have added a malicious script in the interim. force (off by
+      // default) is set only by the user's explicit "Prune all archived now"
+      // with the uncommitted-changes option checked.
       await runWorktreeRemoval(
         { worktreeId, force: opts?.force ?? false, skipArchive: true },
         { store: storeRef, runtime: runtimeRef, mainWindow: window }
