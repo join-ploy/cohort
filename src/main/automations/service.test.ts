@@ -6,6 +6,7 @@ import type { Repo } from '../../shared/types'
 import type { AutoTrigger, Rule, Step } from '../../shared/automations-types'
 import type { CandidateEvent } from './trigger-sources/types'
 import { AutomationService } from './service'
+import { HttpRequestRunner } from './runners/http-request-runner'
 
 const testState = { dir: '' }
 
@@ -918,5 +919,14 @@ describe('AutomationService retry persisted-pane cleanup', () => {
     expect(closedPaneKeys).toContain('tab-A:pane-1')
     // Sibling 'b' is not being retried — its pane must stay alive.
     expect(closedPaneKeys).not.toContain('tab-B:pane-1')
+  })
+
+  it('resolves the http-request step kind to the HttpRequestRunner', async () => {
+    const store = await createStore()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    const runner = (service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner(
+      'http-request'
+    )
+    expect(runner).toBeInstanceOf(HttpRequestRunner)
   })
 })

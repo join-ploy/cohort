@@ -39,6 +39,7 @@ import {
 } from './runners/create-workspace-group-runner'
 import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
 import { CollectCiResultsRunner } from './runners/collect-ci-results-runner'
+import { HttpRequestRunner } from './runners/http-request-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
 import { getPRChecks, getPRComments, getPRForBranch } from '../github/client'
 import { gitExecFileAsync } from '../github/gh-utils'
@@ -183,6 +184,7 @@ export class AutomationService {
   private readonly createWorkspaceGroupRunner: CreateWorkspaceGroupRunner
   private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
   private readonly collectCiResultsRunner: CollectCiResultsRunner
+  private readonly httpRequestRunner: HttpRequestRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -458,6 +460,12 @@ export class AutomationService {
       now: () => Date.now()
     })
 
+    this.httpRequestRunner = new HttpRequestRunner({
+      // Why: resolve the referenced connection (sealed base URL + headers) from
+      // settings at run time; execute defaults to the real guarded executor.
+      getConnection: (id) => this.store.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+
     this.chainExecutor = new ChainExecutor({
       getRunner: (kind) => this.resolveRunner(kind),
       persistRun: (run) => {
@@ -730,6 +738,9 @@ export class AutomationService {
     }
     if (kind === 'collect-ci-results') {
       return this.collectCiResultsRunner
+    }
+    if (kind === 'http-request') {
+      return this.httpRequestRunner
     }
     return undefined
   }
