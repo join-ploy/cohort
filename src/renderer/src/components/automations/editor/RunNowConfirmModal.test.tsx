@@ -85,7 +85,11 @@ function baseStoreState(): StoreState {
     listLinearIssues: vi.fn().mockResolvedValue([]),
     openSettingsTarget: vi.fn(),
     // Project picker dependencies.
-    repos: [repoA]
+    repos: [repoA],
+    // Run-status marks: the http picker reads runs from the store and refetches
+    // on open. Empty + a no-op fetch keeps the snapshot deterministic.
+    automationRunsById: {},
+    fetchAutomationRuns: vi.fn()
   }
 }
 

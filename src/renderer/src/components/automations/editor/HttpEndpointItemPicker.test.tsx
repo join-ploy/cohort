@@ -2,7 +2,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpEndpointItemPicker } from './HttpEndpointItemPicker'
-import type { HttpEndpointItem } from '../../../../../shared/automations-types'
+import type {
+  AutomationRun,
+  AutomationRunStatus,
+  HttpEndpointItem
+} from '../../../../../shared/automations-types'
 
 // Why: cmdk (used by the picker) instantiates a ResizeObserver on mount; jsdom
 // doesn't provide one. Stub it before any component renders.
@@ -33,6 +37,34 @@ function stubFetchItems(impl: () => Promise<HttpEndpointItem[]>): ReturnType<typ
     httpEndpoint: { fetchItems }
   }
   return fetchItems
+}
+
+const mkRun = (
+  idValue: unknown,
+  status: AutomationRunStatus,
+  over: Partial<AutomationRun> = {}
+): AutomationRun => ({
+  id: `run-${String(idValue)}-${status}`,
+  automationId: 'auto-1',
+  title: 'Run',
+  scheduledFor: 0,
+  status,
+  trigger: 'manual',
+  workspaceId: null,
+  sessionKind: 'terminal',
+  chatSessionId: null,
+  terminalSessionId: null,
+  error: null,
+  startedAt: null,
+  dispatchedAt: null,
+  createdAt: 0,
+  context: { trigger: { http: { id: idValue } } },
+  ...over
+})
+
+function markFor(key: string): HTMLElement | null {
+  const row = document.querySelector(`[data-http-item-key="${key}"]`)
+  return row ? row.querySelector<HTMLElement>('[data-run-mark]') : null
 }
 
 afterEach(() => {
@@ -92,6 +124,92 @@ describe('HttpEndpointItemPicker', () => {
     })
     render(<HttpEndpointItemPicker automationId="a" autoTriggerId="t" onSelect={() => {}} />)
     expect(await screen.findByText(/Failed to load/i)).toBeTruthy()
+  })
+
+  it('marks an item whose id has a completed run as succeeded', async () => {
+    stubFetchItems(async () => [itemA, itemB])
+    render(
+      <HttpEndpointItemPicker
+        automationId="auto-1"
+        autoTriggerId="t1"
+        onSelect={() => {}}
+        matchVariableName="id"
+        runs={[mkRun(1, 'completed')]}
+      />
+    )
+    await screen.findByText('First item')
+    const mark = markFor('k1')
+    expect(mark?.getAttribute('data-run-mark')).toBe('succeeded')
+    // aria-label carries the precise status behind the coarse mark.
+    expect(mark?.getAttribute('aria-label')).toBe('Done')
+    // The unrun item shows no mark.
+    expect(markFor('k2')).toBeNull()
+  })
+
+  it('marks an in-progress run with the running label', async () => {
+    stubFetchItems(async () => [itemA])
+    render(
+      <HttpEndpointItemPicker
+        automationId="auto-1"
+        autoTriggerId="t1"
+        onSelect={() => {}}
+        matchVariableName="id"
+        runs={[mkRun(1, 'running')]}
+      />
+    )
+    await screen.findByText('First item')
+    const mark = markFor('k1')
+    expect(mark?.getAttribute('data-run-mark')).toBe('in-progress')
+    expect(mark?.getAttribute('aria-label')).toBe('Running')
+  })
+
+  it('folds a cancelled run into the failed mark but keeps the precise label', async () => {
+    stubFetchItems(async () => [itemA])
+    render(
+      <HttpEndpointItemPicker
+        automationId="auto-1"
+        autoTriggerId="t1"
+        onSelect={() => {}}
+        matchVariableName="id"
+        runs={[mkRun(1, 'cancelled')]}
+      />
+    )
+    await screen.findByText('First item')
+    const mark = markFor('k1')
+    expect(mark?.getAttribute('data-run-mark')).toBe('failed')
+    expect(mark?.getAttribute('aria-label')).toBe('Cancelled')
+  })
+
+  it('reflects the most recent run when an id has several', async () => {
+    stubFetchItems(async () => [itemA])
+    render(
+      <HttpEndpointItemPicker
+        automationId="auto-1"
+        autoTriggerId="t1"
+        onSelect={() => {}}
+        matchVariableName="id"
+        runs={[
+          mkRun(1, 'completed', { id: 'old', createdAt: 100 }),
+          mkRun(1, 'failed', { id: 'new', createdAt: 200 })
+        ]}
+      />
+    )
+    await screen.findByText('First item')
+    expect(markFor('k1')?.getAttribute('data-run-mark')).toBe('failed')
+  })
+
+  it('renders no marks when no match field is configured', async () => {
+    stubFetchItems(async () => [itemA, itemB])
+    render(
+      <HttpEndpointItemPicker
+        automationId="auto-1"
+        autoTriggerId="t1"
+        onSelect={() => {}}
+        runs={[mkRun(1, 'completed')]}
+      />
+    )
+    await screen.findByText('First item')
+    expect(document.querySelector('[data-run-mark]')).toBeNull()
   })
 
   it('recovers via the Retry button after a failed fetch', async () => {

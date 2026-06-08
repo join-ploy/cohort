@@ -1,9 +1,10 @@
 import * as React from 'react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import type {
   Automation,
+  AutomationRun,
   HttpEndpointItem,
   LinearIssuePayload,
   RunNowPayload
@@ -12,6 +13,7 @@ import type { Repo } from '../../../../../shared/types'
 import { LinearIssuePicker } from './LinearIssuePicker'
 import { ProjectPicker } from './ProjectPicker'
 import { HttpEndpointItemPicker } from './HttpEndpointItemPicker'
+import { resolveIdVariableName } from './http-endpoint-run-marks'
 
 export type RunNowConfirmModalProps = {
   open: boolean
@@ -50,6 +52,25 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
     (t) => t.source === 'http-endpoint' && t.manualEnabled
   )
   const needsHttp = !!httpTrigger
+
+  // Run-status marks in the picker compare each item's id-field value against
+  // past runs of this automation. Refetch on open for a fresh snapshot so a
+  // just-kicked-off run shows as in-progress.
+  const automationRunsById = useAppStore((s) => s.automationRunsById)
+  const fetchAutomationRuns = useAppStore((s) => s.fetchAutomationRuns)
+  const automationId = props.automation.id
+  useEffect(() => {
+    if (needsHttp) {
+      void fetchAutomationRuns()
+    }
+  }, [needsHttp, fetchAutomationRuns])
+  const runsForAutomation = useMemo<AutomationRun[]>(
+    () => Object.values(automationRunsById).filter((r) => r.automationId === automationId),
+    [automationRunsById, automationId]
+  )
+  const httpMatchVariableName = httpTrigger?.http
+    ? resolveIdVariableName(httpTrigger.http.fields, httpTrigger.http.idField)
+    : undefined
   const canRun =
     (!needsLinear || pickedLinear !== null) &&
     (!needsProject || pickedProjectId !== null) &&
@@ -170,6 +191,8 @@ function RunNowConfirmModalBody(props: RunNowConfirmModalProps): React.JSX.Eleme
                   automationId={props.automation.id}
                   autoTriggerId={httpTrigger.id}
                   onSelect={setPickedHttp}
+                  runs={runsForAutomation}
+                  matchVariableName={httpMatchVariableName}
                 />
               )}
             </section>

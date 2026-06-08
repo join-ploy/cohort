@@ -7,6 +7,7 @@ import {
 import {
   setDateGateField,
   setDedupeFields,
+  setIdField,
   setIntervalMs,
   setLabelField,
   setManualEnabled,
@@ -63,6 +64,7 @@ describe('poll + manual setters', () => {
     expect(setIntervalMs(t, 60_000).http?.intervalMs).toBe(60_000)
     expect(setLabelField(t, 'title').http?.labelField).toBe('title')
     expect(setSubtitleField(t, 'sub').http?.subtitleField).toBe('sub')
+    expect(setIdField(t, 'id').http?.idField).toBe('id')
   })
 })
 
@@ -90,10 +92,16 @@ describe('capability toggles derive enabled', () => {
 
 describe('reducer edge cases', () => {
   it('clears optional fields when set to undefined', () => {
-    const t = httpTrigger({ intervalMs: 5000, labelField: 'name', subtitleField: 'at' })
+    const t = httpTrigger({
+      intervalMs: 5000,
+      labelField: 'name',
+      subtitleField: 'at',
+      idField: 'id'
+    })
     expect(setIntervalMs(t, undefined).http?.intervalMs).toBeUndefined()
     expect(setLabelField(t, undefined).http?.labelField).toBeUndefined()
     expect(setSubtitleField(t, undefined).http?.subtitleField).toBeUndefined()
+    expect(setIdField(t, undefined).http?.idField).toBeUndefined()
   })
 
   it('setManualEnabled(false) with polling off also clears the master enabled', () => {

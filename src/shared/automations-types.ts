@@ -332,6 +332,9 @@ export type HttpEndpointConfig = {
   // Manual-only:
   labelField?: string // dot-path shown as the picker's primary label
   subtitleField?: string // dot-path shown as the picker's secondary line
+  // dot-path identifying an item across runs; drives the run-status mark shown
+  // beside each item in the manual picker (matched against trigger.http.*).
+  idField?: string
 }
 
 // Masked sentinel sent to the renderer in place of an encrypted secret value.

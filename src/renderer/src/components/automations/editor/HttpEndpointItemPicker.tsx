@@ -1,17 +1,51 @@
 import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Globe, LoaderCircle, Search } from 'lucide-react'
+import { Check, Globe, LoaderCircle, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import type { HttpEndpointItem } from '../../../../../shared/automations-types'
+import type { AutomationRun, HttpEndpointItem } from '../../../../../shared/automations-types'
+import { getAutomationRunStatusLabel } from '../automation-page-parts'
+import { latestRunByIdValue, statusToRunMark } from './http-endpoint-run-marks'
 
 export type HttpEndpointItemPickerProps = {
   automationId: string
   autoTriggerId: string
   onSelect: (item: HttpEndpointItem) => void
   className?: string
+  // Run-status indicator: the most recent run per identity value marks each
+  // item. `matchVariableName` is the resolved `trigger.http.*` key the item's
+  // `vars` and past runs share; absent (no configured id field) = no marks.
+  runs?: AutomationRun[]
+  matchVariableName?: string
+}
+
+// The mark sits at the row's trailing edge; the precise status rides on the
+// aria-label/title so the coarse three-icon set stays accessible.
+function ItemRunMark({ run }: { run: AutomationRun }): React.JSX.Element {
+  const mark = statusToRunMark(run.status)
+  const label = getAutomationRunStatusLabel(run.status)
+  const Icon = mark === 'in-progress' ? LoaderCircle : mark === 'succeeded' ? Check : X
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-run-mark={mark}
+      className="ml-auto shrink-0"
+    >
+      <Icon
+        aria-hidden
+        className={cn(
+          'size-3.5',
+          mark === 'in-progress' && 'animate-spin text-muted-foreground',
+          mark === 'succeeded' && 'text-emerald-600 dark:text-emerald-400',
+          mark === 'failed' && 'text-destructive'
+        )}
+      />
+    </span>
+  )
 }
 
 /**
@@ -23,7 +57,7 @@ export type HttpEndpointItemPickerProps = {
  * memory after the fetch, so filtering is a pure client-side substring match.
  */
 export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): React.JSX.Element {
-  const { automationId, autoTriggerId } = props
+  const { automationId, autoTriggerId, runs, matchVariableName } = props
   const [items, setItems] = useState<HttpEndpointItem[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -84,6 +118,24 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
   }, [results])
 
   const ActiveIcon = loading ? LoaderCircle : Search
+
+  // Index the latest run per identity value once; null when no id field is
+  // configured, which turns the marks off entirely.
+  const runByIdValue = useMemo(
+    () => (matchVariableName ? latestRunByIdValue(runs ?? [], matchVariableName) : null),
+    [runs, matchVariableName]
+  )
+
+  const runForItem = (item: HttpEndpointItem): AutomationRun | null => {
+    if (!runByIdValue || !matchVariableName) {
+      return null
+    }
+    const idValue = item.vars[matchVariableName]
+    if (idValue == null || idValue === '') {
+      return null
+    }
+    return runByIdValue.get(String(idValue)) ?? null
+  }
 
   const handleSelect = (item: HttpEndpointItem): void => {
     props.onSelect(item)
@@ -152,21 +204,25 @@ export function HttpEndpointItemPicker(props: HttpEndpointItemPickerProps): Reac
             </div>
           ) : (
             <CommandGroup className="p-1">
-              {results.map((item) => (
-                <CommandItem
-                  key={item.key}
-                  value={item.key}
-                  data-http-item-key={item.key}
-                  onSelect={() => handleSelect(item)}
-                  className="gap-2 px-2 py-1.5 text-xs"
-                >
-                  <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate font-medium text-foreground">{item.label}</span>
-                    <span className="truncate text-muted-foreground">{item.subtitle}</span>
-                  </span>
-                </CommandItem>
-              ))}
+              {results.map((item) => {
+                const run = runForItem(item)
+                return (
+                  <CommandItem
+                    key={item.key}
+                    value={item.key}
+                    data-http-item-key={item.key}
+                    onSelect={() => handleSelect(item)}
+                    className="gap-2 px-2 py-1.5 text-xs"
+                  >
+                    <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate font-medium text-foreground">{item.label}</span>
+                      <span className="truncate text-muted-foreground">{item.subtitle}</span>
+                    </span>
+                    {run ? <ItemRunMark run={run} /> : null}
+                  </CommandItem>
+                )
+              })}
             </CommandGroup>
           )}
         </CommandList>
