@@ -240,7 +240,7 @@ export class WatchPrRunner implements StepRunner {
       const due = now >= tracker.lastPollAt + pollIntervalMs
       if (due) {
         tracker.lastPollAt = now
-        const terminal = await this.sweep(ctx, tracker, worktreeId, config)
+        const terminal = await this.sweep(ctx, tracker, config)
         if (terminal) {
           return terminal
         }
@@ -325,7 +325,7 @@ export class WatchPrRunner implements StepRunner {
       // Network reads gated to the poll interval (per-member terminal + coalesce arming).
       if (now >= tracker.lastPollAt + pollIntervalMs) {
         tracker.lastPollAt = now
-        const terminal = await this.sweep(ctx, tracker, worktreeId, config)
+        const terminal = await this.sweep(ctx, tracker, config)
         if (terminal) {
           return terminal // every member settled cancels child + finishes (Q4)
         }
@@ -378,11 +378,17 @@ export class WatchPrRunner implements StepRunner {
   private async sweep(
     ctx: StepRunnerCtx,
     tracker: WatchTracker,
-    worktreeId: string,
     config: WatchPrConfig
   ): Promise<StepRunnerResult | null> {
-    // Forced teardown: workspace archived → stop the chain cleanly.
-    if (this.deps.isWorktreeArchived(worktreeId)) {
+    // Forced teardown: an OPEN member's worktree archived (or its group) → stop
+    // the chain cleanly. Check each member's real worktreeId (the group: ref has
+    // no worktree meta, so it can't be passed here). Settled members are skipped
+    // so a merged member's normally-pruned worktree can't trigger a false archive.
+    if (
+      [...tracker.members.values()].some(
+        (m) => m.settled === 'open' && this.deps.isWorktreeArchived(m.worktreeId)
+      )
+    ) {
       this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id)
       return this.finishArchived(ctx.step.id, tracker)
     }
@@ -576,9 +582,10 @@ export class WatchPrRunner implements StepRunner {
       reviewAuthor: first?.reviewAuthor ?? '',
       reviewBody: first?.reviewBody ?? '',
       commentsJson: first?.commentsJson ?? '[]',
-      commentsSummary: first?.commentsSummary ?? ''
-      // prTitle lives only inside each membersJson entry, not top-level (the
-      // WATCH_PR_CYCLE_SCHEMA has no top-level prTitle).
+      commentsSummary: first?.commentsSummary ?? '',
+      // First-member convenience (like prNumber/prUrl above); per-member titles
+      // also live inside each membersJson entry.
+      prTitle: first?.prTitle ?? ''
     }
   }
 

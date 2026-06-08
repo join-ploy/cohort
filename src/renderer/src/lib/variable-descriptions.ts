@@ -100,6 +100,7 @@ const STEP_BY_KIND: Partial<Record<StepKind, Record<string, string>>> = {
     cyclesRun: 'Number of review rounds the loop ran',
     prNumber: 'Pull request number (first/only member)',
     prUrl: 'Link to the PR on GitHub (first/only member)',
+    prTitle: 'Pull request title (first/only member)',
     finishedAt: 'Unix epoch time (ms) the watch ended',
     // Per-cycle payload (inside the branch).
     combinedSummary: "Markdown digest of all batched members' review feedback",

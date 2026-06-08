@@ -571,7 +571,7 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     expect(typeof cycleOutput.membersJson).toBe('string')
     expect(typeof cycleOutput.prNumber).toBe('number')
     expect(typeof cycleOutput.prUrl).toBe('string')
-    expect(cycleOutput.prTitle).toBeUndefined()
+    expect(typeof cycleOutput.prTitle).toBe('string')
     expect(typeof cycleOutput.reviewState).toBe('string')
     expect(typeof cycleOutput.reviewAuthor).toBe('string')
     expect(typeof cycleOutput.reviewBody).toBe('string')
@@ -999,6 +999,36 @@ describe('WatchPrRunner — group', () => {
     expect(result.outcome).toBe('failed')
     expect(result.status).toBe('failed')
     expect(result.error).toContain('Could not resolve')
+  })
+
+  it('does NOT tear down a group when isWorktreeArchived uses real (meta-keyed) semantics', async () => {
+    // Regression guard: the real dep returns true for any id without worktree
+    // meta — including the group:<uuid> ref. The runner must check per MEMBER
+    // worktreeId (which has meta), not the raw group ref, or it would falsely
+    // archive-tear-down on the first sweep.
+    const realArchived = (id: string): boolean => id !== MEMBER_A && id !== MEMBER_B
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], { isWorktreeArchived: realArchived })
+    )
+    const result = await runner.tick(
+      groupCtx({ stateOutput: groupWatchingState(), configOverrides: { pollIntervalSeconds: 0 } })
+    )
+    expect(result.outcome).toBe('needs-more-time')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('watching')
+  })
+
+  it('tears down when an open member worktree is archived', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], { isWorktreeArchived: (id) => id === MEMBER_A })
+    )
+    const result = await runner.tick(
+      groupCtx({ stateOutput: groupWatchingState(), configOverrides: { pollIntervalSeconds: 0 } })
+    )
+    expect(result.outcome).toBe('done')
+    expect(result.endChain).toBe(true)
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('archived')
   })
 
   it('expansion: 2 members with changes + PRs → 2 members; no-diff 3rd skipped', async () => {

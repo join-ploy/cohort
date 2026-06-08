@@ -137,6 +137,7 @@ describe('watch-pr schema', () => {
       changeRequestCount: 'number',
       prNumber: 'number',
       prUrl: 'string',
+      prTitle: 'string',
       reviewState: 'string',
       reviewAuthor: 'string',
       reviewBody: 'string',

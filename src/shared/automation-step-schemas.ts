@@ -92,6 +92,7 @@ export const WATCH_PR_CYCLE_SCHEMA: OutputSchema = {
   changeRequestCount: 'number',
   prNumber: 'number',
   prUrl: 'string',
+  prTitle: 'string',
   reviewState: 'string',
   reviewAuthor: 'string',
   reviewBody: 'string',
