@@ -22,6 +22,10 @@ export type StepRunnerResult = {
    *  of outcome, so the field is available to the retry-cleanup path even
    *  after a restart wipes the runner's in-memory tracker map. */
   openedPane?: { paneKey: string; selfOpenedPane: boolean } | null
+  /** When true with outcome 'done', the executor finalizes the run as
+   *  'completed' immediately and does NOT advance to downstream steps. Used
+   *  for a clean early exit (e.g. watch-pr when the PR is closed). */
+  endChain?: boolean
 }
 
 export type StepRunner = {

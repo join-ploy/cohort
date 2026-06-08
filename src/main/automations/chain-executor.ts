@@ -219,6 +219,15 @@ export class ChainExecutor {
       return false
     }
 
+    // Clean early exit: a runner can finish the run without advancing to
+    // downstream steps (e.g. watch-pr on PR close). Mirrors the lazy-stepStates
+    // model — downstream steps are simply never materialized.
+    if (result.outcome === 'done' && result.endChain) {
+      this.finalizeRun(automation, run)
+      this.deps.persistRun(run)
+      return false
+    }
+
     const totalFlat = countFlatSteps(steps)
     if (run.stepStates!.length >= totalFlat && run.stepStates!.every(isTerminal)) {
       this.finalizeRun(automation, run)
@@ -271,6 +280,7 @@ export class ChainExecutor {
 
     // Tick every non-terminal sibling concurrently.
     let anyAdvanced = false
+    const endChainFlags: boolean[] = []
     await Promise.all(
       group.map(async (step, i) => {
         const state = groupStates[i]
@@ -312,6 +322,12 @@ export class ChainExecutor {
           if (result.status === 'skipped' && !result.contextPatch) {
             this.applyContextPatch(run, { steps: { [step.id]: {} } })
           }
+          // Honor the documented contract — endChain is only meaningful with
+          // outcome 'done' (matches the solo path); a failed sibling never ends
+          // the chain cleanly.
+          if (result.outcome === 'done' && result.endChain) {
+            endChainFlags[i] = true
+          }
           anyAdvanced = true
         }
       })
@@ -345,6 +361,15 @@ export class ChainExecutor {
     if (haltFailure) {
       run.status = 'failed'
       run.finishedAt = this.deps.now()
+      this.deps.persistRun(run)
+      return false
+    }
+
+    // Clean early exit: any settled sibling that asked to end the chain
+    // finalizes the run without materializing downstream positions. Runs only
+    // once the whole group is terminal (the early-return above guarantees it).
+    if (endChainFlags.some(Boolean)) {
+      this.finalizeRun(automation, run)
       this.deps.persistRun(run)
       return false
     }
