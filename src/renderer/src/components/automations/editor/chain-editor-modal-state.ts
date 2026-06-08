@@ -14,7 +14,8 @@ import type {
   StepOrGroup,
   TriggerConfig,
   UpdateLinearIssueConfig,
-  WaitForSetupConfig
+  WaitForSetupConfig,
+  WatchPrConfig
 } from '../../../../../shared/automations-types'
 import type { Repo } from '../../../../../shared/types'
 import {
@@ -34,6 +35,7 @@ import {
   httpFieldsToSchema,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
+  WATCH_PR_CYCLE_SCHEMA,
   type NestedSchema,
   type OutputSchema
 } from '../../../../../shared/automation-step-schemas'
@@ -52,7 +54,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
   'collect-ci-results': 'Collect CI results',
-  'http-request': 'HTTP request'
+  'http-request': 'HTTP request',
+  'watch-pr': 'Watch PR / review loop'
 }
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
@@ -66,6 +69,7 @@ export const STEP_KIND_ORDER: StepKind[] = [
   'run-prompt',
   'http-request',
   'collect-ci-results',
+  'watch-pr',
   'update-linear-issue'
 ]
 
@@ -193,6 +197,43 @@ export function getAvailableVariablesAtStep(
     stepKinds,
     group: groupSchema
   }
+}
+
+/**
+ * Builds the AvailableVariables snapshot for a step at `branchFlatIndex` INSIDE
+ * a watch-pr node's `branchSteps`. The branch sees:
+ *  - every parent-chain variable visible at the watch node (`parentAvailable`),
+ *  - the watch node's own per-cycle payload under `steps.<watchStepId>.*` mapped
+ *    to WATCH_PR_CYCLE_SCHEMA (the review feedback) — NOT the final output, which
+ *    is what the same id resolves to in the parent chain, and
+ *  - any earlier branch step's outputs, so a later branch step can reference one.
+ *
+ * Pure (no React) so the branch scope is unit-testable independently of the card.
+ */
+export function getBranchAvailableVariablesAtStep(
+  parentAvailable: AvailableVariables,
+  watchStepId: string,
+  branchSteps: StepOrGroup[],
+  branchFlatIndex: number
+): AvailableVariables {
+  const steps: Record<string, OutputSchema> = {
+    ...parentAvailable.steps,
+    [watchStepId]: WATCH_PR_CYCLE_SCHEMA
+  }
+  const stepKinds: Record<string, StepKind> = {
+    ...parentAvailable.stepKinds,
+    [watchStepId]: 'watch-pr'
+  }
+  const { topIndex } = findStepPosition(branchSteps, branchFlatIndex)
+  for (let i = 0; i < topIndex && i < branchSteps.length; i++) {
+    const item = branchSteps[i]
+    const members = Array.isArray(item) ? item : [item]
+    for (const s of members) {
+      steps[s.id] = getOutputSchemaForStep(s)
+      stepKinds[s.id] = s.kind
+    }
+  }
+  return { ...parentAvailable, steps, stepKinds }
 }
 
 // Per-member leaf shape, mirroring buildGroupTemplateContext in
@@ -567,6 +608,20 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         request: { method: 'GET', url: '', headers: [], query: [] },
         itemsPath: null,
         fields: []
+      }
+      return cfg
+    }
+    case 'watch-pr': {
+      const cfg: WatchPrConfig = {
+        worktreeRef: '',
+        paneRef: '',
+        // Default to formal "Changes requested" only — the crispest review
+        // signal, per the design doc.
+        events: { changesRequested: true, newReviewComments: false, anyReview: false },
+        pollIntervalSeconds: 30,
+        agentIdleDebounceSeconds: 5,
+        failedCycleHaltsLoop: false,
+        branchSteps: []
       }
       return cfg
     }

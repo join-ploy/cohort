@@ -10,6 +10,7 @@ import { RunCommandStepCard } from './RunCommandStepCard'
 import { UpdateLinearIssueStepCard } from './UpdateLinearIssueStepCard'
 import { CollectCiResultsStepCard } from './CollectCiResultsStepCard'
 import { HttpRequestStepCard } from './HttpRequestStepCard'
+import { WatchPrStepCard } from './WatchPrStepCard'
 
 export type ChainEditorStepCardRouterProps = {
   step: Step
@@ -89,6 +90,17 @@ export function ChainEditorStepCardRouter(
       return (
         <HttpRequestStepCard
           {...common}
+          httpConnections={props.httpConnections}
+          onConfigChange={props.onConfigChange}
+        />
+      )
+    case 'watch-pr':
+      return (
+        <WatchPrStepCard
+          {...common}
+          repos={props.repos}
+          reviewCommands={props.reviewCommands}
+          createPrCommands={props.createPrCommands}
           httpConnections={props.httpConnections}
           onConfigChange={props.onConfigChange}
         />

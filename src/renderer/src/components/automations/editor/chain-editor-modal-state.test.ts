@@ -6,17 +6,21 @@ import type {
   HttpRequestStepConfig,
   MappedField,
   Step,
-  StepOrGroup
+  StepOrGroup,
+  WatchPrConfig
 } from '../../../../../shared/automations-types'
 import type { Repo } from '../../../../../shared/types'
 import type { ChainDraft } from '../../../lib/chain-editor-state'
+import type { AvailableVariables } from '../../../lib/template-dry-run'
 import {
   STEP_KIND_ORDER,
   buildTriggerSchema,
   chainHasStep,
   chainReferencesAutomationProjectId,
   computeAllErrors,
+  defaultConfigForKind,
   getAvailableVariablesAtStep,
+  getBranchAvailableVariablesAtStep,
   isProjectRequired
 } from './chain-editor-modal-state'
 
@@ -62,6 +66,53 @@ describe('STEP_KIND_ORDER', () => {
     // Why: run-command is still renderable for legacy chains, but new chains
     // should use run-prompt with stored prompt/agent presets instead.
     expect(STEP_KIND_ORDER).not.toContain('run-command')
+  })
+
+  it('offers watch-pr in the add-step palette, grouped after collect-ci-results', () => {
+    expect(STEP_KIND_ORDER).toContain('watch-pr')
+    expect(STEP_KIND_ORDER.indexOf('watch-pr')).toBe(
+      STEP_KIND_ORDER.indexOf('collect-ci-results') + 1
+    )
+  })
+})
+
+describe('defaultConfigForKind — watch-pr', () => {
+  it('seeds the watch-pr default config (changes-requested on, empty branch)', () => {
+    const cfg = defaultConfigForKind('watch-pr') as WatchPrConfig
+    expect(cfg).toEqual({
+      worktreeRef: '',
+      paneRef: '',
+      events: { changesRequested: true, newReviewComments: false, anyReview: false },
+      pollIntervalSeconds: 30,
+      agentIdleDebounceSeconds: 5,
+      failedCycleHaltsLoop: false,
+      branchSteps: []
+    })
+  })
+
+  it('resolves a watch-pr step to the final output schema in the parent chain', () => {
+    const draft = makeDraft([
+      {
+        id: 'watch',
+        kind: 'watch-pr',
+        config: defaultConfigForKind('watch-pr'),
+        onFailure: 'halt',
+        timeoutSeconds: null
+      },
+      {
+        id: 'after',
+        kind: 'run-prompt',
+        config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+        onFailure: 'halt',
+        timeoutSeconds: null
+      }
+    ])
+    // At the downstream step, the watch node exposes its FINAL payload.
+    const out = getAvailableVariablesAtStep(draft, 1, [])
+    expect(out.steps.watch.finalState).toBe('string')
+    expect(out.steps.watch.cyclesRun).toBe('number')
+    // The per-cycle-only field must NOT leak into the parent chain.
+    expect(out.steps.watch.commentsSummary).toBeUndefined()
   })
 })
 
@@ -639,5 +690,53 @@ describe('computeAllErrors — schedule trigger cron validity', () => {
     const draft = { ...makeDraft([]), autoTriggers: [scheduleTrigger('0 9 * * *')] } as ChainDraft
     // Everything else is well-formed, so a valid cron leaves zero errors.
     expect(computeAllErrors(draft)).toEqual([])
+  })
+})
+
+describe('getBranchAvailableVariablesAtStep — watch-pr branch scope', () => {
+  // Parent scope as seen at the watch node: an upstream run-prompt's paneKey is
+  // available, mirroring the motivating flow (run-prompt opens a pane → watch).
+  const parentAvailable: AvailableVariables = {
+    automation: { projectId: 'string', workspaceId: 'string' },
+    trigger: {},
+    steps: { rp: { paneKey: 'string', durationMs: 'number', outputTail: 'string' } },
+    stepKinds: { rp: 'run-prompt' }
+  }
+
+  function branchRunPrompt(id: string): Step {
+    return {
+      id,
+      kind: 'run-prompt',
+      config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('maps steps.<watch-id>.* to the PER-CYCLE payload inside the branch', () => {
+    const out = getBranchAvailableVariablesAtStep(parentAvailable, 'watch', [], 0)
+    // Inside the branch, the watch node resolves to review feedback…
+    expect(out.steps.watch.commentsSummary).toBe('string')
+    expect(out.steps.watch.reviewBody).toBe('string')
+    expect(out.steps.watch.prNumber).toBe('number')
+    // …NOT the final output (finalState is parent-scope only).
+    expect(out.steps.watch.finalState).toBeUndefined()
+    expect(out.stepKinds?.watch).toBe('watch-pr')
+  })
+
+  it('keeps the upstream parent variables visible in the branch', () => {
+    const out = getBranchAvailableVariablesAtStep(parentAvailable, 'watch', [], 0)
+    // The supervised pane the branch targets comes from an upstream run-prompt.
+    expect(out.steps.rp.paneKey).toBe('string')
+    expect(out.stepKinds?.rp).toBe('run-prompt')
+  })
+
+  it('exposes earlier branch steps but not the current or later ones', () => {
+    const branchSteps = [branchRunPrompt('b1'), branchRunPrompt('b2'), branchRunPrompt('b3')]
+    // At branch flat index 2 (b3), only b1 and b2 are in scope.
+    const out = getBranchAvailableVariablesAtStep(parentAvailable, 'watch', branchSteps, 2)
+    expect(out.steps.b1).toBeDefined()
+    expect(out.steps.b2).toBeDefined()
+    expect(out.steps.b3).toBeUndefined()
   })
 })

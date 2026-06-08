@@ -16,7 +16,8 @@ const KNOWN_STEP_KINDS: Record<StepKind, true> = {
   'run-command': true,
   'update-linear-issue': true,
   'collect-ci-results': true,
-  'http-request': true
+  'http-request': true,
+  'watch-pr': true
 }
 
 /**

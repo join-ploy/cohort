@@ -11,7 +11,8 @@ import type {
   RunPromptConfig,
   RunCommandConfig,
   CollectCiResultsConfig,
-  UpdateLinearIssueConfig
+  UpdateLinearIssueConfig,
+  WatchPrConfig
 } from '../../../shared/automations-types'
 
 /**
@@ -284,6 +285,20 @@ export function walkStepConfigStrings(
       }
       break
     }
+    case 'watch-pr': {
+      // Why: only the two top-level template fields are dry-run/id-rename aware;
+      // branchSteps is a nested chain with its own scope, validated by the
+      // embedded branch editor — walking it here would resolve its templates
+      // against the wrong (parent) variable namespace.
+      const c = config as WatchPrConfig
+      if (typeof c.worktreeRef === 'string') {
+        visit('worktreeRef', c.worktreeRef)
+      }
+      if (typeof c.paneRef === 'string') {
+        visit('paneRef', c.paneRef)
+      }
+      break
+    }
     // Deferred no-op (mirrors rewriteConfigStrings): visiting the request step's
     // url/headers[].value/query[].value/body would let dry-run + id-rename see its
     // templates. Safe to defer — the editor has no template autocomplete for these
@@ -369,6 +384,16 @@ function rewriteConfigStrings(
       return {
         ...c,
         worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef
+      }
+    }
+    case 'watch-pr': {
+      // Why: branchSteps is intentionally not rewritten here — a step-id rename
+      // in the parent chain must not reach into the branch's own template scope.
+      const c = config as WatchPrConfig
+      return {
+        ...c,
+        worktreeRef: typeof c.worktreeRef === 'string' ? transform(c.worktreeRef) : c.worktreeRef,
+        paneRef: typeof c.paneRef === 'string' ? transform(c.paneRef) : c.paneRef
       }
     }
     case 'http-request':

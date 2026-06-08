@@ -2,6 +2,7 @@ import * as React from 'react'
 import {
   CircleCheckBig,
   Copy,
+  Eye,
   FolderGit2,
   FolderTree,
   Globe,
@@ -54,7 +55,8 @@ const KIND_META: Record<
   'run-command': { label: 'Run command', icon: TerminalSquare },
   'update-linear-issue': { label: 'Update Linear issue', icon: Ticket },
   'collect-ci-results': { label: 'Collect CI results', icon: CircleCheckBig },
-  'http-request': { label: 'HTTP request', icon: Globe }
+  'http-request': { label: 'HTTP request', icon: Globe },
+  'watch-pr': { label: 'Watch PR', icon: Eye }
 }
 
 /**

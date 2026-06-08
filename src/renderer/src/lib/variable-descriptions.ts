@@ -83,6 +83,27 @@ const STEP_BY_KIND: Partial<Record<StepKind, Record<string, string>>> = {
     failedChecks: 'Names of failing checks (comma-separated)',
     hasFailures: 'Whether any CI check failed',
     prCount: 'Number of pull requests inspected'
+  },
+  // Why: a watch-pr node resolves to two different payloads by scope — the final
+  // output in the parent chain, the per-cycle review feedback inside the branch.
+  // Both map to kind 'watch-pr', so this entry merges the union of both schemas'
+  // leaf descriptions.
+  'watch-pr': {
+    // Final output (parent chain, after the watch node).
+    finalState: 'How the watch ended: merged, closed, or archived',
+    cyclesRun: 'Number of review rounds the loop ran',
+    finishedAt: 'Unix epoch time (ms) the watch ended',
+    // Per-cycle payload (inside the branch).
+    prNumber: 'Pull request number',
+    prUrl: 'Link to the PR on GitHub',
+    prTitle: 'Title of the pull request',
+    reviewState: "Latest arming review's state, e.g. CHANGES_REQUESTED",
+    reviewAuthor: 'GitHub login of the reviewer who armed this cycle',
+    reviewBody: "That review's top-level body text",
+    commentsJson: 'Unresolved review threads as a JSON string',
+    commentsSummary: 'Markdown digest of the unresolved review feedback',
+    cycleIndex: 'This review round (1-based)',
+    changeRequestCount: 'Arming events folded into this cycle (coalesced)'
   }
 }
 

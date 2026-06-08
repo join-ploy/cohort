@@ -28,7 +28,8 @@ import type {
   TriggerPollStatus,
   TriggerSourceId,
   UpdateLinearIssueConfig,
-  WaitForSetupConfig
+  WaitForSetupConfig,
+  WatchPrConfig
 } from '../../../../shared/automations-types'
 import type { Repo, Worktree } from '../../../../shared/types'
 import { parseAutomationRrule } from '../../../../shared/automation-schedules'
@@ -617,7 +618,8 @@ const STEP_KIND_LABELS: Record<Step['kind'], string> = {
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
   'collect-ci-results': 'Collect CI results',
-  'http-request': 'HTTP request'
+  'http-request': 'HTTP request',
+  'watch-pr': 'Watch PR'
 }
 
 function firstNonEmptyLine(value: string): string {
@@ -697,6 +699,22 @@ function describeStepConfig(step: Step): string {
       const config = step.config as HttpRequestStepConfig
       const url = config.request.url.trim()
       return url ? `${config.request.method} ${url}` : config.request.method
+    }
+    case 'watch-pr': {
+      const config = step.config as WatchPrConfig
+      const events: string[] = []
+      if (config.events?.changesRequested) {
+        events.push('changes requested')
+      }
+      if (config.events?.newReviewComments) {
+        events.push('new comments')
+      }
+      if (config.events?.anyReview) {
+        events.push('any review')
+      }
+      const count = config.branchSteps?.length ?? 0
+      const branchLabel = `${count} branch ${count === 1 ? 'step' : 'steps'}`
+      return events.length > 0 ? `Watch on ${events.join(' + ')} · ${branchLabel}` : branchLabel
     }
   }
 }
