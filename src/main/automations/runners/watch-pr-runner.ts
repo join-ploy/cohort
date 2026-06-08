@@ -48,7 +48,7 @@ export type WatchPrDeps = {
 
 type Phase = 'resolving' | 'watching' | 'responding'
 
-type Settled = 'open' | 'merged' | 'closed'
+type Settled = 'open' | 'merged' | 'closed' | 'approved'
 
 // One watched member PR. A single-worktree node is the degenerate 1-member case;
 // a group node holds one entry per member with a diff-from-main.
@@ -405,6 +405,9 @@ export class WatchPrRunner implements StepRunner {
         member.settled = 'merged'
       } else if (state.state === 'CLOSED') {
         member.settled = 'closed'
+      } else if (config.endOnApprove && state.reviewDecision === 'APPROVED') {
+        // Opt-in: an approved (but unmerged) PR ends the loop — stop watching it.
+        member.settled = 'approved'
       } else {
         // Still open — arm from its reviews against the member's own cursor.
         this.armFromReviews(
@@ -446,6 +449,7 @@ export class WatchPrRunner implements StepRunner {
       memberCount: members.length,
       mergedCount: members.filter((m) => m.settled === 'merged').length,
       closedCount: members.filter((m) => m.settled === 'closed').length,
+      approvedCount: members.filter((m) => m.settled === 'approved').length,
       membersJson: JSON.stringify(
         members.map((m) => ({
           worktreeId: m.worktreeId,
@@ -480,19 +484,26 @@ export class WatchPrRunner implements StepRunner {
     )
   }
 
-  /** Aggregate finish over all settled members: all merged → continue (endChain
-   *  false); any closed → stop cleanly (endChain true). With one member this
-   *  preserves single-PR semantics: 1 merged ⇒ all-merged ⇒ continue, 1 closed
-   *  ⇒ partial-closed ⇒ stop. */
+  /** Aggregate finish over all settled members. Any closed → stop cleanly
+   *  (endChain true, 'partial-closed'); otherwise (all merged and/or approved
+   *  via endOnApprove) → continue (endChain false). Single-PR: 1 merged ⇒
+   *  all-merged ⇒ continue, 1 closed ⇒ partial-closed ⇒ stop, 1 approved ⇒
+   *  approved ⇒ continue. */
   private finishAggregate(stepId: string, tracker: WatchTracker): StepRunnerResult {
     const members = [...tracker.members.values()]
+    const anyClosed = members.some((m) => m.settled === 'closed')
     const allMerged = members.length > 0 && members.every((m) => m.settled === 'merged')
+    const finalState = anyClosed ? 'partial-closed' : allMerged ? 'all-merged' : 'approved'
     return this.buildTerminalResult(
       stepId,
       tracker,
-      allMerged ? 'all-merged' : 'partial-closed',
-      !allMerged,
-      allMerged ? 'All PRs merged' : 'Group settled — some PRs closed'
+      finalState,
+      anyClosed,
+      anyClosed
+        ? 'Group settled — some PRs closed'
+        : allMerged
+          ? 'All PRs merged'
+          : 'All PRs approved'
     )
   }
 

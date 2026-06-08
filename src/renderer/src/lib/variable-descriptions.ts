@@ -92,10 +92,11 @@ const STEP_BY_KIND: Partial<Record<StepKind, Record<string, string>>> = {
   'watch-pr': {
     // Final output (parent chain, after the watch node).
     finalState:
-      "How the watch ended across all members: 'all-merged', 'partial-closed', or 'archived'",
+      "How the watch ended across all members: 'all-merged', 'approved', 'partial-closed', or 'archived'",
     memberCount: 'Number of PRs the watch tracked (1 for a single PR)',
     mergedCount: 'How many tracked PRs ended up merged',
     closedCount: 'How many tracked PRs ended up closed without merging',
+    approvedCount: 'How many tracked PRs ended via approval (when End-on-approve is on)',
     membersJson: 'JSON array of per-member PR info (worktree, number, url)',
     cyclesRun: 'Number of review rounds the loop ran',
     prNumber: 'Pull request number (first/only member)',

@@ -677,6 +677,7 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         pollIntervalSeconds: 30,
         agentIdleDebounceSeconds: 5,
         failedCycleHaltsLoop: false,
+        endOnApprove: false,
         branchSteps: []
       }
       return cfg

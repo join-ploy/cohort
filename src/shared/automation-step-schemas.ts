@@ -67,13 +67,14 @@ export const COLLECT_CI_RESULTS_OUTPUT_SCHEMA: OutputSchema = {
 export const HTTP_REQUEST_OUTPUT_SCHEMA: OutputSchema = {}
 
 // Final output (parent-chain scope). For a single PR: memberCount=1, finalState
-// 'all-merged'|'partial-closed' (1 merged ⇒ all-merged ⇒ chain continues; 1
-// closed ⇒ partial-closed ⇒ chain stops). prNumber/prUrl = first/only member.
+// 'all-merged'|'approved'|'partial-closed' (merged or approved ⇒ chain continues;
+// closed ⇒ chain stops). prNumber/prUrl = first/only member.
 export const WATCH_PR_OUTPUT_SCHEMA: OutputSchema = {
   finalState: 'string',
   memberCount: 'number',
   mergedCount: 'number',
   closedCount: 'number',
+  approvedCount: 'number',
   membersJson: 'string',
   cyclesRun: 'number',
   prNumber: 'number',

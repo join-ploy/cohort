@@ -1334,3 +1334,72 @@ describe('WatchPrRunner — group', () => {
     expect(reviewRepos).not.toContain('/a')
   })
 })
+
+describe('WatchPrRunner — end on approve', () => {
+  it('single approved PR + endOnApprove → continues (approved, endChain false)', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({ getPRState: async () => prState({ reviewDecision: 'APPROVED', url: 'u' }) })
+    )
+    const result = await runner.tick(
+      makeCtx({
+        stateOutput: watchingState(),
+        configOverrides: { endOnApprove: true, pollIntervalSeconds: 0 }
+      })
+    )
+    expect(result.outcome).toBe('done')
+    expect(result.endChain).toBeFalsy()
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('approved')
+    expect(output.approvedCount).toBe(1)
+  })
+
+  it('approved but endOnApprove off (default) → keeps watching', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({ getPRState: async () => prState({ reviewDecision: 'APPROVED', url: 'u' }) })
+    )
+    const result = await runner.tick(
+      makeCtx({ stateOutput: watchingState(), configOverrides: { pollIntervalSeconds: 0 } })
+    )
+    expect(result.outcome).toBe('needs-more-time')
+  })
+
+  it('group all approved + endOnApprove → continues (approved, count 2)', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        getPRState: async (repoPath) => prState({ reviewDecision: 'APPROVED', url: `u${repoPath}` })
+      })
+    )
+    const result = await runner.tick(
+      groupCtx({
+        stateOutput: groupWatchingState(),
+        configOverrides: { endOnApprove: true, pollIntervalSeconds: 0 }
+      })
+    )
+    expect(result.outcome).toBe('done')
+    expect(result.endChain).toBeFalsy()
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('approved')
+    expect(output.approvedCount).toBe(2)
+  })
+
+  it('group one approved + one closed → stops (partial-closed)', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        getPRState: async (repoPath) =>
+          repoPath === '/a'
+            ? prState({ reviewDecision: 'APPROVED', url: 'ua' })
+            : prState({ state: 'CLOSED', url: 'ub' })
+      })
+    )
+    const result = await runner.tick(
+      groupCtx({
+        stateOutput: groupWatchingState(),
+        configOverrides: { endOnApprove: true, pollIntervalSeconds: 0 }
+      })
+    )
+    expect(result.outcome).toBe('done')
+    expect(result.endChain).toBe(true)
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('partial-closed')
+  })
+})

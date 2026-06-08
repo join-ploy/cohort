@@ -86,6 +86,7 @@ describe('defaultConfigForKind — watch-pr', () => {
       pollIntervalSeconds: 30,
       agentIdleDebounceSeconds: 5,
       failedCycleHaltsLoop: false,
+      endOnApprove: false,
       branchSteps: []
     })
   })

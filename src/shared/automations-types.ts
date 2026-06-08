@@ -515,6 +515,9 @@ export type WatchPrConfig = {
   // When false (default) a failed branch cycle keeps the loop watching; the
   // failure is recorded on that cycle's child run. True halts the whole watch.
   failedCycleHaltsLoop?: boolean
+  // When true, an approved (but unmerged) PR ends the loop and continues the
+  // chain — for a group, only once every member PR is approved/merged.
+  endOnApprove?: boolean
   branchSteps: StepOrGroup[] // sub-graph run each cycle
 }
 

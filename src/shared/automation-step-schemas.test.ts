@@ -153,6 +153,7 @@ describe('watch-pr schema', () => {
       memberCount: 'number',
       mergedCount: 'number',
       closedCount: 'number',
+      approvedCount: 'number',
       membersJson: 'string',
       cyclesRun: 'number',
       prNumber: 'number',

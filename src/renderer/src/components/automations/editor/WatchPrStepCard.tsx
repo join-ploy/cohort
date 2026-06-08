@@ -182,6 +182,16 @@ export function WatchPrStepCard(props: WatchPrStepCardProps): React.JSX.Element 
         Halt the loop if a response cycle fails
       </label>
 
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          aria-label="End the loop when the PR is approved"
+          checked={config.endOnApprove ?? false}
+          onChange={(e) => update({ endOnApprove: e.target.checked })}
+        />
+        End the loop when the PR is approved (group: when all are approved)
+      </label>
+
       <div className="mt-1 rounded-md border border-border bg-muted/20 p-2">
         <div className="mb-1.5 text-xs font-medium text-muted-foreground">
           Branch — runs each review round
