@@ -322,11 +322,33 @@ export function computeAllErrors(
       }
     })
     if (step.kind === 'watch-pr') {
+      const watchConfig = step.config as WatchPrConfig
+      // Both refs are required for the loop to work: an empty worktreeRef leaves
+      // nothing to watch, and an empty paneRef makes the idle gate read 'unknown'
+      // so a response cycle never fires. Gate save on them.
+      if (!watchConfig.worktreeRef?.trim()) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' needs a worktree or group to watch.`,
+          stepId: step.id,
+          field: 'worktreeRef'
+        })
+      }
+      if (!watchConfig.paneRef?.trim()) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' needs a supervised pane (e.g. {{steps.<run-prompt>.paneKey}}).`,
+          stepId: step.id,
+          field: 'paneRef'
+        })
+      }
       // Belt-and-suspenders for the no-nested-watch-pr invariant the runtime
       // relies on: the branch palette/paste already block it, but a
       // hand-edited or imported automation could still nest one, so surface an
       // error before save. Recurse through parallel groups in branchSteps too.
-      const branchSteps = (step.config as WatchPrConfig).branchSteps ?? []
+      const branchSteps = watchConfig.branchSteps ?? []
       if (flattenSteps(branchSteps).some((s) => s.kind === 'watch-pr')) {
         all.push({
           path: step.id,

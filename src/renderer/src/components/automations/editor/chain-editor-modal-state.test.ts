@@ -783,6 +783,39 @@ describe('computeAllErrors — no nested watch-pr in branchSteps', () => {
   })
 })
 
+describe('computeAllErrors — watch-pr required refs', () => {
+  function watchWith(config: Partial<WatchPrConfig>): Step {
+    return {
+      id: 'watch',
+      kind: 'watch-pr',
+      config: { ...(defaultConfigForKind('watch-pr') as WatchPrConfig), ...config },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('flags an empty supervised pane (paneRef)', () => {
+    const draft = makeDraft([watchWith({ worktreeRef: 'repo::/p', paneRef: '' })])
+    const errs = computeAllErrors(draft).filter((e) => e.field === 'paneRef')
+    expect(errs).toHaveLength(1)
+    expect(errs[0].message).toMatch(/supervised pane/i)
+  })
+
+  it('flags an empty worktreeRef', () => {
+    const draft = makeDraft([watchWith({ worktreeRef: '', paneRef: 'tab1:2' })])
+    const errs = computeAllErrors(draft).filter((e) => e.field === 'worktreeRef')
+    expect(errs).toHaveLength(1)
+  })
+
+  it('no ref errors when both worktreeRef and paneRef are set', () => {
+    const draft = makeDraft([watchWith({ worktreeRef: 'repo::/p', paneRef: 'tab1:2' })])
+    const errs = computeAllErrors(draft).filter(
+      (e) => e.field === 'worktreeRef' || e.field === 'paneRef'
+    )
+    expect(errs).toEqual([])
+  })
+})
+
 describe('computeAllErrors — watch-pr branch step template references', () => {
   function branchRunPrompt(id: string, prompt: string): Step {
     return {
