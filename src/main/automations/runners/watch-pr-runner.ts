@@ -41,6 +41,12 @@ export type WatchPrDeps = {
     cycleIndex: number
     cycleOutput: Record<string, unknown>
   }) => string
+  /** Spawn the background detached watcher run; returns its id. */
+  spawnDetachedWatcher: (args: {
+    fromRunId: string
+    stepId: string
+    context: Record<string, unknown>
+  }) => string
   getChildRunStatus: (childRunId: string) => 'active' | 'completed' | 'failed' | 'missing'
   cancelChildRunsForStep: (parentRunId: string, parentStepId: string) => void
   now: () => number
@@ -133,6 +139,27 @@ export class WatchPrRunner implements StepRunner {
         return { outcome: 'failed', status: 'failed', error: e.message }
       }
       throw e
+    }
+
+    // Detached: spawn a background run carrying this loop and return done so the
+    // chain continues. The spawned run sets __watchDetached in its context, so when
+    // IT ticks this branch is skipped and the normal loop runs (no re-spawn).
+    // Placed after worktreeId resolution so a bad worktreeRef fails fast before
+    // spawning a detached run that could never resolve its target.
+    if (config.detached && !ctx.context.__watchDetached) {
+      const detachedRunId = this.deps.spawnDetachedWatcher({
+        fromRunId: ctx.runId,
+        stepId: ctx.step.id,
+        context: ctx.context
+      })
+      const output = { detached: true, detachedRunId }
+      return {
+        outcome: 'done',
+        status: 'succeeded',
+        statusMessage: 'Watching in the background',
+        output,
+        contextPatch: { steps: { [ctx.step.id]: output } }
+      }
     }
 
     // ── Phase: resolving ──────────────────────────────────────────────

@@ -1388,6 +1388,184 @@ describe('AutomationService watch-pr child runs', () => {
     expect(child.finishedAt).toBeTypeOf('number')
   })
 
+  it('spawnDetachedWatcher builds a running detached run carrying the watch step + flag', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const spawner = store.createAutomationRun(stored, Date.now(), 'manual')
+    spawner.status = 'running'
+    spawner.context = {
+      automation: { workspaceId: null, projectId: 'p1' },
+      steps: { rp: { paneKey: 'tab-A:pane-1' } }
+    }
+    store.replaceAutomationRun(spawner)
+
+    // Distinct scheduledFor so createAutomationRun's dedup gate gives a new row.
+    vi.advanceTimersByTime(1000)
+    const detachedId = service.spawnDetachedWatcher({
+      fromRunId: spawner.id,
+      stepId: 'watch',
+      context: spawner.context
+    })
+    expect(typeof detachedId).toBe('string')
+    expect(detachedId).not.toBe(spawner.id)
+
+    const detached = store.getAutomationRun(detachedId)!
+    expect(detached).toBeDefined()
+    expect(detached.detachedFromRunId).toBe(spawner.id)
+    // No parentRunId — a detached run isn't torn down with its spawner.
+    expect(detached.parentRunId).toBeUndefined()
+    // parentStepId points at the watch step so the tick interception resolves it.
+    expect(detached.parentStepId).toBe('watch')
+    const ctx = detached.context as {
+      __watchDetached?: boolean
+      steps: { rp: { paneKey: string } }
+    }
+    // The flag makes the runner skip its detached branch on this run (no re-spawn).
+    expect(ctx.__watchDetached).toBe(true)
+    // Spawner context carried over (deep clone) so the loop re-resolves identically.
+    expect(ctx.steps.rp.paneKey).toBe('tab-A:pane-1')
+  })
+
+  it('spawnDetachedWatcher creates a running run with empty stepStates (pre-tick shape)', async () => {
+    // Capture the spawn-time shape before wakeChains drives the first tick by
+    // intercepting replaceAutomationRun for the new detached row.
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const spawner = store.createAutomationRun(stored, Date.now(), 'manual')
+    spawner.status = 'running'
+    store.replaceAutomationRun(spawner)
+
+    let captured: AutomationRun | undefined
+    const realReplace = store.replaceAutomationRun.bind(store)
+    store.replaceAutomationRun = (run: AutomationRun) => {
+      if (run.detachedFromRunId === spawner.id && captured === undefined) {
+        captured = structuredClone(run)
+      }
+      return realReplace(run)
+    }
+
+    vi.advanceTimersByTime(1000)
+    service.spawnDetachedWatcher({ fromRunId: spawner.id, stepId: 'watch', context: {} })
+
+    expect(captured).toBeDefined()
+    expect(captured!.status).toBe('running')
+    expect(captured!.stepStates).toEqual([])
+  })
+
+  it('spawnDetachedWatcher throws when the spawner run is missing', async () => {
+    const { service } = await seedWatchAutomation()
+    expect(() =>
+      service.spawnDetachedWatcher({ fromRunId: 'nope', stepId: 'watch', context: {} })
+    ).toThrow(/run nope not found/)
+  })
+
+  it('resolveDetachedRunAutomation returns the single watch step (not its branchSteps)', async () => {
+    const branch = [runPromptStep('rp')]
+    const { store, service, automationId } = await seedWatchAutomation(branch)
+    const parentAutomation = store.listAutomations().find((a) => a.id === automationId)!
+    const detached = { detachedFromRunId: 'spawner', parentStepId: 'watch' } as AutomationRun
+    const resolved = (
+      service as unknown as {
+        resolveDetachedRunAutomation(d: AutomationRun, a: typeof parentAutomation): unknown
+      }
+    ).resolveDetachedRunAutomation(detached, parentAutomation) as
+      | { steps: StepOrGroup[] }
+      | undefined
+    expect(resolved).toBeDefined()
+    expect(resolved!.steps).toHaveLength(1)
+    expect((resolved!.steps[0] as Step).kind).toBe('watch-pr')
+    expect((resolved!.steps[0] as Step).id).toBe('watch')
+  })
+
+  it('resolveDetachedRunAutomation returns undefined when the step is not watch-pr', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const parentAutomation = store.listAutomations().find((a) => a.id === automationId)!
+    parentAutomation.steps = [runPromptStep('watch')] // same id, wrong kind
+    const detached = { detachedFromRunId: 'spawner', parentStepId: 'watch' } as AutomationRun
+    const resolved = (
+      service as unknown as {
+        resolveDetachedRunAutomation(d: AutomationRun, a: typeof parentAutomation): unknown
+      }
+    ).resolveDetachedRunAutomation(detached, parentAutomation)
+    expect(resolved).toBeUndefined()
+  })
+
+  it('tickRunningChains ticks a detached run against the single watch step', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+
+    // Spy the watch-pr runner so we can observe the detached run ticks against
+    // a single-step automation (the watch step), not the parent's branchSteps.
+    const tickedKinds: string[] = []
+    const tickedStepCounts: number[] = []
+    const fakeRunner = {
+      tick: async (ctx: { step: Step }) => {
+        tickedKinds.push(ctx.step.kind)
+        return { outcome: 'done' as const, status: 'succeeded' as const }
+      }
+    }
+    const realResolve = (
+      service as unknown as { resolveRunner(kind: string): unknown }
+    ).resolveRunner.bind(service)
+    ;(service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner = (
+      kind: string
+    ) => (kind === 'watch-pr' ? fakeRunner : realResolve(kind))
+
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const spawner = store.createAutomationRun(stored, Date.now(), 'manual')
+    spawner.status = 'completed' // terminal so only the detached run is ticked
+    spawner.context = { automation: { workspaceId: 'wt1', projectId: 'p1' }, steps: {} }
+    store.replaceAutomationRun(spawner)
+
+    vi.advanceTimersByTime(1000)
+    const detachedId = service.spawnDetachedWatcher({
+      fromRunId: spawner.id,
+      stepId: 'watch',
+      context: spawner.context
+    })
+    // Capture the single-step automation the detached run ticks against.
+    const detachedRun = store.getAutomationRun(detachedId)!
+    const tickAutomation = (
+      service as unknown as {
+        resolveDetachedRunAutomation(d: AutomationRun, a: typeof stored): { steps: StepOrGroup[] }
+      }
+    ).resolveDetachedRunAutomation(detachedRun, stored)
+    tickedStepCounts.push(tickAutomation.steps.length)
+
+    await (service as unknown as { tickRunningChains(): Promise<void> }).tickRunningChains()
+
+    expect(tickedKinds).toEqual(['watch-pr'])
+    expect(tickedStepCounts).toEqual([1])
+    const detached = store.getAutomationRun(detachedId)!
+    expect(detached.stepStates?.[0]?.stepId).toBe('watch')
+    expect(detached.status).toBe('completed')
+  })
+
+  it('cancelRun(spawner) does NOT cancel the detached run; cancelRun(detached) does', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const spawner = store.createAutomationRun(stored, Date.now(), 'manual')
+    spawner.status = 'running'
+    store.replaceAutomationRun(spawner)
+
+    vi.advanceTimersByTime(1000)
+    const detachedId = service.spawnDetachedWatcher({
+      fromRunId: spawner.id,
+      stepId: 'watch',
+      context: {}
+    })
+    expect(store.getAutomationRun(detachedId)!.status).toBe('running')
+
+    // The detached run has no parentRunId, so cancelChildRunsForRun (keyed on
+    // parentRunId) leaves it active — a detached watcher outlives its spawner.
+    service.cancelRun(spawner.id)
+    expect(store.getAutomationRun(spawner.id)!.status).toBe('cancelled')
+    expect(store.getAutomationRun(detachedId)!.status).toBe('running')
+
+    // Cancelling the detached run directly stops it.
+    service.cancelRun(detachedId)
+    expect(store.getAutomationRun(detachedId)!.status).toBe('cancelled')
+  })
+
   it('toAgentLiveStatus maps registry state onto the watch-pr idle gate', async () => {
     const { service } = await seedWatchAutomation()
     const map = (

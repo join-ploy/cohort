@@ -27,6 +27,7 @@ function makeDeps(overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
     getPRComments: vi.fn(async () => [] as PRComment[]),
     getAgentLiveStatus: (): AgentLiveStatus => 'idle',
     spawnChildRun: vi.fn(() => 'child-1'),
+    spawnDetachedWatcher: vi.fn(() => 'detached-1'),
     getChildRunStatus: () => 'missing',
     cancelChildRunsForStep: vi.fn(),
     now: () => 1000,
@@ -1401,5 +1402,45 @@ describe('WatchPrRunner — end on approve', () => {
     expect(result.endChain).toBe(true)
     const output = result.output as Record<string, unknown>
     expect(output.finalState).toBe('partial-closed')
+  })
+})
+
+describe('WatchPrRunner — detached spawn-and-done', () => {
+  it('detached + no __watchDetached → spawns the background watcher and returns done', async () => {
+    const spawnDetachedWatcher = vi.fn<WatchPrDeps['spawnDetachedWatcher']>(() => 'detached-1')
+    const runner = new WatchPrRunner(makeDeps({ spawnDetachedWatcher }))
+    const context = { trigger: { worktreeId: 'repo-a::/tmp/wt' } }
+    const result = await runner.tick(makeCtx({ configOverrides: { detached: true }, context }))
+    expect(spawnDetachedWatcher).toHaveBeenCalledTimes(1)
+    expect(spawnDetachedWatcher.mock.calls[0][0]).toEqual({
+      fromRunId: 'run-1',
+      stepId: 'step-1',
+      context
+    })
+    expect(result.outcome).toBe('done')
+    expect(result.status).toBe('succeeded')
+    const output = result.output as Record<string, unknown>
+    expect(output.detached).toBe(true)
+    expect(output.detachedRunId).toBe('detached-1')
+  })
+
+  it('detached + __watchDetached already set → no re-spawn, runs the normal loop', async () => {
+    const spawnDetachedWatcher = vi.fn<WatchPrDeps['spawnDetachedWatcher']>(() => 'detached-1')
+    const runner = new WatchPrRunner(
+      makeDeps({
+        spawnDetachedWatcher,
+        // No linked PR → the normal resolving loop parks waiting (proof the
+        // detached branch was skipped, not short-circuited to done).
+        getWorktreeMeta: () => ({ linkedPR: null, path: '/wt', repoPath: '/repo' }),
+        resolveLinkedPR: async () => null
+      })
+    )
+    const result = await runner.tick(
+      makeCtx({ configOverrides: { detached: true }, context: { __watchDetached: true } })
+    )
+    expect(spawnDetachedWatcher).not.toHaveBeenCalled()
+    expect(result.outcome).toBe('needs-more-time')
+    expect(result.status).toBe('waiting')
+    expect(result.statusMessage).toBe('Waiting for PRs to be linked')
   })
 })

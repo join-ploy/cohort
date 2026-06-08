@@ -484,6 +484,7 @@ export class AutomationService {
       getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
       getAgentLiveStatus: (paneKey) => this.toAgentLiveStatus(this.getAgentStatus(paneKey)),
       spawnChildRun: (args) => this.spawnChildRun(args),
+      spawnDetachedWatcher: (args) => this.spawnDetachedWatcher(args),
       getChildRunStatus: (childRunId) => this.getChildRunStatus(childRunId),
       cancelChildRunsForStep: (parentRunId, parentStepId) =>
         this.cancelChildRunsForStep(parentRunId, parentStepId),
@@ -909,14 +910,19 @@ export class AutomationService {
       if (!automation) {
         continue
       }
-      // Child (branch) runs execute the watch step's branchSteps, not the
-      // parent automation's steps — resolve a transient automation for them.
-      const tickAutomation = run.parentRunId
-        ? this.resolveChildRunAutomation(run, automation)
-        : automation
+      // Synthetic step source: a detached watch run ticks against the SINGLE
+      // watch step (carrying its loop); a child (branch) run ticks against that
+      // step's branchSteps. Both resolve a transient automation; a normal run
+      // ticks against the automation as-is. A run is child XOR detached (never
+      // both — each spawner sets only its own field), so the order is safe.
+      const tickAutomation = run.detachedFromRunId
+        ? this.resolveDetachedRunAutomation(run, automation)
+        : run.parentRunId
+          ? this.resolveChildRunAutomation(run, automation)
+          : automation
       if (!tickAutomation) {
-        // Orphaned child: its parent watch step was removed or changed kind.
-        // Finalize it as failed so it stops re-arming the fast-tick loop forever.
+        // Orphaned child/detached run: its watch step was removed or changed
+        // kind. Finalize as failed so it stops re-arming the fast-tick loop.
         this.finalizeFailedRun(run, new Error('Parent watch-pr step no longer exists'))
         continue
       }
@@ -997,6 +1003,22 @@ export class AutomationService {
     return { ...parentAutomation, steps: branchSteps }
   }
 
+  /** The transient automation a detached watch run executes against: the SINGLE
+   *  watch step itself (carrying its full loop), not its branchSteps. Returns
+   *  undefined when the spawner step was removed or changed kind (orphan). */
+  private resolveDetachedRunAutomation(
+    detached: AutomationRun,
+    spawnerAutomation: Automation
+  ): Automation | undefined {
+    const step = flattenSteps(spawnerAutomation.steps ?? []).find(
+      (s) => s.id === detached.parentStepId
+    )
+    if (!step || step.kind !== 'watch-pr') {
+      return undefined
+    }
+    return { ...spawnerAutomation, steps: [step] }
+  }
+
   /** Spawn a watch-pr response cycle as a child run. Clones the parent's
    *  context and overlays this cycle's payload under the watch step id so the
    *  branch resolves {{steps.<run-prompt>.paneKey}} and
@@ -1042,6 +1064,45 @@ export class AutomationService {
     this.broadcastAutomationsChanged()
     this.wakeChains() // let the tick loop pick it up promptly
     return child.id
+  }
+
+  /** Spawn a background detached watch run carrying the watch step's loop. The
+   *  spawner's watch step returns done immediately so its chain continues; this
+   *  run carries `__watchDetached` in its context so when IT ticks the runner's
+   *  detached branch is skipped and the normal loop runs (no re-spawn). Unlike a
+   *  child run it has no parentRunId — it's not torn down when the spawner stops. */
+  spawnDetachedWatcher(args: {
+    fromRunId: string
+    stepId: string
+    context: Record<string, unknown>
+  }): string {
+    const parent = this.store.listAutomationRuns().find((r) => r.id === args.fromRunId)
+    if (!parent) {
+      throw new Error(`spawnDetachedWatcher: run ${args.fromRunId} not found`)
+    }
+    const automation = this.store.listAutomations().find((a) => a.id === parent.automationId)
+    if (!automation) {
+      throw new Error(`spawnDetachedWatcher: automation ${parent.automationId} not found`)
+    }
+    const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
+    if (run.id === parent.id) {
+      // createAutomationRun dedups on (automationId, scheduledFor); a same-ms spawn
+      // would alias the spawner row. Refuse rather than corrupt the spawner.
+      throw new Error('spawnDetachedWatcher: detached run aliased spawner (scheduledFor collision)')
+    }
+    run.detachedFromRunId = parent.id
+    run.parentStepId = args.stepId // resolves the single watch step (see tick interception)
+    run.status = 'running'
+    run.stepStates = []
+    // Carry the spawner's context (deep clone) so the loop re-resolves identically,
+    // plus the flag so the runner skips its detached branch on this run.
+    const ctx = structuredClone(args.context)
+    ctx.__watchDetached = true
+    run.context = ctx
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    this.wakeChains()
+    return run.id
   }
 
   /** Classify a child run's status for the watch-pr runner's responding phase.

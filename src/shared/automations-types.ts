@@ -101,6 +101,8 @@ export type AutomationRun = {
   // Set when this run is a watch-pr response cycle. Its steps come from the
   // parent automation's watch step `branchSteps`, not `automation.steps`.
   parentRunId?: string
+  // The watch step id. On a branch child run it scopes branchSteps; on a detached
+  // run (detachedFromRunId set) it resolves the single watch step to tick.
   parentStepId?: string
   cycleIndex?: number // 1-based review round
   // Set on a background watch run spawned by a detached watch-pr step (provenance
