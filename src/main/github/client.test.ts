@@ -40,7 +40,12 @@ vi.mock('../git/runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock
 }))
 
-import { getPRForBranch, getPullRequestPushTarget, _resetOwnerRepoCache } from './client'
+import {
+  getPRForBranch,
+  getPRState,
+  getPullRequestPushTarget,
+  _resetOwnerRepoCache
+} from './client'
 
 describe('getPRForBranch', () => {
   beforeEach(() => {
@@ -327,5 +332,77 @@ describe('getPRForBranch', () => {
       branchName: 'fix-sidebar'
     })
     expect(gitExecFileAsyncMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('getPRState', () => {
+  beforeEach(() => {
+    ghExecFileAsyncMock.mockReset()
+    acquireMock.mockReset()
+    releaseMock.mockReset()
+    acquireMock.mockResolvedValue(undefined)
+  })
+
+  it('parses state + reviewDecision from gh pr view', async () => {
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        state: 'OPEN',
+        mergedAt: null,
+        closedAt: null,
+        reviewDecision: 'CHANGES_REQUESTED'
+      })
+    })
+    const res = await getPRState('/repo/path', 42)
+    expect(res).toEqual({
+      state: 'OPEN',
+      mergedAt: null,
+      closedAt: null,
+      reviewDecision: 'CHANGES_REQUESTED'
+    })
+    expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
+      ['pr', 'view', '42', '--json', 'state,mergedAt,closedAt,reviewDecision'],
+      { cwd: '/repo/path' }
+    )
+  })
+
+  it('normalizes a MERGED pr with mergedAt and null reviewDecision', async () => {
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        state: 'MERGED',
+        mergedAt: '2026-06-01T00:00:00Z',
+        closedAt: '2026-06-01T00:00:00Z',
+        reviewDecision: null
+      })
+    })
+    const res = await getPRState('/repo/path', 7)
+    expect(res).toEqual({
+      state: 'MERGED',
+      mergedAt: '2026-06-01T00:00:00Z',
+      closedAt: '2026-06-01T00:00:00Z',
+      reviewDecision: null
+    })
+  })
+
+  it('folds an empty-string reviewDecision to null', async () => {
+    // gh returns reviewDecision: "" when no decision exists; the `|| null`
+    // normalization (not `?? null`) must coerce that to null.
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        state: 'OPEN',
+        mergedAt: null,
+        closedAt: null,
+        reviewDecision: ''
+      })
+    })
+    const res = await getPRState('/repo/path', 9)
+    expect(res.reviewDecision).toBeNull()
+  })
+
+  it('propagates errors (no fallback) but still releases the semaphore', async () => {
+    // Unlike getPRChecks, a state read has no sensible empty fallback — the
+    // poll loop must see the rejection and retry. Guard against a future swallow.
+    ghExecFileAsyncMock.mockRejectedValueOnce(new Error('gh exploded'))
+    await expect(getPRState('/repo/path', 1)).rejects.toThrow('gh exploded')
+    expect(releaseMock).toHaveBeenCalledTimes(1)
   })
 })

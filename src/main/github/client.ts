@@ -1090,6 +1090,52 @@ export async function getPRChecks(
   }
 }
 
+// Named PRWatchState (not PRState) to avoid colliding with the string-union
+// PRState in src/shared/types.ts — this is the structured open/merged/closed +
+// review-decision read the watch-pr runner polls.
+export type PRWatchState = {
+  state: 'OPEN' | 'MERGED' | 'CLOSED'
+  mergedAt: string | null
+  closedAt: string | null
+  reviewDecision: 'CHANGES_REQUESTED' | 'APPROVED' | 'REVIEW_REQUIRED' | null
+}
+
+/**
+ * Fetch a PR's merge/close/review state for the watch-pr runner to detect
+ * terminal states (merged/closed) and pre-filter "changes requested".
+ * Errors propagate so the caller's poll loop can retry — unlike getPRChecks
+ * there is no sensible empty fallback for a state read.
+ */
+export async function getPRState(
+  repoPath: string,
+  prNumber: number,
+  // gh pr view has no --cache flag and is always fresh, so `noCache` is a no-op
+  // here; it exists only for caller API symmetry with getPRChecks.
+  _options?: { noCache?: boolean }
+): Promise<PRWatchState> {
+  await acquire()
+  try {
+    const { stdout } = await ghExecFileAsync(
+      ['pr', 'view', String(prNumber), '--json', 'state,mergedAt,closedAt,reviewDecision'],
+      { cwd: repoPath }
+    )
+    const json = JSON.parse(stdout) as {
+      state: string
+      mergedAt: string | null
+      closedAt: string | null
+      reviewDecision: string | null
+    }
+    return {
+      state: json.state as PRWatchState['state'],
+      mergedAt: json.mergedAt ?? null,
+      closedAt: json.closedAt ?? null,
+      reviewDecision: (json.reviewDecision || null) as PRWatchState['reviewDecision']
+    }
+  } finally {
+    release()
+  }
+}
+
 // Why: review thread resolution status and thread IDs are only available via
 // GraphQL. The REST pulls/{n}/comments endpoint does not expose them, so we
 // use GraphQL for review threads and REST for issue-level comments.
