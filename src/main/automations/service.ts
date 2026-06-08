@@ -452,11 +452,16 @@ export class AutomationService {
       getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
       resolveLinkedPR: (worktreePath, repoPath) =>
         this.resolveLinkedPRForRunner(worktreePath, repoPath),
-      // True when the worktree is pruned (gone) OR its workspace group is archived
-      // — either is a forced teardown signal for the watch loop.
+      // True when the worktree is pruned (gone), archived directly, OR its
+      // workspace group is archived — each is a forced teardown signal for the
+      // watch loop.
       isWorktreeArchived: (worktreeId) => {
-        if (!this.store.getWorktreeMeta(worktreeId)) {
-          return true
+        const meta = this.store.getWorktreeMeta(worktreeId)
+        if (!meta) {
+          return true // pruned/removed
+        }
+        if (meta.isArchived) {
+          return true // worktree archived directly
         }
         return this.store
           .getWorkspaceGroups()
@@ -542,22 +547,24 @@ export class AutomationService {
   }
 
   /** Map the main-process agent-status registry's richer state onto the
-   *  watch-pr runner's idle gate. `blocked` (mid-turn/stuck) is treated as
-   *  working — don't send a new prompt yet; `waiting` (paused for input) is
-   *  idle — safe to respond. */
+   *  watch-pr runner's send gate. Only `done` is safe to interrupt with a new
+   *  prompt; everything else maps to `working` (do not send). */
   private toAgentLiveStatus(entry: AgentStatusEntry | undefined): AgentLiveStatus {
     if (!entry) {
       return 'unknown'
     }
     switch (entry.state) {
-      case 'working':
-        return 'working'
-      case 'blocked':
-        return 'working'
-      case 'waiting':
-        return 'idle'
       case 'done':
         return 'done'
+      // Only 'done' is safe to interrupt with a new prompt. 'working' is mid-turn;
+      // 'blocked'/'waiting' mean the agent needs human input (matching how
+      // run-prompt-runner and the canonical agent-status mapper treat them) — the
+      // review loop must not barge in until the user resolves it and the agent
+      // settles to 'done'.
+      case 'working':
+      case 'blocked':
+      case 'waiting':
+        return 'working'
       default:
         return 'unknown'
     }
@@ -896,8 +903,9 @@ export class AutomationService {
         ? this.resolveChildRunAutomation(run, automation)
         : automation
       if (!tickAutomation) {
-        // Parent step missing / no longer watch-pr → orphaned child run; leave
-        // it for the cancel paths to clean up rather than tick against nothing.
+        // Orphaned child: its parent watch step was removed or changed kind.
+        // Finalize it as failed so it stops re-arming the fast-tick loop forever.
+        this.finalizeFailedRun(run, new Error('Parent watch-pr step no longer exists'))
         continue
       }
       this.inFlightRunIds.add(run.id)
@@ -948,6 +956,13 @@ export class AutomationService {
       throw new Error(`spawnChildRun: automation ${parent.automationId} not found`)
     }
     const child = this.store.createAutomationRun(automation, Date.now(), 'manual')
+    if (child.id === parent.id) {
+      // createAutomationRun dedups on (automationId, scheduledFor); a same-ms spawn
+      // would alias the parent row. Refuse rather than corrupt the parent.
+      throw new Error(
+        `spawnChildRun: child run aliased parent ${parent.id} (scheduledFor collision)`
+      )
+    }
     child.parentRunId = parent.id
     child.parentStepId = args.parentStepId
     child.cycleIndex = args.cycleIndex

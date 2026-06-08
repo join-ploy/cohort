@@ -1158,6 +1158,90 @@ describe('AutomationService watch-pr child runs', () => {
     expect(resolved).toBeUndefined()
   })
 
+  it('tickRunningChains ticks a child run against the branch steps, not the parent automation', async () => {
+    // Branch step kind the parent watch step never has — so observing a tick of
+    // this kind proves the child ran the branchSteps, not the parent's steps.
+    const branchStep: Step = {
+      id: 'branch-1',
+      kind: 'fake-branch' as unknown as Step['kind'],
+      config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'go', doneDebounceSeconds: 15 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+    const { store, service, automationId } = await seedWatchAutomation([branchStep])
+
+    // Register a fake runner for the branch step kind that records each tick and
+    // immediately succeeds, so the child run goes terminal in one pass.
+    const tickedKinds: string[] = []
+    const fakeRunner = {
+      tick: async (ctx: { step: Step }) => {
+        tickedKinds.push(ctx.step.kind)
+        return { outcome: 'done' as const, status: 'succeeded' as const }
+      }
+    }
+    const realResolve = (
+      service as unknown as { resolveRunner(kind: string): unknown }
+    ).resolveRunner.bind(service)
+    ;(service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner = (
+      kind: string
+    ) => (kind === 'fake-branch' ? fakeRunner : realResolve(kind))
+
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    parent.context = { automation: { workspaceId: 'wt1', projectId: 'p1' }, steps: {} }
+    store.replaceAutomationRun(parent)
+
+    vi.advanceTimersByTime(1000) // distinct scheduledFor so the dedup gate gives a new row
+    const childId = service.spawnChildRun({
+      parentRunId: parent.id,
+      parentStepId: 'watch',
+      cycleIndex: 0,
+      cycleOutput: { prNumber: 7 }
+    })
+
+    // Take the parent terminal so tickRunningChains() doesn't drive the real
+    // WatchPrRunner — we only want to exercise the child interception path.
+    const parentRow = store.getAutomationRun(parent.id)!
+    parentRow.status = 'completed'
+    store.replaceAutomationRun(parentRow)
+
+    await (service as unknown as { tickRunningChains(): Promise<void> }).tickRunningChains()
+
+    // The child ticked the BRANCH step kind (not 'watch-pr'), and advanced its
+    // own stepStates against the branch chain.
+    expect(tickedKinds).toEqual(['fake-branch'])
+    const child = store.getAutomationRun(childId)!
+    expect(child.stepStates?.[0]?.stepId).toBe('branch-1')
+    expect(child.stepStates?.[0]?.status).toBe('succeeded')
+    expect(child.status).toBe('completed')
+  })
+
+  it('tickRunningChains finalizes an orphaned child (parent step gone) as failed', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'completed' // terminal so only the child is ticked
+    store.replaceAutomationRun(parent)
+
+    vi.advanceTimersByTime(1000)
+    const childId = service.spawnChildRun({
+      parentRunId: parent.id,
+      // Points at a step id that does not exist on the parent automation, so
+      // resolveChildRunAutomation returns undefined → orphaned child.
+      parentStepId: 'no-such-step',
+      cycleIndex: 0,
+      cycleOutput: {}
+    })
+
+    await (service as unknown as { tickRunningChains(): Promise<void> }).tickRunningChains()
+
+    const child = store.getAutomationRun(childId)!
+    expect(child.status).toBe('failed')
+    expect(child.error).toMatch(/parent watch-pr step no longer exists/i)
+    expect(child.finishedAt).toBeTypeOf('number')
+  })
+
   it('toAgentLiveStatus maps registry state onto the watch-pr idle gate', async () => {
     const { service } = await seedWatchAutomation()
     const map = (
@@ -1167,7 +1251,9 @@ describe('AutomationService watch-pr child runs', () => {
     ).toAgentLiveStatus.bind(service)
     expect(map({ state: 'working' })).toBe('working')
     expect(map({ state: 'blocked' })).toBe('working')
-    expect(map({ state: 'waiting' })).toBe('idle')
+    // Only 'done' is safe to interrupt; 'waiting' means the agent needs human
+    // input, so it maps to 'working' (do not send a new prompt).
+    expect(map({ state: 'waiting' })).toBe('working')
     expect(map({ state: 'done' })).toBe('done')
     expect(map(undefined)).toBe('unknown')
   })
