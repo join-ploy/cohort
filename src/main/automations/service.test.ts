@@ -1498,4 +1498,22 @@ describe('AutomationService pane queue', () => {
     // run-1's token is gone, so run-2 is now the head.
     expect(q.acquirePane('pane', 'run-2:s1')).toBe(true)
   })
+
+  it('finalizeFailedRun frees the failed run pane claims (deadlock backstop)', async () => {
+    const { store, service, automationId } = await makeService()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const run = store.createAutomationRun(stored, Date.now(), 'manual')
+    run.status = 'running'
+    store.replaceAutomationRun(run)
+
+    const q = service as unknown as PaneQ & {
+      finalizeFailedRun(run: { id: string }, error: unknown): void
+    }
+    expect(q.acquirePane('pane', `${run.id}:s1`)).toBe(true)
+    expect(q.acquirePane('pane', 'other:s1')).toBe(false)
+
+    // A runner that threw after acquiring lands here — panes must be freed.
+    q.finalizeFailedRun(run, new Error('boom'))
+    expect(q.acquirePane('pane', 'other:s1')).toBe(true)
+  })
 })

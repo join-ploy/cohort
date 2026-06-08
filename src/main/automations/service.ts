@@ -318,6 +318,10 @@ export class AutomationService {
       // the full pane history.
       getPtyIdForPaneKey: this.getPtyIdForPaneKey,
       subscribePtyData: this.subscribePtyData,
+      // Pane FIFO queue: serialize concurrent run-prompts that drive the same
+      // agent pane (e.g. a detached watcher and the main chain).
+      acquirePane: (paneKey, token) => this.acquirePane(paneKey, token),
+      releasePane: (paneKey, token) => this.releasePane(paneKey, token),
       now: () => Date.now()
     })
 
@@ -1406,6 +1410,10 @@ export class AutomationService {
     run.error = errorMessage
     run.finishedAt = now
     this.store.replaceAutomationRun(run)
+    // Backstop: a runner that threw after acquiring a pane must not leave the
+    // FIFO queue deadlocked behind a dead holder. Idempotent with the runner's
+    // own release on its return paths.
+    this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
   }
 

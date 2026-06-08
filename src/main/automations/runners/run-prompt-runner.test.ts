@@ -1,7 +1,20 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { Step, StepRunState } from '../../../shared/automations-types'
-import { RunPromptRunner } from './run-prompt-runner'
+import { RunPromptRunner, type RunPromptDeps } from './run-prompt-runner'
 import type { StepRunnerCtx } from '../step-runner'
+
+// Default the pane FIFO stubs to "always head" (acquirePane → true) so existing
+// tests stay contention-free; override acquirePane to exercise the queue gate.
+function makeDeps(
+  overrides: Partial<RunPromptDeps> & Pick<RunPromptDeps, 'getAgentStatus' | 'now'>
+): RunPromptDeps {
+  return {
+    openPromptPane: vi.fn().mockResolvedValue({ paneKey: 'p' }),
+    acquirePane: vi.fn(() => true),
+    releasePane: vi.fn(),
+    ...overrides
+  }
+}
 
 const baseStep: Step = {
   id: 'send-prompt',
@@ -28,11 +41,13 @@ const baseState: StepRunState = {
 describe('RunPromptRunner', () => {
   it('opens a prompt pane on the first tick and returns needs-more-time', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-1:pane-1' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r1', step: baseStep, state: baseState, context: {} }
     const next = await runner.tick(ctx)
     expect(openPromptPane).toHaveBeenCalledWith({
@@ -51,13 +66,15 @@ describe('RunPromptRunner', () => {
       hasChanges: false,
       checkedWorktreeIds: ['wt-123']
     })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getWorktreeSummary: vi.fn().mockReturnValue({ path: '/work/wt-123', connectionId: null }),
-      hasChangesFromMain,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getWorktreeSummary: vi.fn().mockReturnValue({ path: '/work/wt-123', connectionId: null }),
+        hasChangesFromMain,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, skipIfNoChangesFromMain: true }
@@ -77,16 +94,18 @@ describe('RunPromptRunner', () => {
 
   it('opens the pane when the skip check finds changes', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-1:pane-1' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getWorktreeSummary: vi.fn().mockReturnValue({ path: '/work/wt-123', connectionId: null }),
-      hasChangesFromMain: vi.fn().mockResolvedValue({
-        hasChanges: true,
-        checkedWorktreeIds: ['wt-123']
-      }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getWorktreeSummary: vi.fn().mockReturnValue({ path: '/work/wt-123', connectionId: null }),
+        hasChangesFromMain: vi.fn().mockResolvedValue({
+          hasChanges: true,
+          checkedWorktreeIds: ['wt-123']
+        }),
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, skipIfNoChangesFromMain: true }
@@ -110,12 +129,14 @@ describe('RunPromptRunner', () => {
       agentId: 'codex',
       prompt: 'Review {{trigger.title}}'
     })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      resolvePresetPrompt,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        resolvePresetPrompt,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: {
@@ -148,11 +169,13 @@ describe('RunPromptRunner', () => {
 
   it('resolves templated worktreeRef and prompt from context before opening the pane', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-1:pane-1' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: {
@@ -181,11 +204,13 @@ describe('RunPromptRunner', () => {
 
   it('does not call openPromptPane on subsequent ticks for the same step', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'tab-1:pane-1' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r3', step: baseStep, state: baseState, context: {} }
     await runner.tick(ctx)
     await runner.tick(ctx)
@@ -195,11 +220,13 @@ describe('RunPromptRunner', () => {
 
   it('fails fast when a template references an unresolved path', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, prompt: 'Implement {{trigger.missing}}' }
@@ -217,11 +244,13 @@ describe('RunPromptRunner', () => {
       .fn()
       .mockRejectedValueOnce(new Error('worktree not ready'))
       .mockResolvedValueOnce({ paneKey: 'p' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     // First tick throws — caller would surface this as an error to step state
     await expect(runner.tick(ctx)).rejects.toThrow(/worktree not ready/)
@@ -234,11 +263,13 @@ describe('RunPromptRunner', () => {
   it('fails fast when openPromptPane throws OpenPromptPaneError', async () => {
     const { OpenPromptPaneError } = await import('../open-prompt-pane')
     const openPromptPane = vi.fn().mockRejectedValue(new OpenPromptPaneError('worktree gone'))
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     const result = await runner.tick(ctx)
     expect(result.outcome).toBe('failed')
@@ -248,11 +279,13 @@ describe('RunPromptRunner', () => {
 
   it('two different runs of the same step.id get independent trackers', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p' })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        now: () => 0
+      })
+    )
     const ctxA: StepRunnerCtx = { runId: 'runA', step: baseStep, state: baseState, context: {} }
     const ctxB: StepRunnerCtx = { runId: 'runB', step: baseStep, state: baseState, context: {} }
     await runner.tick(ctxA)
@@ -264,12 +297,14 @@ describe('RunPromptRunner', () => {
 
   it('dropStep calls closePane for a self-opened pane and removes the tracker', () => {
     const closePane = vi.fn()
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn().mockResolvedValue({ paneKey: 'tab-A:pane-1' }),
-      getAgentStatus: () => undefined,
-      closePane,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn().mockResolvedValue({ paneKey: 'tab-A:pane-1' }),
+        getAgentStatus: () => undefined,
+        closePane,
+        now: () => 0
+      })
+    )
     // Manually seed a tracker as if openPromptPane had succeeded.
     return (async () => {
       const ctx: StepRunnerCtx = {
@@ -290,13 +325,15 @@ describe('RunPromptRunner', () => {
   it('dropStep does NOT call closePane when the pane was reused via paneRef', async () => {
     const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
     const closePane = vi.fn()
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn(),
-      sendPromptToPane,
-      getAgentStatus: () => ({ state: 'done', updatedAt: 0 }),
-      closePane,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: () => ({ state: 'done', updatedAt: 0 }),
+        closePane,
+        now: () => 0
+      })
+    )
     const stepReusing: Step = {
       ...baseStep,
       config: { ...baseStep.config, paneRef: 'tab-X:pane-1' }
@@ -317,11 +354,13 @@ describe('RunPromptRunner', () => {
   it('keeps running while the agent is working', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state: 'working', updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state: 'working', updatedAt: now }),
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     // Tick 1: opens pane.
     await runner.tick(ctx)
@@ -337,11 +376,13 @@ describe('RunPromptRunner', () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
     let state: 'working' | 'blocked' | 'waiting' | 'done' = 'working'
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state, updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state, updatedAt: now }),
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     await runner.tick(ctx)
     now = 1_000
@@ -354,11 +395,13 @@ describe('RunPromptRunner', () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
     let state: 'working' | 'blocked' | 'waiting' | 'done' = 'working'
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state, updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state, updatedAt: now }),
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     await runner.tick(ctx)
     now = 1_000
@@ -371,11 +414,13 @@ describe('RunPromptRunner', () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
     let state: 'working' | 'blocked' | 'waiting' | 'done' = 'working'
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state, updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state, updatedAt: now }),
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     // Open pane at t=0.
     await runner.tick(ctx)
@@ -400,11 +445,13 @@ describe('RunPromptRunner', () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
     let state: 'working' | 'blocked' | 'waiting' | 'done' = 'working'
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state, updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state, updatedAt: now }),
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     await runner.tick(ctx)
     // Arm debounce at t=1s.
@@ -436,11 +483,13 @@ describe('RunPromptRunner', () => {
   it('times out per step.timeoutSeconds', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => ({ state: 'working', updatedAt: now }),
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => ({ state: 'working', updatedAt: now }),
+        now: () => now
+      })
+    )
     const step = { ...baseStep, timeoutSeconds: 30 }
     const ctx: StepRunnerCtx = { runId: 'r', step, state: baseState, context: {} }
     await runner.tick(ctx)
@@ -459,11 +508,13 @@ describe('RunPromptRunner', () => {
   it('treats missing status as still warming up (running)', async () => {
     const openPromptPane = vi.fn().mockResolvedValue({ paneKey: 'p1' })
     let now = 0
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: () => undefined,
-      now: () => now
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: () => undefined,
+        now: () => now
+      })
+    )
     const ctx: StepRunnerCtx = { runId: 'r', step: baseStep, state: baseState, context: {} }
     // Tick 1 opens the pane.
     await runner.tick(ctx)
@@ -481,12 +532,14 @@ describe('RunPromptRunner', () => {
   it('with paneRef set: calls sendPromptToPane and records the resolved paneKey', async () => {
     const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
     const openPromptPane = vi.fn() // should NOT be called
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      sendPromptToPane,
-      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, paneRef: 'tab-9:1' }
@@ -501,12 +554,14 @@ describe('RunPromptRunner', () => {
 
   it('with paneRef set + agent working: returns needs-more-time WITHOUT sending', async () => {
     const sendPromptToPane = vi.fn()
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn(),
-      sendPromptToPane,
-      getAgentStatus: vi.fn().mockReturnValue({ state: 'working', updatedAt: 0 }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'working', updatedAt: 0 }),
+        now: () => 0
+      })
+    )
     const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
     const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
     expect(sendPromptToPane).not.toHaveBeenCalled()
@@ -515,12 +570,14 @@ describe('RunPromptRunner', () => {
 
   it('with paneRef set + agent blocked: fails immediately', async () => {
     const sendPromptToPane = vi.fn()
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn(),
-      sendPromptToPane,
-      getAgentStatus: vi.fn().mockReturnValue({ state: 'blocked', updatedAt: 0 }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'blocked', updatedAt: 0 }),
+        now: () => 0
+      })
+    )
     const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
     const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
     expect(result.outcome).toBe('failed')
@@ -530,12 +587,14 @@ describe('RunPromptRunner', () => {
   it('with paneRef set + SendPromptToPaneError: fails fast', async () => {
     const { SendPromptToPaneError } = await import('../send-prompt-to-pane')
     const sendPromptToPane = vi.fn().mockRejectedValue(new SendPromptToPaneError('pane gone'))
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn(),
-      sendPromptToPane,
-      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+        now: () => 0
+      })
+    )
     const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
     const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
     expect(result.outcome).toBe('failed')
@@ -544,12 +603,14 @@ describe('RunPromptRunner', () => {
 
   it('with paneRef template using context: resolves before sending', async () => {
     const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
-    const runner = new RunPromptRunner({
-      openPromptPane: vi.fn(),
-      sendPromptToPane,
-      getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, paneRef: '{{steps.prior.paneKey}}' }
@@ -574,13 +635,15 @@ describe('RunPromptRunner', () => {
       connectionId: null
     })
     const getWorktreeSummary = vi.fn() // must NOT be called for group: ids
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getGroupSummary,
-      getWorktreeSummary,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getGroupSummary,
+        getWorktreeSummary,
+        now: () => 0
+      })
+    )
     // Why: simulate the output shape CreateWorkspaceGroupRunner stamps into
     // context.steps — `groupId` is a `group:<uuid>` string.
     const step: Step = {
@@ -635,15 +698,17 @@ describe('RunPromptRunner', () => {
         'repo-b::/orca/workspaces/feat-x/repo-b'
       ]
     })
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getGroupSummary,
-      getGroupMemberWorktreeIds,
-      getWorktreeSummary,
-      hasChangesFromMain,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getGroupSummary,
+        getGroupMemberWorktreeIds,
+        getWorktreeSummary,
+        hasChangesFromMain,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: {
@@ -677,12 +742,14 @@ describe('RunPromptRunner', () => {
   it('fails fast when worktreeRef resolves to a group:<id> the store cannot find', async () => {
     const openPromptPane = vi.fn()
     const getGroupSummary = vi.fn().mockReturnValue(null)
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getGroupSummary,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getGroupSummary,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, worktreeRef: 'group:missing' }
@@ -704,13 +771,15 @@ describe('RunPromptRunner', () => {
       connectionId: null
     })
     const getGroupSummary = vi.fn() // must NOT be called for member-scoped refs
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getWorktreeSummary,
-      getGroupSummary,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getWorktreeSummary,
+        getGroupSummary,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       // Why: simulate `{{group.members.repo-a.scoped}}` resolving to the
@@ -743,12 +812,14 @@ describe('RunPromptRunner', () => {
   it('fails fast when a member-scoped ref points at a missing member worktree', async () => {
     const openPromptPane = vi.fn()
     const getWorktreeSummary = vi.fn().mockReturnValue(null)
-    const runner = new RunPromptRunner({
-      openPromptPane,
-      getAgentStatus: vi.fn().mockReturnValue(undefined),
-      getWorktreeSummary,
-      now: () => 0
-    })
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane,
+        getAgentStatus: vi.fn().mockReturnValue(undefined),
+        getWorktreeSummary,
+        now: () => 0
+      })
+    )
     const step: Step = {
       ...baseStep,
       config: { ...baseStep.config, worktreeRef: 'member:group:abc:repo-z::/gone' }
@@ -759,5 +830,125 @@ describe('RunPromptRunner', () => {
     expect(result.status).toBe('failed')
     expect(result.error).toMatch(/Member worktree not found.*member:group:abc:repo-z/)
     expect(openPromptPane).not.toHaveBeenCalled()
+  })
+
+  // ─── pane FIFO queue ─────────────────────────────────────────────────────
+
+  it('reuse step waits (does not send) when not the pane queue head', async () => {
+    const sendPromptToPane = vi.fn()
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'done', updatedAt: 0 }),
+        // Not head → must park before touching the agent.
+        acquirePane: vi.fn(() => false),
+        now: () => 0
+      })
+    )
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const result = await runner.tick({ runId: 'r', step, state: baseState, context: {} })
+    expect(result).toEqual({
+      outcome: 'needs-more-time',
+      status: 'waiting',
+      statusMessage: 'Waiting for pane'
+    })
+    expect(sendPromptToPane).not.toHaveBeenCalled()
+  })
+
+  it('reuse step drives the agent and releases the pane on done', async () => {
+    const sendPromptToPane = vi.fn().mockResolvedValue(undefined)
+    const releasePane = vi.fn()
+    let now = 0
+    // Reuse trackers require a fresh `working` transition before a `done`
+    // satisfies the debounce. The pre-send gate also needs the agent idle
+    // (`done`) at send time, so start done → flip working → done across ticks.
+    let state: 'working' | 'done' = 'done'
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: () => ({ state, updatedAt: now }),
+        releasePane,
+        now: () => now
+      })
+    )
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const ctx: StepRunnerCtx = { runId: 'rd', step, state: baseState, context: {} }
+    // Tick 1: agent idle (done) → send the prompt into the reused pane.
+    await runner.tick(ctx)
+    expect(sendPromptToPane).toHaveBeenCalledWith({ paneKey: 'tab-9:1', prompt: 'Hello' })
+    // Observe a fresh `working` turn to clear requiresWorkingFirst.
+    now = 1_000
+    state = 'working'
+    await runner.tick(ctx)
+    // First `done` arms the debounce.
+    now = 2_000
+    state = 'done'
+    await runner.tick(ctx)
+    // 15s of continuous done elapsed — succeed and release.
+    now = 17_000
+    const succeed = await runner.tick(ctx)
+    expect(succeed.outcome).toBe('done')
+    expect(succeed.status).toBe('succeeded')
+    expect(releasePane).toHaveBeenCalledWith('tab-9:1', 'rd:send-prompt')
+  })
+
+  it('reuse step releases the pane when the agent needs human input', async () => {
+    const sendPromptToPane = vi.fn()
+    const releasePane = vi.fn()
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane,
+        getAgentStatus: vi.fn().mockReturnValue({ state: 'blocked', updatedAt: 0 }),
+        releasePane,
+        now: () => 0
+      })
+    )
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const result = await runner.tick({ runId: 'rb', step, state: baseState, context: {} })
+    expect(result.outcome).toBe('failed')
+    expect(sendPromptToPane).not.toHaveBeenCalled()
+    expect(releasePane).toHaveBeenCalledWith('tab-9:1', 'rb:send-prompt')
+  })
+
+  it('reuse step releases the pane when sendPromptToPane throws a transient (plain) error', async () => {
+    const releasePane = vi.fn()
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane: vi.fn().mockRejectedValue(new Error('Renderer did not respond')),
+        getAgentStatus: () => ({ state: 'done', updatedAt: 0 }),
+        releasePane,
+        now: () => 0
+      })
+    )
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    // A plain Error re-throws (routes to finalizeFailedRun); the pane must be
+    // released first so the FIFO queue can't deadlock behind the dead holder.
+    await expect(runner.tick({ runId: 'rt', step, state: baseState, context: {} })).rejects.toThrow(
+      'Renderer did not respond'
+    )
+    expect(releasePane).toHaveBeenCalledWith('tab-9:1', 'rt:send-prompt')
+  })
+
+  it('dropStep releases the dropped step pane', async () => {
+    const releasePane = vi.fn()
+    const runner = new RunPromptRunner(
+      makeDeps({
+        openPromptPane: vi.fn(),
+        sendPromptToPane: vi.fn().mockResolvedValue(undefined),
+        getAgentStatus: () => ({ state: 'done', updatedAt: 0 }),
+        releasePane,
+        now: () => 0
+      })
+    )
+    const step: Step = { ...baseStep, config: { ...baseStep.config, paneRef: 'tab-9:1' } }
+    const ctx: StepRunnerCtx = { runId: 'rdrop', step, state: baseState, context: {} }
+    // Acquire a reuse step so a tracker exists, then drop it.
+    await runner.tick(ctx)
+    runner.dropStep('rdrop', step.id)
+    expect(releasePane).toHaveBeenCalledWith('tab-9:1', 'rdrop:send-prompt')
   })
 })

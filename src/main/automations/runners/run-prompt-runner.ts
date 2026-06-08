@@ -86,6 +86,10 @@ export type RunPromptDeps = {
    *  those panes belong to upstream steps and must remain available for
    *  downstream paneRef consumers. Fire-and-forget. */
   closePane?: (paneKey: string) => void
+  /** Pane FIFO queue. acquirePane returns true only when this token holds the
+   *  pane; release frees it. token = `${runId}:${stepId}`. */
+  acquirePane: (paneKey: string, token: string) => boolean
+  releasePane: (paneKey: string, token: string) => void
   now: () => number
 }
 
@@ -221,8 +225,17 @@ export class RunPromptRunner implements StepRunner {
     return { ok: true, effectiveWorktreeId, effectiveSummary, memberScoped, changeTargets }
   }
 
+  /** Release the pane claim this step holds (idempotent). Used on every
+   *  terminal outcome so a dead holder never blocks the per-paneKey FIFO. */
+  private releasePaneFor(ctx: StepRunnerCtx, paneKey: string | undefined): void {
+    if (paneKey) {
+      this.deps.releasePane(paneKey, `${ctx.runId}:${ctx.step.id}`)
+    }
+  }
+
   async tick(ctx: StepRunnerCtx): Promise<StepRunnerResult> {
     const config = ctx.step.config as RunPromptConfig
+    const paneToken = `${ctx.runId}:${ctx.step.id}`
     let runTrackers = this.trackers.get(ctx.runId)
     let tracker = runTrackers?.get(ctx.step.id)
     if (!tracker) {
@@ -297,6 +310,16 @@ export class RunPromptRunner implements StepRunner {
       // paneRef branch: reuse an existing pane instead of opening a new one.
       const paneRef = resolvedPaneRef.trim()
       if (paneRef.length > 0) {
+        // Pane FIFO gate: only the queue head may drive the pane. Acquire
+        // synchronously (before any await) so concurrent run-prompts to the
+        // same paneKey serialize; non-head parks and retries next tick.
+        if (!this.deps.acquirePane(paneRef, paneToken)) {
+          return {
+            outcome: 'needs-more-time',
+            status: 'waiting',
+            statusMessage: 'Waiting for pane'
+          }
+        }
         // Why: pre-send wait gate — never write into a pane mid-turn. A
         // `working` agent is still composing/executing, so we hold off until
         // it returns to `done`. Returning `needs-more-time` (not `failed`)
@@ -308,6 +331,7 @@ export class RunPromptRunner implements StepRunner {
         if (status?.state === 'blocked' || status?.state === 'waiting') {
           // Same halt semantics as the polling branch below: can't send into
           // a pane whose agent is waiting on a human.
+          this.releasePaneFor(ctx, paneRef)
           return {
             outcome: 'failed',
             status: 'failed',
@@ -315,6 +339,9 @@ export class RunPromptRunner implements StepRunner {
           }
         }
         if (!this.deps.sendPromptToPane) {
+          // Release the pane we just acquired before throwing — the throw routes
+          // to finalizeFailedRun, which (as a backstop) also frees panes.
+          this.releasePaneFor(ctx, paneRef)
           throw new Error('RunPromptRunner: sendPromptToPane dep not wired.')
         }
         try {
@@ -323,6 +350,8 @@ export class RunPromptRunner implements StepRunner {
           // Why: mirror the openPromptPane branch — deterministic renderer
           // failures (pane gone, write rejected) fail-fast via the dedicated
           // error class; plain Errors are transient and re-thrown for retry.
+          // Either way release the acquired pane so the queue doesn't deadlock.
+          this.releasePaneFor(ctx, paneRef)
           if (e instanceof SendPromptToPaneError) {
             return { outcome: 'failed', status: 'failed', error: e.message }
           }
@@ -360,6 +389,9 @@ export class RunPromptRunner implements StepRunner {
           ...(target.memberScoped ? { memberScoped: true } : {})
         })
         paneKey = result.paneKey
+        // Claim the freshly-opened key (always head since it's brand new) so a
+        // concurrent reuse of this paneKey queues behind us until we release.
+        this.deps.acquirePane(paneKey, paneToken)
       } catch (e) {
         // Why: OpenPromptPaneError signals a deterministic renderer-side
         // failure (bad worktree/agent, empty startup plan) — same fail-fast
@@ -396,6 +428,9 @@ export class RunPromptRunner implements StepRunner {
     if (ctx.step.timeoutSeconds != null) {
       const elapsedMs = now - tracker.openedAt
       if (elapsedMs >= ctx.step.timeoutSeconds * 1000) {
+        // Release the pane on this terminal path so the next queued waiter can
+        // drive — a dead holder would block the FIFO forever.
+        this.releasePaneFor(ctx, tracker.paneKey)
         return {
           outcome: 'failed',
           status: 'timed-out',
@@ -479,6 +514,9 @@ export class RunPromptRunner implements StepRunner {
         outputTail: status.lastAssistantMessage ?? tracker.outputTail?.read() ?? ''
       }
       this.cleanup(tracker)
+      // Release the pane on success so the next queued waiter (e.g. a detached
+      // watcher's response on the same pane) becomes head and can drive.
+      this.releasePaneFor(ctx, tracker.paneKey)
       return {
         outcome: 'done',
         status: 'succeeded',
@@ -559,8 +597,11 @@ export class RunPromptRunner implements StepRunner {
     if (!runTrackers) {
       return
     }
-    for (const tracker of runTrackers.values()) {
+    for (const [stepId, tracker] of runTrackers) {
       this.cleanup(tracker)
+      // Free the pane for every tracked step so a cancelled run never leaves a
+      // dead holder blocking the FIFO.
+      this.deps.releasePane(tracker.paneKey, `${runId}:${stepId}`)
     }
     this.trackers.delete(runId)
   }
@@ -577,6 +618,9 @@ export class RunPromptRunner implements StepRunner {
       return
     }
     this.cleanup(tracker)
+    // Free the dropped step's pane so a retry-from-step (or any waiter behind
+    // it) isn't blocked by a holder that no longer exists.
+    this.deps.releasePane(tracker.paneKey, `${runId}:${stepId}`)
     if (tracker.selfOpenedPane) {
       this.deps.closePane?.(tracker.paneKey)
     }
