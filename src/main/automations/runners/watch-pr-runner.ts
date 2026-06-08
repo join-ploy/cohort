@@ -386,12 +386,22 @@ export class WatchPrRunner implements StepRunner {
     }
   }
 
-  // TODO(Task 10): cancel active child runs before clearing the tracker.
   dropRun(runId: string): void {
+    const runMap = this.trackers.get(runId)
+    if (runMap) {
+      // Cancel each tracked step's active child cycle so a stopped watch doesn't
+      // orphan a running branch run after the in-memory tracker is gone.
+      for (const stepId of runMap.keys()) {
+        this.deps.cancelChildRunsForStep(runId, stepId)
+      }
+    }
     this.trackers.delete(runId)
   }
 
   dropStep(runId: string, stepId: string): void {
+    // Cancel the active child cycle so a retried/dropped watch step doesn't
+    // orphan a running branch run before the chain re-reaches the node.
+    this.deps.cancelChildRunsForStep(runId, stepId)
     const runMap = this.trackers.get(runId)
     runMap?.delete(stepId)
     if (runMap && runMap.size === 0) {

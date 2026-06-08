@@ -735,6 +735,52 @@ describe('WatchPrRunner — responding phase', () => {
   })
 })
 
+describe('WatchPrRunner — dropRun / dropStep cancel active child runs', () => {
+  it('dropRun cancels children for every tracked step then clears the tracker', async () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(makeDeps({ cancelChildRunsForStep: cancel }))
+    // One tick lands in watching → creates an in-memory tracker for (run-1, step-1).
+    await runner.tick(makeCtx({ stateOutput: watchingState() }))
+    runner.dropRun('run-1')
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledWith('run-1', 'step-1')
+    // Tracker cleared: a second dropRun finds no map → no further cancel.
+    runner.dropRun('run-1')
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('dropStep cancels the step’s children then removes that step’s tracker', async () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(makeDeps({ cancelChildRunsForStep: cancel }))
+    await runner.tick(makeCtx({ stateOutput: watchingState() }))
+    runner.dropStep('run-1', 'step-1')
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledWith('run-1', 'step-1')
+    // Tracker for that step removed: dropRun (which only cancels for *tracked*
+    // steps) now finds an empty/absent run map and does not cancel again.
+    runner.dropRun('run-1')
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('dropRun with no tracker for the run is a no-op (no cancel, no throw)', () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(makeDeps({ cancelChildRunsForStep: cancel }))
+    expect(() => runner.dropRun('run-1')).not.toThrow()
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it('dropStep prunes the run map when the last step is removed', async () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(makeDeps({ cancelChildRunsForStep: cancel }))
+    await runner.tick(makeCtx({ stateOutput: watchingState() }))
+    runner.dropStep('run-1', 'step-1')
+    // The run map was pruned (last step removed), so dropRun finds no tracker
+    // and does not cancel again.
+    runner.dropRun('run-1')
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('WatchPrRunner — poll cost (Part A)', () => {
   it('two watching ticks within one poll interval → getPRState called at most once', async () => {
     let nowValue = 1_000_000
