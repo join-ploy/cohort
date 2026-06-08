@@ -3,10 +3,17 @@ import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { Repo } from '../../shared/types'
-import type { AutoTrigger, Rule, Step } from '../../shared/automations-types'
+import type {
+  AutomationRun,
+  AutoTrigger,
+  Rule,
+  Step,
+  StepOrGroup
+} from '../../shared/automations-types'
 import type { CandidateEvent } from './trigger-sources/types'
 import { AutomationService } from './service'
 import { HttpRequestRunner } from './runners/http-request-runner'
+import { WatchPrRunner } from './runners/watch-pr-runner'
 
 const testState = { dir: '' }
 
@@ -928,5 +935,240 @@ describe('AutomationService retry persisted-pane cleanup', () => {
       'http-request'
     )
     expect(runner).toBeInstanceOf(HttpRequestRunner)
+  })
+})
+
+describe('AutomationService watch-pr child runs', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-automations-test-'))
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-13T09:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  const watchStep = (id: string, branchSteps: StepOrGroup[] = []): Step => ({
+    id,
+    kind: 'watch-pr',
+    config: {
+      worktreeRef: '{{trigger.worktreeId}}',
+      paneRef: '{{steps.rp.paneKey}}',
+      events: { changesRequested: true, newReviewComments: false, anyReview: false },
+      pollIntervalSeconds: 30,
+      agentIdleDebounceSeconds: 5,
+      branchSteps
+    },
+    onFailure: 'halt',
+    timeoutSeconds: null
+  })
+
+  const runPromptStep = (id: string): Step => ({
+    id,
+    kind: 'run-prompt',
+    config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'fix', doneDebounceSeconds: 15 },
+    onFailure: 'halt',
+    timeoutSeconds: null
+  })
+
+  async function seedWatchAutomation(branchSteps: StepOrGroup[] = []): Promise<{
+    store: Awaited<ReturnType<typeof createStore>>
+    service: AutomationService
+    automationId: string
+  }> {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    const automation = store.createAutomation({
+      name: 'Watch chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [watchStep('watch', branchSteps)]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+    return { store, service, automationId: stored.id }
+  }
+
+  it('resolves the watch-pr step kind to the WatchPrRunner', async () => {
+    const { service } = await seedWatchAutomation()
+    const runner = (service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner(
+      'watch-pr'
+    )
+    expect(runner).toBeInstanceOf(WatchPrRunner)
+  })
+
+  it('spawnChildRun builds a running child carrying parent lineage + merged context', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    // Parent already resolved its run-prompt pane into context; the child must
+    // inherit it so the branch can template {{steps.rp.paneKey}}.
+    parent.context = {
+      automation: { workspaceId: null, projectId: 'p1' },
+      steps: { rp: { paneKey: 'tab-A:pane-1' } }
+    }
+    store.replaceAutomationRun(parent)
+
+    // Advance the clock so the child's scheduledFor differs from the parent's —
+    // otherwise createAutomationRun's (automationId, scheduledFor) dedup gate
+    // would hand back the parent row. In production a cycle always fires a poll
+    // interval later, so the timestamps never collide.
+    vi.advanceTimersByTime(1000)
+    const cycleOutput = { prNumber: 7, commentsSummary: 'fix the bug', cycleIndex: 1 }
+    const childId = service.spawnChildRun({
+      parentRunId: parent.id,
+      parentStepId: 'watch',
+      cycleIndex: 1,
+      cycleOutput
+    })
+    expect(typeof childId).toBe('string')
+    expect(childId).not.toBe(parent.id)
+
+    const child = store.listAutomationRuns().find((r) => r.id === childId)!
+    expect(child).toBeDefined()
+    expect(child.parentRunId).toBe(parent.id)
+    expect(child.parentStepId).toBe('watch')
+    expect(child.cycleIndex).toBe(1)
+    expect(child.status).toBe('running')
+    expect(child.stepStates).toEqual([])
+    const childCtx = child.context as {
+      steps: { rp?: { paneKey: string }; watch?: Record<string, unknown> }
+    }
+    // Parent's other context preserved …
+    expect(childCtx.steps.rp?.paneKey).toBe('tab-A:pane-1')
+    // … and this cycle's payload overlaid under the watch step id.
+    expect(childCtx.steps.watch).toEqual(cycleOutput)
+    // Deep clone — mutating the child context must not touch the parent.
+    childCtx.steps.rp!.paneKey = 'mutated'
+    const reloadedParent = store.getAutomationRun(parent.id)!
+    expect(
+      (reloadedParent.context as { steps: { rp: { paneKey: string } } }).steps.rp.paneKey
+    ).toBe('tab-A:pane-1')
+  })
+
+  it('spawnChildRun throws when the parent run is missing', async () => {
+    const { service } = await seedWatchAutomation()
+    expect(() =>
+      service.spawnChildRun({
+        parentRunId: 'nope',
+        parentStepId: 'watch',
+        cycleIndex: 1,
+        cycleOutput: {}
+      })
+    ).toThrow(/parent run nope not found/)
+  })
+
+  it('getChildRunStatus maps active/completed/failed/missing', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const get = (id: string): string =>
+      (
+        service as unknown as {
+          getChildRunStatus(id: string): string
+        }
+      ).getChildRunStatus(id)
+
+    expect(get('does-not-exist')).toBe('missing')
+
+    const mk = (status: AutomationRun['status']): string => {
+      vi.advanceTimersByTime(1000) // distinct scheduledFor so the dedup gate doesn't reuse a row
+      const r = store.createAutomationRun(stored, Date.now(), 'manual')
+      r.status = status
+      store.replaceAutomationRun(r)
+      return r.id
+    }
+    expect(get(mk('running'))).toBe('active')
+    expect(get(mk('waiting'))).toBe('active')
+    expect(get(mk('completed'))).toBe('completed')
+    expect(get(mk('failed'))).toBe('failed')
+    expect(get(mk('cancelled'))).toBe('failed')
+  })
+
+  it('cancelChildRunsForStep cancels only active children of the matching step', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parentRunId = 'parent-1'
+    const makeChild = (
+      overrides: Partial<AutomationRun> & { status: AutomationRun['status'] }
+    ): string => {
+      vi.advanceTimersByTime(1000)
+      const r = store.createAutomationRun(stored, Date.now(), 'manual')
+      r.parentRunId = parentRunId
+      r.parentStepId = 'watch'
+      Object.assign(r, overrides)
+      store.replaceAutomationRun(r)
+      return r.id
+    }
+    const activeMatch = makeChild({ status: 'running' })
+    const waitingMatch = makeChild({ status: 'waiting' })
+    const completedMatch = makeChild({ status: 'completed' }) // terminal — untouched
+    const otherStep = makeChild({ status: 'running', parentStepId: 'other' }) // wrong step
+    const otherParent = makeChild({ status: 'running', parentRunId: 'parent-2' }) // wrong parent
+
+    ;(
+      service as unknown as {
+        cancelChildRunsForStep(p: string, s: string): void
+      }
+    ).cancelChildRunsForStep(parentRunId, 'watch')
+
+    const statusOf = (id: string): string => store.getAutomationRun(id)!.status
+    expect(statusOf(activeMatch)).toBe('cancelled')
+    expect(statusOf(waitingMatch)).toBe('cancelled')
+    expect(statusOf(completedMatch)).toBe('completed')
+    expect(statusOf(otherStep)).toBe('running')
+    expect(statusOf(otherParent)).toBe('running')
+  })
+
+  it('resolveChildRunAutomation returns branchSteps as the child automation steps', async () => {
+    const branch = [runPromptStep('rp')]
+    const { store, service, automationId } = await seedWatchAutomation(branch)
+    const parentAutomation = store.listAutomations().find((a) => a.id === automationId)!
+    const child = { parentStepId: 'watch' } as AutomationRun
+    const resolved = (
+      service as unknown as {
+        resolveChildRunAutomation(c: AutomationRun, a: typeof parentAutomation): unknown
+      }
+    ).resolveChildRunAutomation(child, parentAutomation) as { steps: StepOrGroup[] } | undefined
+    expect(resolved).toBeDefined()
+    expect(resolved!.steps).toEqual(branch)
+  })
+
+  it('resolveChildRunAutomation returns undefined when the parent step is not watch-pr', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const parentAutomation = store.listAutomations().find((a) => a.id === automationId)!
+    // Replace the watch step with a non-watch step under the same id.
+    parentAutomation.steps = [runPromptStep('watch')]
+    const child = { parentStepId: 'watch' } as AutomationRun
+    const resolved = (
+      service as unknown as {
+        resolveChildRunAutomation(c: AutomationRun, a: typeof parentAutomation): unknown
+      }
+    ).resolveChildRunAutomation(child, parentAutomation)
+    expect(resolved).toBeUndefined()
+  })
+
+  it('toAgentLiveStatus maps registry state onto the watch-pr idle gate', async () => {
+    const { service } = await seedWatchAutomation()
+    const map = (
+      service as unknown as {
+        toAgentLiveStatus(entry: { state: string } | undefined): string
+      }
+    ).toAgentLiveStatus.bind(service)
+    expect(map({ state: 'working' })).toBe('working')
+    expect(map({ state: 'blocked' })).toBe('working')
+    expect(map({ state: 'waiting' })).toBe('idle')
+    expect(map({ state: 'done' })).toBe('done')
+    expect(map(undefined)).toBe('unknown')
   })
 })

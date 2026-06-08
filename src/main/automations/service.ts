@@ -16,7 +16,8 @@ import type {
   Step,
   StepOrGroup,
   StepRunState,
-  TriggerSourceId
+  TriggerSourceId,
+  WatchPrConfig
 } from '../../shared/automations-types'
 import type { TuiAgent } from '../../shared/types'
 import type { CandidateEvent } from './trigger-sources/types'
@@ -40,8 +41,15 @@ import {
 import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
 import { CollectCiResultsRunner } from './runners/collect-ci-results-runner'
 import { HttpRequestRunner } from './runners/http-request-runner'
+import { WatchPrRunner, type AgentLiveStatus } from './runners/watch-pr-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
-import { getPRChecks, getPRComments, getPRForBranch } from '../github/client'
+import {
+  getPRChecks,
+  getPRComments,
+  getPRForBranch,
+  getPRState,
+  getPRReviews
+} from '../github/client'
 import { gitExecFileAsync } from '../github/gh-utils'
 import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
@@ -185,6 +193,7 @@ export class AutomationService {
   private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
   private readonly collectCiResultsRunner: CollectCiResultsRunner
   private readonly httpRequestRunner: HttpRequestRunner
+  private readonly watchPrRunner: WatchPrRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -415,19 +424,8 @@ export class AutomationService {
     })
 
     this.collectCiResultsRunner = new CollectCiResultsRunner({
-      getWorktreeMeta: (worktreeId) => {
-        const meta = this.store.getWorktreeMeta(worktreeId)
-        if (!meta) {
-          return undefined
-        }
-        const parsed = splitWorktreeId(worktreeId)
-        const repo = parsed ? this.store.getRepo(parsed.repoId) : null
-        return {
-          linkedPR: meta.linkedPR,
-          path: parsed?.worktreePath ?? worktreeId,
-          repoPath: repo?.path ?? ''
-        }
-      },
+      // Shared with watchPrRunner — see worktreeMetaForRunner/resolveLinkedPRForRunner.
+      getWorktreeMeta: (worktreeId) => this.worktreeMetaForRunner(worktreeId),
       getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
       hasChangesFromMain: async (worktreeId, path, connectionId) => {
         const result = await hasPromptTargetChangesFromMain([{ worktreeId, path, connectionId }])
@@ -437,26 +435,8 @@ export class AutomationService {
       getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
       getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
       getConnectionId: (repoId) => this.store.getRepo(repoId)?.connectionId ?? null,
-      resolveLinkedPR: async (worktreePath, repoPath) => {
-        try {
-          const { stdout } = await gitExecFileAsync(['branch', '--show-current'], {
-            cwd: worktreePath
-          })
-          const branch = stdout.trim()
-          if (!branch) {
-            return null
-          }
-          const ghCache = this.store.getGitHubCache()
-          const cached = ghCache.pr[`${repoPath}::${branch}`]
-          if (cached?.data?.number != null) {
-            return cached.data.number
-          }
-          const pr = await getPRForBranch(repoPath, branch)
-          return pr?.number ?? null
-        } catch {
-          return null
-        }
-      },
+      resolveLinkedPR: (worktreePath, repoPath) =>
+        this.resolveLinkedPRForRunner(worktreePath, repoPath),
       now: () => Date.now()
     })
 
@@ -464,6 +444,33 @@ export class AutomationService {
       // Why: resolve the referenced connection (sealed base URL + headers) from
       // settings at run time; execute defaults to the real guarded executor.
       getConnection: (id) => this.store.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+
+    this.watchPrRunner = new WatchPrRunner({
+      // Same worktree→PR resolution collect-ci uses (shared methods).
+      getWorktreeMeta: (worktreeId) => this.worktreeMetaForRunner(worktreeId),
+      getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
+      resolveLinkedPR: (worktreePath, repoPath) =>
+        this.resolveLinkedPRForRunner(worktreePath, repoPath),
+      // True when the worktree is pruned (gone) OR its workspace group is archived
+      // — either is a forced teardown signal for the watch loop.
+      isWorktreeArchived: (worktreeId) => {
+        if (!this.store.getWorktreeMeta(worktreeId)) {
+          return true
+        }
+        return this.store
+          .getWorkspaceGroups()
+          .some((g) => g.isArchived && g.memberWorktreeIds.includes(worktreeId))
+      },
+      getPRState: (repoPath, prNumber, opts) => getPRState(repoPath, prNumber, opts),
+      getPRReviews: (repoPath, prNumber) => getPRReviews(repoPath, prNumber),
+      getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
+      getAgentLiveStatus: (paneKey) => this.toAgentLiveStatus(this.getAgentStatus(paneKey)),
+      spawnChildRun: (args) => this.spawnChildRun(args),
+      getChildRunStatus: (childRunId) => this.getChildRunStatus(childRunId),
+      cancelChildRunsForStep: (parentRunId, parentStepId) =>
+        this.cancelChildRunsForStep(parentRunId, parentStepId),
+      now: () => Date.now()
     })
 
     this.chainExecutor = new ChainExecutor({
@@ -487,6 +494,73 @@ export class AutomationService {
       return
     }
     webContents.send('automations:changed')
+  }
+
+  /** Resolve a worktreeId to the {linkedPR, path, repoPath} shape both
+   *  collect-ci and watch-pr runners consume. Returns undefined when the
+   *  worktree is gone (pruned) so the runner can surface a clear error. */
+  private worktreeMetaForRunner(
+    worktreeId: string
+  ): { linkedPR: number | null; path: string; repoPath: string } | undefined {
+    const meta = this.store.getWorktreeMeta(worktreeId)
+    if (!meta) {
+      return undefined
+    }
+    const parsed = splitWorktreeId(worktreeId)
+    const repo = parsed ? this.store.getRepo(parsed.repoId) : null
+    return {
+      linkedPR: meta.linkedPR,
+      path: parsed?.worktreePath ?? worktreeId,
+      repoPath: repo?.path ?? ''
+    }
+  }
+
+  /** Resolve the PR number linked to a worktree's current branch — cache-first,
+   *  falling back to a live `gh pr` lookup. Shared by collect-ci and watch-pr. */
+  private async resolveLinkedPRForRunner(
+    worktreePath: string,
+    repoPath: string
+  ): Promise<number | null> {
+    try {
+      const { stdout } = await gitExecFileAsync(['branch', '--show-current'], {
+        cwd: worktreePath
+      })
+      const branch = stdout.trim()
+      if (!branch) {
+        return null
+      }
+      const ghCache = this.store.getGitHubCache()
+      const cached = ghCache.pr[`${repoPath}::${branch}`]
+      if (cached?.data?.number != null) {
+        return cached.data.number
+      }
+      const pr = await getPRForBranch(repoPath, branch)
+      return pr?.number ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** Map the main-process agent-status registry's richer state onto the
+   *  watch-pr runner's idle gate. `blocked` (mid-turn/stuck) is treated as
+   *  working — don't send a new prompt yet; `waiting` (paused for input) is
+   *  idle — safe to respond. */
+  private toAgentLiveStatus(entry: AgentStatusEntry | undefined): AgentLiveStatus {
+    if (!entry) {
+      return 'unknown'
+    }
+    switch (entry.state) {
+      case 'working':
+        return 'working'
+      case 'blocked':
+        return 'working'
+      case 'waiting':
+        return 'idle'
+      case 'done':
+        return 'done'
+      default:
+        return 'unknown'
+    }
   }
 
   setWebContents(webContents: WebContents | null): void {
@@ -742,6 +816,9 @@ export class AutomationService {
     if (kind === 'http-request') {
       return this.httpRequestRunner
     }
+    if (kind === 'watch-pr') {
+      return this.watchPrRunner
+    }
     return undefined
   }
 
@@ -813,9 +890,19 @@ export class AutomationService {
       if (!automation) {
         continue
       }
+      // Child (branch) runs execute the watch step's branchSteps, not the
+      // parent automation's steps — resolve a transient automation for them.
+      const tickAutomation = run.parentRunId
+        ? this.resolveChildRunAutomation(run, automation)
+        : automation
+      if (!tickAutomation) {
+        // Parent step missing / no longer watch-pr → orphaned child run; leave
+        // it for the cancel paths to clean up rather than tick against nothing.
+        continue
+      }
       this.inFlightRunIds.add(run.id)
       try {
-        await this.chainExecutor.tick(automation, run)
+        await this.chainExecutor.tick(tickAutomation, run)
       } catch (e) {
         // Why: an unhandled runner error must not poison the tick loop for
         // every other run. Mark this run failed and persist so the operator
@@ -823,6 +910,89 @@ export class AutomationService {
         this.finalizeFailedRun(run, e)
       } finally {
         this.inFlightRunIds.delete(run.id)
+      }
+    }
+  }
+
+  /** The transient automation a child (branch) run executes against: same
+   *  trigger as the parent automation, steps = the watch step's branchSteps. */
+  private resolveChildRunAutomation(
+    child: AutomationRun,
+    parentAutomation: Automation
+  ): Automation | undefined {
+    const step = flattenSteps(parentAutomation.steps ?? []).find((s) => s.id === child.parentStepId)
+    if (!step || step.kind !== 'watch-pr') {
+      return undefined
+    }
+    const branchSteps = (step.config as WatchPrConfig).branchSteps ?? []
+    return { ...parentAutomation, steps: branchSteps }
+  }
+
+  /** Spawn a watch-pr response cycle as a child run. Clones the parent's
+   *  context and overlays this cycle's payload under the watch step id so the
+   *  branch resolves {{steps.<run-prompt>.paneKey}} and
+   *  {{steps.<watch-id>.commentsSummary}}. Persists as `running` and wakes the
+   *  tick loop so it's picked up promptly. */
+  spawnChildRun(args: {
+    parentRunId: string
+    parentStepId: string
+    cycleIndex: number
+    cycleOutput: Record<string, unknown>
+  }): string {
+    const parent = this.store.listAutomationRuns().find((r) => r.id === args.parentRunId)
+    if (!parent) {
+      throw new Error(`spawnChildRun: parent run ${args.parentRunId} not found`)
+    }
+    const automation = this.store.listAutomations().find((a) => a.id === parent.automationId)
+    if (!automation) {
+      throw new Error(`spawnChildRun: automation ${parent.automationId} not found`)
+    }
+    const child = this.store.createAutomationRun(automation, Date.now(), 'manual')
+    child.parentRunId = parent.id
+    child.parentStepId = args.parentStepId
+    child.cycleIndex = args.cycleIndex
+    child.status = 'running'
+    child.stepStates = []
+    // Child context = clone of parent context + this cycle's payload under the
+    // watch step id, so the branch resolves {{steps.<run-prompt>.paneKey}} and
+    // {{steps.<watch-id>.commentsSummary}}. Parent context is JSON-ish
+    // (strings/numbers/objects), so structuredClone is safe here.
+    const ctx = structuredClone(parent.context ?? {})
+    const steps = (ctx.steps as Record<string, unknown> | undefined) ?? {}
+    steps[args.parentStepId] = args.cycleOutput
+    ctx.steps = steps
+    child.context = ctx
+    this.store.replaceAutomationRun(child)
+    this.broadcastAutomationsChanged()
+    this.wakeChains() // let the tick loop pick it up promptly
+    return child.id
+  }
+
+  /** Classify a child run's status for the watch-pr runner's responding phase.
+   *  `missing` covers a child cancelled/pruned out from under the parent. */
+  getChildRunStatus(childRunId: string): 'active' | 'completed' | 'failed' | 'missing' {
+    const r = this.store.listAutomationRuns().find((x) => x.id === childRunId)
+    if (!r) {
+      return 'missing'
+    }
+    if (isActiveChainRunStatus(r.status)) {
+      return 'active'
+    }
+    return r.status === 'completed' ? 'completed' : 'failed'
+  }
+
+  /** Cancel every active child run for a (parentRunId, parentStepId) pair.
+   *  Called by the runner on terminal/teardown paths (and by Task 12's
+   *  cancel/retry edits). v1 forbids nested watch-pr in branchSteps, so the
+   *  cancelRun recursion is bounded. */
+  private cancelChildRunsForStep(parentRunId: string, parentStepId: string): void {
+    for (const r of this.store.listAutomationRuns()) {
+      if (
+        r.parentRunId === parentRunId &&
+        r.parentStepId === parentStepId &&
+        isActiveChainRunStatus(r.status)
+      ) {
+        this.cancelRun(r.id)
       }
     }
   }
@@ -1100,7 +1270,9 @@ export class AutomationService {
       this.createWorktreeRunner,
       this.createWorkspaceGroupRunner,
       this.updateLinearIssueRunner,
-      this.collectCiResultsRunner
+      this.collectCiResultsRunner,
+      this.httpRequestRunner,
+      this.watchPrRunner
     ]
   }
 
