@@ -796,6 +796,146 @@ function ChainStepRow({ step, index }: { step: Step; index: number }): React.JSX
   )
 }
 
+/** Renders a run's per-step breakdown (the expand-below-row view). Extracted so
+ *  both top-level run rows and nested watch-pr cycle rows reuse the exact same
+ *  step-state rendering, parallel grouping, and per-step retry wiring. Returns
+ *  null when the run has no recorded steps (legacy single-row runs). */
+function RunStepStates({
+  run,
+  automationSteps,
+  onRetryRunFromStep,
+  onRetryParallelStep
+}: {
+  run: AutomationRun
+  automationSteps: StepOrGroup[]
+  onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
+  onRetryParallelStep: (run: AutomationRun, stepId: string) => void
+}): React.JSX.Element | null {
+  const hasStepStates = Boolean(run.stepStates && run.stepStates.length > 0)
+  if (!hasStepStates) {
+    return null
+  }
+  // Why: chain runs (`stepStates` present) get a per-step breakdown appended
+  // below the existing summary row. Parallel groups are rendered side-by-side so
+  // the operator can see concurrent progress at a glance.
+  const groupedStates = groupRunStates(run.stepStates!, automationSteps)
+  return (
+    <div className="flex flex-col gap-0 border-t border-border/50 bg-background/60 py-1">
+      {groupedStates.map((item) => {
+        if (Array.isArray(item)) {
+          // Why: "Retry all" truncates from the first sibling's flat index using
+          // the existing retryRunFromStep semantics, which drops every sibling +
+          // downstream and re-runs the whole group. Allowed only when at least
+          // one sibling is terminal/waiting (mirrors the per-step canRetry gate)
+          // — re-running an in-flight group would race the live tick.
+          const groupFirstFlatIdx = run.stepStates!.indexOf(item[0])
+          const canRetryGroup = item.some((s) => s.status !== 'running' && s.status !== 'pending')
+          return (
+            <div key={item.map((s) => s.stepId).join('+')} className="px-3 py-2">
+              <div className="mb-1 flex items-center justify-between">
+                <div className="text-[11px] font-medium uppercase text-muted-foreground">
+                  Parallel
+                </div>
+                {canRetryGroup ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Retry all parallel steps"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRetryRunFromStep(run, groupFirstFlatIdx)
+                        }}
+                      >
+                        <RotateCcw className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" sideOffset={6}>
+                      Retry all parallel steps
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                {item.map((state) => (
+                  <div key={state.stepId} className="min-w-0 flex-1">
+                    <StepRunRow
+                      step={state}
+                      onRetry={() => onRetryParallelStep(run, state.stepId)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        }
+        const flatIdx = run.stepStates!.indexOf(item)
+        return (
+          <StepRunRow
+            key={item.stepId}
+            step={item}
+            onRetry={() => onRetryRunFromStep(run, flatIdx)}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+/** Compact nested row for a watch-pr branch-cycle child run ("Review round N").
+ *  Reuses the status label/variant helpers and the shared RunStepStates view so
+ *  each cycle stays independently inspectable, but drops the top-level row's
+ *  trigger badge / lineage labels / action controls — a cycle is driven by its
+ *  parent watcher, not directly operated. Click toggles its step states. */
+function ReviewCycleRow({
+  cycle,
+  automationSteps,
+  expanded,
+  onToggle,
+  onRetryRunFromStep,
+  onRetryParallelStep
+}: {
+  cycle: AutomationRun
+  automationSteps: StepOrGroup[]
+  expanded: boolean
+  onToggle: () => void
+  onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
+  onRetryParallelStep: (run: AutomationRun, stepId: string) => void
+}): React.JSX.Element {
+  const hasStepStates = Boolean(cycle.stepStates && cycle.stepStates.length > 0)
+  return (
+    <div>
+      <button
+        type="button"
+        // Left border + padding marks this as a child of the watcher row above,
+        // using documented border/muted tokens (no new color values).
+        className="flex w-full items-center gap-3 border-l-2 border-border/50 py-2 pl-6 pr-3 text-left text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        onClick={onToggle}
+        aria-expanded={hasStepStates ? expanded : undefined}
+      >
+        <span className="min-w-0 flex-1 truncate font-medium text-muted-foreground">
+          Review round {cycle.cycleIndex ?? '?'}
+        </span>
+        <Badge variant={getAutomationRunStatusVariant(cycle.status)}>
+          {getAutomationRunStatusLabel(cycle.status)}
+        </Badge>
+      </button>
+      {expanded ? (
+        <div className="border-l-2 border-border/50 pl-4">
+          <RunStepStates
+            run={cycle}
+            automationSteps={automationSteps}
+            onRetryRunFromStep={onRetryRunFromStep}
+            onRetryParallelStep={onRetryParallelStep}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function StepRunRow({
   step,
   onRetry
@@ -939,6 +1079,13 @@ export function AutomationDetail({
   onRestartRun,
   repos
 }: AutomationDetailProps): React.JSX.Element {
+  // Per-cycle collapse set: cycle rows default to EXPANDED (step states visible
+  // like top-level rows); clicking a cycle adds its id here to collapse it.
+  // A set of collapsed (not expanded) ids keeps the default-open behavior
+  // without seeding state from the runs list. Hook must precede the early
+  // return below to satisfy the rules of hooks.
+  const [collapsedCycles, setCollapsedCycles] = useState<Set<string>>(() => new Set())
+
   if (!automation) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -957,6 +1104,51 @@ export function AutomationDetail({
       ? 'Project picked at Run'
       : projectName
     : `${projectName} / ${workspaceName}`
+
+  // Partition runs: watch-pr branch-cycle CHILD runs (`parentRunId` set) are
+  // pulled out of the top level and nested under their watcher row. Detached
+  // watcher runs (`detachedFromRunId` set, no parentRunId) stay top-level —
+  // they're the watcher itself, not a cycle.
+  const topLevelRuns = runs.filter((r) => r.parentRunId == null)
+  const cyclesByParent = new Map<string, AutomationRun[]>()
+  for (const r of runs) {
+    if (r.parentRunId != null) {
+      const list = cyclesByParent.get(r.parentRunId) ?? []
+      list.push(r)
+      cyclesByParent.set(r.parentRunId, list)
+    }
+  }
+  for (const list of cyclesByParent.values()) {
+    list.sort((a, b) => (a.cycleIndex ?? 0) - (b.cycleIndex ?? 0))
+  }
+  const reviewRoundCount = runs.length - topLevelRuns.length
+  // Count header reflects top-level runs; review rounds are nested children, so
+  // surface them as a secondary "· N review rounds" suffix rather than inflating
+  // the primary run count with rows the operator no longer sees as siblings.
+  const runCountLabel =
+    reviewRoundCount > 0
+      ? `${topLevelRuns.length} runs · ${reviewRoundCount} review ${reviewRoundCount === 1 ? 'round' : 'rounds'}`
+      : `${topLevelRuns.length} runs`
+
+  const runHistory = (
+    <div className="rounded-md border border-border/50 bg-muted/20 shadow-sm">
+      <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+        <div className="text-sm font-medium">Run history</div>
+        <div className="text-xs text-muted-foreground">{runCountLabel}</div>
+      </div>
+      <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
+        <div>Run</div>
+        <div>Status</div>
+        <div />
+      </div>
+      <div className="divide-y divide-border/50">
+        {topLevelRuns.map((run) => renderTopLevelRun(run))}
+        {topLevelRuns.length === 0 ? (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">No runs yet.</div>
+        ) : null}
+      </div>
+    </div>
+  )
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -1114,288 +1306,242 @@ export function AutomationDetail({
         </>
       )}
 
-      <div className="rounded-md border border-border/50 bg-muted/20 shadow-sm">
-        <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-          <div className="text-sm font-medium">Run history</div>
-          <div className="text-xs text-muted-foreground">{runs.length} runs</div>
-        </div>
-        <div className="grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] gap-3 border-b border-border/50 px-3 py-1.5 text-[11px] font-medium uppercase text-muted-foreground">
-          <div>Run</div>
-          <div>Status</div>
-          <div />
-        </div>
-        <div className="divide-y divide-border/50">
-          {runs.map((run) => {
-            const runWorktree = run.workspaceId ? (worktreeMap.get(run.workspaceId) ?? null) : null
-            const linearIssue = extractLinearIssue(run.context)
-            // Why: in-flight statuses are the only ones a Stop button can act
-            // on. Terminal rows show an empty action slot so the grid stays
-            // aligned without an enabled-but-pointless button.
-            const isInFlight =
-              run.status === 'running' ||
-              run.status === 'waiting' ||
-              run.status === 'pending' ||
-              run.status === 'dispatching'
-            // Why: Pause/Resume is scoped to detached watcher runs only — the
-            // sole UI surface for the general `paused` flag (design Part 3,
-            // YAGNI: no pausing arbitrary mid-chain runs). A paused run still
-            // counts as in-flight, so we surface Resume there too.
-            const isPausableWatcher =
-              run.detachedFromRunId != null &&
-              onPauseRun !== undefined &&
-              onResumeRun !== undefined &&
-              (isInFlight || run.paused === true)
-            const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
-            const restartChildren = findRestartChildren(run.id, runs)
-            const showRestart = isRestartable(run.status) && onRestartRun !== undefined
-            const showContinue = canContinueRun(run, automation.steps ?? [])
-            const rowClassName =
-              'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
-            const rowContent = (
-              <>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span>{formatAutomationDateTime(run.scheduledFor)}</span>
-                    {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
-                    <span className="text-xs text-muted-foreground">{triggerBadge}</span>
-                  </div>
-                  {run.restartedFromRunId ? (
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      Restarted from #{shortId(run.restartedFromRunId)}
-                    </div>
-                  ) : null}
-                  {restartChildren.length > 0 ? (
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      Restarted as {restartChildren.map((c) => `#${shortId(c.id)}`).join(', ')}
-                    </div>
-                  ) : null}
-                  {run.error ? (
-                    <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
-                  ) : null}
-                </div>
-                <div className="flex items-center justify-start gap-1.5">
-                  <Badge variant={getAutomationRunStatusVariant(run.status)}>
-                    {getAutomationRunStatusLabel(run.status)}
-                  </Badge>
-                  {run.paused ? (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      Paused
-                    </Badge>
-                  ) : null}
-                </div>
-                <div className="flex items-center justify-end gap-1">
-                  {showContinue ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Continue run"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            // Resume the chain from the next un-run step,
-                            // keeping the already-succeeded steps intact.
-                            onRetryRunFromStep(run, run.stepStates!.length)
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <Play className="size-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" sideOffset={6}>
-                        Continue from next step
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                  {showRestart ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Restart run"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onRestartRun?.(run)
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <RotateCcw className="size-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" sideOffset={6}>
-                        Restart run
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                  {isPausableWatcher ? (
-                    run.paused ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Resume run"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onResumeRun?.(run)
-                            }}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <Play className="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" sideOffset={6}>
-                          Resume run
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Pause run"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onPauseRun?.(run)
-                            }}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <Pause className="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" sideOffset={6}>
-                          Pause run
-                        </TooltipContent>
-                      </Tooltip>
-                    )
-                  ) : null}
-                  {isInFlight ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Stop run"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onCancelRun(run)
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <Square className="size-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" sideOffset={6}>
-                        Stop run
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                </div>
-              </>
-            )
-            const hasStepStates = Boolean(run.stepStates && run.stepStates.length > 0)
-            // Why: chain runs (`stepStates` present) get a per-step breakdown
-            // appended below the existing summary row; legacy runs keep their
-            // single-row rendering untouched. Parallel groups are rendered
-            // side-by-side so the operator can see concurrent progress at a glance.
-            const groupedStates = hasStepStates
-              ? groupRunStates(run.stepStates!, automation.steps ?? [])
-              : []
-            const stepList = hasStepStates ? (
-              <div className="flex flex-col gap-0 border-t border-border/50 bg-background/60 py-1">
-                {groupedStates.map((item) => {
-                  if (Array.isArray(item)) {
-                    // Why: "Retry all" truncates from the first sibling's flat
-                    // index using the existing retryRunFromStep semantics,
-                    // which drops every sibling + downstream and re-runs the
-                    // whole group. Allowed only when at least one sibling is
-                    // terminal/waiting (mirrors the per-step canRetry gate) —
-                    // re-running an in-flight group would race the live tick.
-                    const groupFirstFlatIdx = run.stepStates!.indexOf(item[0])
-                    const canRetryGroup = item.some(
-                      (s) => s.status !== 'running' && s.status !== 'pending'
-                    )
-                    return (
-                      <div key={item.map((s) => s.stepId).join('+')} className="px-3 py-2">
-                        <div className="mb-1 flex items-center justify-between">
-                          <div className="text-[11px] font-medium uppercase text-muted-foreground">
-                            Parallel
-                          </div>
-                          {canRetryGroup ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  aria-label="Retry all parallel steps"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    onRetryRunFromStep(run, groupFirstFlatIdx)
-                                  }}
-                                >
-                                  <RotateCcw className="size-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="left" sideOffset={6}>
-                                Retry all parallel steps
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : null}
-                        </div>
-                        <div className="flex gap-2">
-                          {item.map((state) => (
-                            <div key={state.stepId} className="min-w-0 flex-1">
-                              <StepRunRow
-                                step={state}
-                                onRetry={() => onRetryParallelStep(run, state.stepId)}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  }
-                  const flatIdx = run.stepStates!.indexOf(item)
-                  return (
-                    <StepRunRow
-                      key={item.stepId}
-                      step={item}
-                      onRetry={() => onRetryRunFromStep(run, flatIdx)}
-                    />
-                  )
-                })}
-              </div>
-            ) : null
-            return (
-              <div key={run.id}>
-                {runWorktree ? (
-                  <button
-                    type="button"
-                    className={`${rowClassName} w-full cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50`}
-                    onClick={() => onOpenRunWorkspace(run)}
-                  >
-                    {rowContent}
-                  </button>
-                ) : (
-                  <div className={rowClassName}>{rowContent}</div>
-                )}
-                {stepList}
-              </div>
-            )
-          })}
-          {runs.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-muted-foreground">No runs yet.</div>
-          ) : null}
-        </div>
-      </div>
+      {runHistory}
     </div>
   )
+
+  function renderTopLevelRun(run: AutomationRun): React.JSX.Element {
+    const runWorktree = run.workspaceId ? (worktreeMap.get(run.workspaceId) ?? null) : null
+    const linearIssue = extractLinearIssue(run.context)
+    // Why: in-flight statuses are the only ones a Stop button can act
+    // on. Terminal rows show an empty action slot so the grid stays
+    // aligned without an enabled-but-pointless button.
+    const isInFlight =
+      run.status === 'running' ||
+      run.status === 'waiting' ||
+      run.status === 'pending' ||
+      run.status === 'dispatching'
+    // Why: Pause/Resume is scoped to detached watcher runs only — the
+    // sole UI surface for the general `paused` flag (design Part 3,
+    // YAGNI: no pausing arbitrary mid-chain runs). A paused run still
+    // counts as in-flight, so we surface Resume there too.
+    const isPausableWatcher =
+      run.detachedFromRunId != null &&
+      onPauseRun !== undefined &&
+      onResumeRun !== undefined &&
+      (isInFlight || run.paused === true)
+    const triggerBadge = describeRunTrigger(run, automation!, repos ?? [])
+    const restartChildren = findRestartChildren(run.id, runs)
+    const showRestart = isRestartable(run.status) && onRestartRun !== undefined
+    const showContinue = canContinueRun(run, automation!.steps ?? [])
+    const rowClassName =
+      'grid grid-cols-[minmax(10rem,1fr)_minmax(6rem,auto)_auto] items-center gap-3 px-3 py-2 text-left text-sm outline-none transition-colors'
+    const rowContent = (
+      <>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>{formatAutomationDateTime(run.scheduledFor)}</span>
+            {linearIssue ? <LinearIssuePill issue={linearIssue} /> : null}
+            <span className="text-xs text-muted-foreground">{triggerBadge}</span>
+          </div>
+          {run.restartedFromRunId ? (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Restarted from #{shortId(run.restartedFromRunId)}
+            </div>
+          ) : null}
+          {restartChildren.length > 0 ? (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Restarted as {restartChildren.map((c) => `#${shortId(c.id)}`).join(', ')}
+            </div>
+          ) : null}
+          {run.error ? (
+            <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-start gap-1.5">
+          <Badge variant={getAutomationRunStatusVariant(run.status)}>
+            {getAutomationRunStatusLabel(run.status)}
+          </Badge>
+          {run.paused ? (
+            <Badge variant="outline" className="text-muted-foreground">
+              Paused
+            </Badge>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-end gap-1">
+          {showContinue ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Continue run"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    // Resume the chain from the next un-run step,
+                    // keeping the already-succeeded steps intact.
+                    onRetryRunFromStep(run, run.stepStates!.length)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Play className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" sideOffset={6}>
+                Continue from next step
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          {showRestart ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Restart run"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRestartRun?.(run)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <RotateCcw className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" sideOffset={6}>
+                Restart run
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          {isPausableWatcher ? (
+            run.paused ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Resume run"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onResumeRun?.(run)
+                    }}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Play className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={6}>
+                  Resume run
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Pause run"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onPauseRun?.(run)
+                    }}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Pause className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={6}>
+                  Pause run
+                </TooltipContent>
+              </Tooltip>
+            )
+          ) : null}
+          {isInFlight ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Stop run"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onCancelRun(run)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Square className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" sideOffset={6}>
+                Stop run
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
+      </>
+    )
+    // Nested watch-pr review-round cycles for this run (1-based, asc).
+    const cycles = cyclesByParent.get(run.id) ?? []
+    // A cycle's stepStates come from the watch step's `branchSteps`, not the
+    // automation's top-level steps — resolve them (all cycles share the watch
+    // step via parentStepId) so a parallel group inside a review round renders
+    // grouped, not flattened.
+    const watchStepId = cycles[0]?.parentStepId
+    const watchStep = watchStepId
+      ? (automation?.steps ?? [])
+          .flatMap((s) => (Array.isArray(s) ? s : [s]))
+          .find((s) => s.id === watchStepId)
+      : undefined
+    const cycleSteps =
+      watchStep?.kind === 'watch-pr' ? ((watchStep.config as WatchPrConfig).branchSteps ?? []) : []
+    return (
+      <div key={run.id}>
+        {runWorktree ? (
+          <button
+            type="button"
+            className={`${rowClassName} w-full cursor-pointer hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50`}
+            onClick={() => onOpenRunWorkspace(run)}
+          >
+            {rowContent}
+          </button>
+        ) : (
+          <div className={rowClassName}>{rowContent}</div>
+        )}
+        {/* Top-level rows reuse the shared step-state view; for legacy
+            (no stepStates) runs RunStepStates renders nothing. */}
+        <RunStepStates
+          run={run}
+          automationSteps={automation!.steps ?? []}
+          onRetryRunFromStep={onRetryRunFromStep}
+          onRetryParallelStep={onRetryParallelStep}
+        />
+        {cycles.map((cycle) => (
+          <ReviewCycleRow
+            key={cycle.id}
+            cycle={cycle}
+            automationSteps={cycleSteps}
+            expanded={!collapsedCycles.has(cycle.id)}
+            onToggle={() =>
+              setCollapsedCycles((prev) => {
+                const next = new Set(prev)
+                if (next.has(cycle.id)) {
+                  next.delete(cycle.id)
+                } else {
+                  next.add(cycle.id)
+                }
+                return next
+              })
+            }
+            onRetryRunFromStep={onRetryRunFromStep}
+            onRetryParallelStep={onRetryParallelStep}
+          />
+        ))}
+      </div>
+    )
+  }
 }

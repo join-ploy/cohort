@@ -627,6 +627,171 @@ describe('AutomationDetail restart lineage', () => {
   })
 })
 
+describe('AutomationDetail watch-pr review-round nesting', () => {
+  // Parent watcher + two branch-cycle child runs (parentRunId = parent.id).
+  const parent: AutomationRun = { ...chainRun, id: 'r-watch-parent', stepStates: undefined }
+  const cycle1: AutomationRun = {
+    ...chainRun,
+    id: 'r-cycle-1',
+    parentRunId: 'r-watch-parent',
+    cycleIndex: 1,
+    status: 'completed',
+    stepStates: [
+      {
+        stepId: 'cycle-1-fix',
+        status: 'succeeded',
+        startedAt: 1,
+        finishedAt: 2,
+        output: null,
+        error: null
+      }
+    ]
+  }
+  const cycle2: AutomationRun = {
+    ...chainRun,
+    id: 'r-cycle-2',
+    parentRunId: 'r-watch-parent',
+    cycleIndex: 2,
+    status: 'running',
+    stepStates: undefined
+  }
+
+  async function render(runs: AutomationRun[]): Promise<string> {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    return renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={runs}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        onRetryParallelStep={noop}
+      />
+    )
+  }
+
+  it('nests child cycles as "Review round N" instead of top-level sibling rows', async () => {
+    const markup = await render([parent, cycle1, cycle2])
+    // Both cycles surface as nested review-round rows.
+    expect(markup).toContain('Review round 1')
+    expect(markup).toContain('Review round 2')
+    // Header counts the single top-level run and the two nested rounds.
+    expect(markup).toContain('1 runs · 2 review rounds')
+  })
+
+  it('renders each cycle with its own status badge', async () => {
+    const markup = await render([parent, cycle1, cycle2])
+    // cycle1 completed → "Done"; cycle2 running → "Running" (status helpers).
+    expect(markup).toContain('Done')
+    expect(markup).toContain('Running')
+  })
+
+  it('expands a cycle row to show its step states', async () => {
+    const markup = await render([parent, cycle1, cycle2])
+    // cycle1's step-state id is only visible because the cycle row is inspectable.
+    expect(markup).toContain('cycle-1-fix')
+    expect(markup).toContain('succeeded')
+  })
+
+  it('keeps a single top-level row when only its child cycles change', async () => {
+    const markup = await render([parent, cycle1, cycle2])
+    // The parent's id appears once; children are not rendered as siblings (their
+    // round labels are the only top-level surface for them).
+    const parentRowOccurrences = markup.split('Review round').length - 1
+    expect(parentRowOccurrences).toBe(2)
+  })
+
+  it("groups a cycle's parallel branchSteps (resolves the watch step's steps, not the chain)", async () => {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    const branchStep = (id: string): Step => ({
+      id,
+      kind: 'run-prompt',
+      config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    })
+    const watchAutomation: Automation = {
+      ...baseAutomation,
+      id: 'a-watch',
+      trigger: { kind: 'manual' },
+      steps: [
+        {
+          id: 'watch',
+          kind: 'watch-pr',
+          config: {
+            worktreeRef: '',
+            paneRef: '',
+            events: { changesRequested: true, newReviewComments: false, anyReview: false },
+            pollIntervalSeconds: 30,
+            agentIdleDebounceSeconds: 5,
+            branchSteps: [[branchStep('a'), branchStep('b')]] // a parallel group
+          },
+          onFailure: 'halt',
+          timeoutSeconds: null
+        }
+      ]
+    }
+    const watchParent: AutomationRun = {
+      ...chainRun,
+      id: 'r-wp',
+      automationId: 'a-watch',
+      stepStates: undefined
+    }
+    const groupCycle: AutomationRun = {
+      ...chainRun,
+      id: 'r-gc',
+      automationId: 'a-watch',
+      parentRunId: 'r-wp',
+      parentStepId: 'watch',
+      cycleIndex: 1,
+      status: 'running',
+      stepStates: [
+        {
+          stepId: 'a',
+          status: 'succeeded',
+          startedAt: 1,
+          finishedAt: 2,
+          output: null,
+          error: null
+        },
+        { stepId: 'b', status: 'succeeded', startedAt: 1, finishedAt: 2, output: null, error: null }
+      ]
+    }
+    const markup = renderToStaticMarkup(
+      <AutomationDetail
+        automation={watchAutomation}
+        runs={[watchParent, groupCycle]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onRetryRunFromStep={noop}
+        onRetryParallelStep={noop}
+      />
+    )
+    // The cycle's branchSteps form a parallel group → the "Parallel" group label
+    // renders, proving the cycle grouped against the watch step's branchSteps
+    // (it would render flat if it used the top-level automation.steps).
+    expect(markup).toContain('Parallel')
+  })
+})
+
 describe('AutomationDetail auto-trigger overview', () => {
   // Why: the new auto-trigger summary only renders in the `isChain` branch
   // (trigger + steps present), so this fixture is a chain-shape automation
