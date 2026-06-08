@@ -69,7 +69,9 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
       maskAutomation(store.updateAutomation(args.id, sealUpdates(args.id, args.updates)))
   )
   ipcMain.handle('automations:delete', (_event, args: { id: string }): void => {
-    store.deleteAutomation(args.id)
+    // Via the service so active runs (incl. detached watchers + branch cycles)
+    // are cancelled — releasing panes/trackers — before the store hard-deletes.
+    service.deleteAutomation(args.id)
   })
   ipcMain.handle(
     'automations:runNow',
@@ -79,6 +81,14 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
   ipcMain.handle(
     'automations:cancelRun',
     (_event, args: { runId: string }): AutomationRun | null => service.cancelRun(args.runId) ?? null
+  )
+  ipcMain.handle(
+    'automations:pauseRun',
+    (_event, args: { runId: string }): AutomationRun | null => service.pauseRun(args.runId) ?? null
+  )
+  ipcMain.handle(
+    'automations:resumeRun',
+    (_event, args: { runId: string }): AutomationRun | null => service.resumeRun(args.runId) ?? null
   )
   ipcMain.handle(
     'automations:retryRunFromStep',

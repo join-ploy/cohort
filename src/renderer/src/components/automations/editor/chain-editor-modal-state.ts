@@ -14,7 +14,8 @@ import type {
   StepOrGroup,
   TriggerConfig,
   UpdateLinearIssueConfig,
-  WaitForSetupConfig
+  WaitForSetupConfig,
+  WatchPrConfig
 } from '../../../../../shared/automations-types'
 import type { Repo } from '../../../../../shared/types'
 import {
@@ -34,6 +35,7 @@ import {
   httpFieldsToSchema,
   LINEAR_TICKET_TRIGGER_OVERLAY,
   MANUAL_TRIGGER_SCHEMA,
+  WATCH_PR_CYCLE_SCHEMA,
   type NestedSchema,
   type OutputSchema
 } from '../../../../../shared/automation-step-schemas'
@@ -52,7 +54,8 @@ export const STEP_KIND_LABELS: Record<StepKind, string> = {
   'run-command': 'Run command',
   'update-linear-issue': 'Update Linear issue',
   'collect-ci-results': 'Collect CI results',
-  'http-request': 'HTTP request'
+  'http-request': 'HTTP request',
+  'watch-pr': 'Watch PR / review loop'
 }
 
 // Why: `create-workspace-group` slots in next to `create-worktree` so the picker
@@ -66,6 +69,7 @@ export const STEP_KIND_ORDER: StepKind[] = [
   'run-prompt',
   'http-request',
   'collect-ci-results',
+  'watch-pr',
   'update-linear-issue'
 ]
 
@@ -195,6 +199,43 @@ export function getAvailableVariablesAtStep(
   }
 }
 
+/**
+ * Builds the AvailableVariables snapshot for a step at `branchFlatIndex` INSIDE
+ * a watch-pr node's `branchSteps`. The branch sees:
+ *  - every parent-chain variable visible at the watch node (`parentAvailable`),
+ *  - the watch node's own per-cycle payload under `steps.<watchStepId>.*` mapped
+ *    to WATCH_PR_CYCLE_SCHEMA (the review feedback) — NOT the final output, which
+ *    is what the same id resolves to in the parent chain, and
+ *  - any earlier branch step's outputs, so a later branch step can reference one.
+ *
+ * Pure (no React) so the branch scope is unit-testable independently of the card.
+ */
+export function getBranchAvailableVariablesAtStep(
+  parentAvailable: AvailableVariables,
+  watchStepId: string,
+  branchSteps: StepOrGroup[],
+  branchFlatIndex: number
+): AvailableVariables {
+  const steps: Record<string, OutputSchema> = {
+    ...parentAvailable.steps,
+    [watchStepId]: WATCH_PR_CYCLE_SCHEMA
+  }
+  const stepKinds: Record<string, StepKind> = {
+    ...parentAvailable.stepKinds,
+    [watchStepId]: 'watch-pr'
+  }
+  const { topIndex } = findStepPosition(branchSteps, branchFlatIndex)
+  for (let i = 0; i < topIndex && i < branchSteps.length; i++) {
+    const item = branchSteps[i]
+    const members = Array.isArray(item) ? item : [item]
+    for (const s of members) {
+      steps[s.id] = getOutputSchemaForStep(s)
+      stepKinds[s.id] = s.kind
+    }
+  }
+  return { ...parentAvailable, steps, stepKinds }
+}
+
 // Per-member leaf shape, mirroring buildGroupTemplateContext in
 // src/main/workspace-group-runtime.ts. The runner emits strings for all keys
 // — `description` is always present (empty string when the repo has no
@@ -280,6 +321,62 @@ export function computeAllErrors(
         all.push({ ...err, stepId: step.id, field })
       }
     })
+    if (step.kind === 'watch-pr') {
+      const watchConfig = step.config as WatchPrConfig
+      // Both refs are required for the loop to work: an empty worktreeRef leaves
+      // nothing to watch, and an empty paneRef makes the idle gate read 'unknown'
+      // so a response cycle never fires. Gate save on them.
+      if (!watchConfig.worktreeRef?.trim()) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' needs a worktree or group to watch.`,
+          stepId: step.id,
+          field: 'worktreeRef'
+        })
+      }
+      if (!watchConfig.paneRef?.trim()) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: `Step '${step.id}' needs a supervised pane (e.g. {{steps.<run-prompt>.paneKey}}).`,
+          stepId: step.id,
+          field: 'paneRef'
+        })
+      }
+      // Belt-and-suspenders for the no-nested-watch-pr invariant the runtime
+      // relies on: the branch palette/paste already block it, but a
+      // hand-edited or imported automation could still nest one, so surface an
+      // error before save. Recurse through parallel groups in branchSteps too.
+      const branchSteps = watchConfig.branchSteps ?? []
+      if (flattenSteps(branchSteps).some((s) => s.kind === 'watch-pr')) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: 'A Watch PR branch cannot contain another Watch PR node.',
+          stepId: step.id,
+          field: 'branchSteps'
+        })
+      }
+      // Branch step templates resolve against the branch scope (parent vars +
+      // steps.<watch-id>.* mapped to the per-cycle payload + earlier branch
+      // steps), so a bad ref must gate Save just like a top-level step's does.
+      const branchFlat = flattenSteps(branchSteps)
+      for (let b = 0; b < branchFlat.length; b++) {
+        const branchStep = branchFlat[b]
+        const branchAvailable = getBranchAvailableVariablesAtStep(
+          available,
+          step.id,
+          branchSteps,
+          b
+        )
+        walkStepConfigStrings(branchStep.config, branchStep.kind, (field, value) => {
+          for (const err of dryRunTemplate(value, branchAvailable)) {
+            all.push({ ...err, stepId: branchStep.id, field })
+          }
+        })
+      }
+    }
     if (step.kind === 'http-request') {
       const config = step.config as HttpRequestStepConfig
       // Why: the step's downstream variables come only from a saved Test mapping, so
@@ -567,6 +664,22 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         request: { method: 'GET', url: '', headers: [], query: [] },
         itemsPath: null,
         fields: []
+      }
+      return cfg
+    }
+    case 'watch-pr': {
+      const cfg: WatchPrConfig = {
+        worktreeRef: '',
+        paneRef: '',
+        // Default to formal "Changes requested" only — the crispest review
+        // signal, per the design doc.
+        events: { changesRequested: true, newReviewComments: false, anyReview: false },
+        pollIntervalSeconds: 30,
+        agentIdleDebounceSeconds: 5,
+        failedCycleHaltsLoop: false,
+        endOnApprove: false,
+        detached: false,
+        branchSteps: []
       }
       return cfg
     }

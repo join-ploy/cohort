@@ -1,30 +1,7 @@
 import * as React from 'react'
-import { Plus, Play, X, GripVertical, ArrowUpFromLine, ClipboardPaste } from 'lucide-react'
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import { toast } from 'sonner'
+import { Play, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger
-} from '@/components/ui/context-menu'
 
 // Why: the editor renders as a fullscreen overlay covering the native macOS
 // traffic lights. Reserve the same 80px pad used by .titlebar-left so the
@@ -38,24 +15,11 @@ import type {
   AutoTrigger,
   HttpConnection,
   RunNowPayload,
-  Step,
-  StepConfig,
-  StepKind,
   StepOrGroup,
   TriggerConfig
 } from '../../../../../shared/automations-types'
 import type { Repo, SidebarPromptCommand } from '../../../../../shared/types'
-import {
-  type ChainDraft,
-  flattenSteps,
-  generateDefaultStepId,
-  groupStepAt,
-  moveStepIntoGroup,
-  renameStepWithRewrites,
-  reorderSteps,
-  ungroupStep
-} from '../../../lib/chain-editor-state'
-import { parseStepFromClipboard } from '../../../lib/chain-editor-clipboard'
+import { type ChainDraft, flattenSteps } from '../../../lib/chain-editor-state'
 import {
   chainHasStep,
   computeAllErrors,
@@ -66,18 +30,15 @@ import {
   LEGACY_AUTOMATION_FIELDS,
   pickDefaultWorktreeRef,
   seedDraft,
-  STEP_KIND_LABELS,
   STEP_KIND_ORDER,
   type ChainEditorError
 } from './chain-editor-modal-state'
 import { AvailableVariablesPanel } from './AvailableVariablesPanel'
-import { ChainEditorStepCardRouter } from './ChainEditorStepCardRouter'
+import { ChainStepList } from './ChainStepList'
 import { RunNowConfirmModal } from './RunNowConfirmModal'
 import { automationNeedsRunNowPayload } from './run-now-payload-gate'
 import { TriggerPill } from './TriggerPill'
 import { TriggersModal } from './TriggersModal'
-
-const STEP_CARD_WIDTH_CLASS = 'w-[min(calc(100vw-5rem),40rem)]'
 
 export type ChainEditorModalProps = {
   open: boolean
@@ -106,7 +67,6 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
   const [draft, setDraft] = React.useState<ChainDraft>(() => seedDraft(props.automation))
   const [dirty, setDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
-  const [addOpen, setAddOpen] = React.useState(false)
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false)
   const [triggersModalOpen, setTriggersModalOpen] = React.useState(false)
 
@@ -125,184 +85,12 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     setDirty(true)
   }, [])
 
-  const updateStep = React.useCallback((stepId: string, patch: Partial<Step>) => {
-    setDraft((current) => {
-      const nextSteps = current.steps.map((item) => {
-        if (Array.isArray(item)) {
-          return item.map((s) => (s.id === stepId ? { ...s, ...patch } : s))
-        }
-        return item.id === stepId ? { ...item, ...patch } : item
-      })
-      return { ...current, steps: nextSteps }
-    })
-    setDirty(true)
-  }, [])
-
-  const updateStepConfig = React.useCallback(
-    (stepId: string, config: StepConfig) => {
-      updateStep(stepId, { config })
-    },
-    [updateStep]
-  )
-
-  const renameStep = React.useCallback((oldId: string, newId: string) => {
-    setDraft((current) => {
-      try {
-        const nextSteps = renameStepWithRewrites(current.steps, oldId, newId)
-        return { ...current, steps: nextSteps }
-      } catch {
-        // Why: StepCardChrome only commits when isValidStepId passes, so the
-        // only path here is a collision with another step id. Drop the rename
-        // silently — the chrome will snap back to the previous id.
-        return current
-      }
-    })
-    setDirty(true)
-  }, [])
-
-  const deleteStep = React.useCallback((stepId: string) => {
-    setDraft((current) => {
-      const nextSteps: StepOrGroup[] = []
-      for (const item of current.steps) {
-        if (Array.isArray(item)) {
-          const remaining = item.filter((s) => s.id !== stepId)
-          if (remaining.length === 0) {
-            continue
-          }
-          if (remaining.length === 1) {
-            nextSteps.push(remaining[0])
-          } else {
-            nextSteps.push(remaining)
-          }
-        } else if (item.id !== stepId) {
-          nextSteps.push(item)
-        }
-      }
-      return { ...current, steps: nextSteps }
-    })
-    setDirty(true)
-  }, [])
-
-  const moveStep = React.useCallback((fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) {
-      return
-    }
-    setDraft((current) => {
-      if (
-        fromIndex < 0 ||
-        fromIndex >= current.steps.length ||
-        toIndex < 0 ||
-        toIndex >= current.steps.length
-      ) {
-        return current
-      }
-      return { ...current, steps: reorderSteps(current.steps, fromIndex, toIndex) }
-    })
-    // Why: dirty stays unconditional so any reorder enables the save button —
-    // even a same-shape move that the executor would treat as a no-op should
-    // require an explicit save so the persisted order matches what the user
-    // sees. Future-reference validation re-runs via computeAllErrors's useMemo
-    // and will surface any newly-invalid {{steps.x}} reference produced by the
-    // reorder, instead of silently accepting an unrunnable chain.
-    setDirty(true)
-  }, [])
-
-  const addStep = React.useCallback((kind: StepKind) => {
-    setDraft((current) => {
-      const config = defaultConfigForKind(kind)
-      // Why: if this new step has a worktreeRef slot AND there's a prior
-      // create-worktree / create-workspace-group step in the chain, prefill
-      // the ref with that step's output. Saves the user from retyping the
-      // same {{steps.<id>.worktreeId}} / {{steps.<id>.groupId}} template
-      // every time they add a run-prompt / wait-for-setup step.
-      if ('worktreeRef' in config && (config as { worktreeRef: string }).worktreeRef === '') {
-        const ref = pickDefaultWorktreeRef(current.steps)
-        if (ref) {
-          ;(config as { worktreeRef: string }).worktreeRef = ref
-        }
-      }
-      const newStep: Step = {
-        id: generateDefaultStepId(kind, current.steps),
-        kind,
-        config,
-        onFailure: 'halt',
-        timeoutSeconds: null
-      }
-      return { ...current, steps: [...current.steps, newStep] }
-    })
-    setDirty(true)
-    setAddOpen(false)
-  }, [])
-
-  const [parallelAddOpen, setParallelAddOpen] = React.useState<number | null>(null)
-
-  const addParallelStep = React.useCallback((topIndex: number, kind: StepKind) => {
-    setDraft((current) => {
-      const config = defaultConfigForKind(kind)
-      if ('worktreeRef' in config && (config as { worktreeRef: string }).worktreeRef === '') {
-        const ref = pickDefaultWorktreeRef(current.steps)
-        if (ref) {
-          ;(config as { worktreeRef: string }).worktreeRef = ref
-        }
-      }
-      const newStep: Step = {
-        id: generateDefaultStepId(kind, current.steps),
-        kind,
-        config,
-        onFailure: 'halt',
-        timeoutSeconds: null
-      }
-      return { ...current, steps: groupStepAt(current.steps, topIndex, newStep) }
-    })
-    setDirty(true)
-    setParallelAddOpen(null)
-  }, [])
-
-  // Why: paste reads the OS clipboard (via Electron IPC — navigator.clipboard is
-  // flaky in overlays), parses the tagged node envelope, and inserts the node
-  // verbatim. The node keeps its original id, so pasting into the same chain
-  // produces a duplicate-id error that blocks save — matching how every other
-  // invalid edit behaves. `place` decides where it lands (chain end vs. a
-  // parallel group).
-  const pasteStep = React.useCallback(
-    async (place: (steps: StepOrGroup[], step: Step) => StepOrGroup[]) => {
-      let text: string
-      try {
-        text = await window.api.ui.readClipboardText()
-      } catch {
-        toast.error('No automation node on the clipboard')
-        return
-      }
-      const step = parseStepFromClipboard(text)
-      if (!step) {
-        toast.error('No automation node on the clipboard')
-        return
-      }
-      setDraft((current) => ({ ...current, steps: place(current.steps, step) }))
-      setDirty(true)
-      toast.success('Node pasted')
-    },
-    []
-  )
-
-  // Why: extracts a step from a parallel group and inserts it right after
-  // the group's top-level position. If only one sibling remains,
-  // ungroupStep auto-unwraps the group to a solo step.
-  const extractFromGroup = React.useCallback((groupIndex: number, innerIndex: number) => {
-    setDraft((current) => {
-      const group = current.steps[groupIndex]
-      if (!Array.isArray(group)) {
-        return current
-      }
-      const step = group[innerIndex]
-      if (!step) {
-        return current
-      }
-      const afterUngroup = ungroupStep(current.steps, groupIndex, innerIndex)
-      const insertAt = groupIndex + 1
-      const nextSteps = [...afterUngroup.slice(0, insertAt), step, ...afterUngroup.slice(insertAt)]
-      return { ...current, steps: nextSteps }
-    })
+  // ChainStepList owns all step mutations as pure transforms; the modal just
+  // commits the new array and marks the draft dirty. dirty stays unconditional
+  // so even a same-shape reorder enables Save — the persisted order must match
+  // what the user sees, and computeAllErrors re-validates future references.
+  const setStepsAndDirty = React.useCallback((next: StepOrGroup[]) => {
+    setDraft((current) => ({ ...current, steps: next }))
     setDirty(true)
   }, [])
 
@@ -357,55 +145,9 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
     [draft, props.repos]
   )
 
-  // Why: 5px activation distance matches TabBar's PointerSensor so a click on
-  // the grip without movement still falls through to focus/native behaviour.
-  // KeyboardSensor is added here (TabBar omits it) because automation editing
-  // is keyboard-heavy — arrow keys on a focused grip reorder a step. Both
-  // sensors are passed even when the chain has zero steps so the hook order
-  // remains stable across renders.
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
-
-  const topLevelIds = React.useMemo(
-    () =>
-      draft.steps.map((item) =>
-        Array.isArray(item) ? `group-${item.map((s) => s.id).join('+')}` : item.id
-      ),
-    [draft.steps]
-  )
-
-  const handleDragEnd = React.useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event
-      if (!over || active.id === over.id) {
-        return
-      }
-      const overId = String(over.id)
-
-      if (overId.startsWith('parallel-drop-')) {
-        const targetTopIndex = Number(overId.slice('parallel-drop-'.length))
-        const fromIndex = topLevelIds.indexOf(String(active.id))
-        if (fromIndex === -1 || fromIndex === targetTopIndex) {
-          return
-        }
-        setDraft((current) => ({
-          ...current,
-          steps: moveStepIntoGroup(current.steps, fromIndex, targetTopIndex)
-        }))
-        setDirty(true)
-        return
-      }
-
-      const fromIndex = topLevelIds.indexOf(String(active.id))
-      const toIndex = topLevelIds.indexOf(overId)
-      if (fromIndex === -1 || toIndex === -1) {
-        return
-      }
-      moveStep(fromIndex, toIndex)
-    },
-    [topLevelIds, moveStep]
+  const getAvailableAtIndex = React.useCallback(
+    (flatIndex: number) => getAvailableVariablesAtStep(draft, flatIndex, props.repos),
+    [draft, props.repos]
   )
 
   const canSave = errors.length === 0 && dirty && !saving
@@ -482,132 +224,17 @@ function ChainEditorModalBody(props: ChainEditorModalProps): React.JSX.Element {
         }}
       >
         <div className="mx-auto flex w-full max-w-7xl flex-col">
-          {draft.steps.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-              No steps yet. Click &ldquo;Add step&rdquo; to start your chain.
-            </div>
-          ) : null}
-          {/* Why: DndContext wraps only the steps list so dnd-kit's pointer
-              listeners don't interfere with the header/footer controls. The
-              outer scroll container is the editor body div above, which
-              DndContext.autoScroll discovers automatically and scrolls while
-              the user drags near its edges. */}
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-            <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
-              {draft.steps.map((item, topIndex) => {
-                if (Array.isArray(item)) {
-                  const groupId = `group-${item.map((s) => s.id).join('+')}`
-                  return (
-                    <div key={groupId}>
-                      {topIndex > 0 && <StepConnector />}
-                      <ParallelGroupContainer groupId={groupId}>
-                        {item.map((step, innerIndex) => {
-                          const flatIndex = computeFlatIndex(draft.steps, topIndex, innerIndex)
-                          return (
-                            <div
-                              key={step.id}
-                              className={cn('relative shrink-0', STEP_CARD_WIDTH_CLASS)}
-                            >
-                              {item.length > 1 && (
-                                <button
-                                  type="button"
-                                  aria-label="Move out of parallel group"
-                                  onClick={() => extractFromGroup(topIndex, innerIndex)}
-                                  className="absolute -top-2 right-2 z-10 rounded-full border border-border bg-background p-0.5 text-muted-foreground shadow-xs hover:bg-accent hover:text-foreground"
-                                >
-                                  <ArrowUpFromLine className="size-3" />
-                                </button>
-                              )}
-                              <ChainEditorStepCardRouter
-                                step={step}
-                                index={flatIndex}
-                                disableDrag
-                                available={getAvailableVariablesAtStep(
-                                  draft,
-                                  flatIndex,
-                                  props.repos
-                                )}
-                                repos={props.repos}
-                                reviewCommands={props.reviewCommands}
-                                createPrCommands={props.createPrCommands}
-                                httpConnections={props.httpConnections}
-                                onIdChange={(newId) => renameStep(step.id, newId)}
-                                onConfigChange={(config) => updateStepConfig(step.id, config)}
-                                onOnFailureChange={(val) => updateStep(step.id, { onFailure: val })}
-                                onTimeoutChange={(val) =>
-                                  updateStep(step.id, { timeoutSeconds: val })
-                                }
-                                onDelete={() => deleteStep(step.id)}
-                              />
-                            </div>
-                          )
-                        })}
-                        <div className="absolute bottom-0 left-full top-0 ml-2 flex">
-                          <AddParallelButton
-                            open={parallelAddOpen === topIndex}
-                            kinds={availableStepKinds}
-                            droppableId={`parallel-drop-${topIndex}`}
-                            onToggle={() =>
-                              setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
-                            }
-                            onPick={(kind) => addParallelStep(topIndex, kind)}
-                            onPaste={() =>
-                              void pasteStep((steps, step) => groupStepAt(steps, topIndex, step))
-                            }
-                          />
-                        </div>
-                      </ParallelGroupContainer>
-                    </div>
-                  )
-                }
-                const flatIndex = computeFlatIndex(draft.steps, topIndex, 0)
-                return (
-                  <div key={item.id}>
-                    {topIndex > 0 && <StepConnector />}
-                    <div className="flex justify-center">
-                      <div className={cn('relative', STEP_CARD_WIDTH_CLASS)}>
-                        <ChainEditorStepCardRouter
-                          step={item}
-                          index={flatIndex}
-                          available={getAvailableVariablesAtStep(draft, flatIndex, props.repos)}
-                          repos={props.repos}
-                          reviewCommands={props.reviewCommands}
-                          createPrCommands={props.createPrCommands}
-                          httpConnections={props.httpConnections}
-                          onIdChange={(newId) => renameStep(item.id, newId)}
-                          onConfigChange={(config) => updateStepConfig(item.id, config)}
-                          onOnFailureChange={(val) => updateStep(item.id, { onFailure: val })}
-                          onTimeoutChange={(val) => updateStep(item.id, { timeoutSeconds: val })}
-                          onDelete={() => deleteStep(item.id)}
-                        />
-                        <div className="absolute bottom-0 left-full top-0 ml-2 flex">
-                          <AddParallelButton
-                            open={parallelAddOpen === topIndex}
-                            kinds={availableStepKinds}
-                            droppableId={`parallel-drop-${topIndex}`}
-                            onToggle={() =>
-                              setParallelAddOpen(parallelAddOpen === topIndex ? null : topIndex)
-                            }
-                            onPick={(kind) => addParallelStep(topIndex, kind)}
-                            onPaste={() =>
-                              void pasteStep((steps, step) => groupStepAt(steps, topIndex, step))
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </SortableContext>
-          </DndContext>
-
-          <AddStepControl
-            open={addOpen}
-            kinds={availableStepKinds}
-            onToggle={setAddOpen}
-            onPick={addStep}
-            onPaste={() => void pasteStep((steps, step) => [...steps, step])}
+          <ChainStepList
+            steps={draft.steps}
+            onStepsChange={setStepsAndDirty}
+            availableStepKinds={availableStepKinds}
+            getAvailableAtIndex={getAvailableAtIndex}
+            repos={props.repos}
+            reviewCommands={props.reviewCommands}
+            createPrCommands={props.createPrCommands}
+            httpConnections={props.httpConnections}
+            pickDefaultWorktreeRef={pickDefaultWorktreeRef}
+            getDefaultConfigForKind={defaultConfigForKind}
           />
 
           <AvailableVariablesPanel available={availableAtEnd} className="mt-2" />
@@ -738,190 +365,6 @@ function ChainEditorFooter(props: ChainEditorFooterProps): React.JSX.Element {
           {props.saving ? 'Saving…' : 'Save'}
         </Button>
       </div>
-    </div>
-  )
-}
-
-type AddStepControlProps = {
-  open: boolean
-  kinds: StepKind[]
-  onToggle: (next: boolean) => void
-  onPick: (kind: StepKind) => void
-  onPaste: () => void
-}
-
-/**
- * Returns the flat (linear) index of a step given its top-level position and
- * inner offset within a parallel group. Solo steps use innerIndex=0.
- */
-function computeFlatIndex(steps: StepOrGroup[], topIndex: number, innerIndex: number): number {
-  let count = 0
-  for (let i = 0; i < topIndex; i++) {
-    const item = steps[i]
-    count += Array.isArray(item) ? item.length : 1
-  }
-  return count + innerIndex
-}
-
-function StepConnector(): React.JSX.Element {
-  return (
-    <div className="-my-px flex justify-center">
-      <div className="h-6 w-px bg-border" />
-    </div>
-  )
-}
-
-/**
- * Sortable wrapper for a parallel group row. Owns the vertical drag handle
- * (GripVertical) for the whole group so individual member cards don't need
- * their own. The composite `groupId` matches the entry in the parent's
- * `SortableContext` items array.
- */
-function ParallelGroupContainer({
-  groupId,
-  children
-}: {
-  groupId: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: groupId })
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : undefined
-  }
-  return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="relative left-1/2 w-screen -translate-x-1/2 overflow-x-auto px-12 pb-2 pt-3">
-        <div className="mx-auto flex w-max items-stretch gap-2">
-          <div className="relative flex items-stretch gap-2">{children}</div>
-          <button
-            ref={setActivatorNodeRef}
-            type="button"
-            aria-label="Reorder group"
-            {...listeners}
-            className={cn(
-              'absolute bottom-0 left-2 top-0 z-10 flex items-center rounded bg-background/80 text-muted-foreground/50 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50',
-              isDragging ? 'cursor-grabbing' : 'cursor-grab'
-            )}
-          >
-            <GripVertical className="size-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type AddParallelButtonProps = {
-  open: boolean
-  kinds: StepKind[]
-  droppableId: string
-  onToggle: () => void
-  onPick: (kind: StepKind) => void
-  onPaste: () => void
-}
-
-function AddParallelButton(props: AddParallelButtonProps): React.JSX.Element {
-  const { setNodeRef, isOver } = useDroppable({ id: props.droppableId })
-  return (
-    <div
-      ref={setNodeRef}
-      className={cn('relative flex shrink-0 items-center', isOver && 'rounded-md ring-2 ring-ring')}
-    >
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Add parallel step"
-            aria-expanded={props.open}
-            onClick={props.onToggle}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-40">
-          <ContextMenuItem onSelect={props.onPaste}>
-            <ClipboardPaste className="size-3.5" />
-            Paste node
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {props.open ? (
-        <div
-          role="menu"
-          aria-label="Step kinds"
-          className="absolute left-full z-10 ml-1 flex flex-col rounded-md border border-border bg-background shadow-md"
-        >
-          {props.kinds.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              role="menuitem"
-              onClick={() => props.onPick(kind)}
-              className="whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-accent hover:text-foreground"
-            >
-              {STEP_KIND_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function AddStepControl(props: AddStepControlProps): React.JSX.Element {
-  return (
-    <div className="relative flex justify-center py-2">
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label="Add step"
-            aria-expanded={props.open}
-            onClick={() => props.onToggle(!props.open)}
-          >
-            <Plus className="size-3.5" />
-            Add step
-          </Button>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-40">
-          <ContextMenuItem onSelect={props.onPaste}>
-            <ClipboardPaste className="size-3.5" />
-            Paste node
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {props.open ? (
-        <div
-          role="menu"
-          aria-label="Step kinds"
-          className="absolute top-full z-10 mt-1 flex flex-col rounded-md border border-border bg-background shadow-md"
-        >
-          {props.kinds.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              role="menuitem"
-              onClick={() => props.onPick(kind)}
-              className="px-3 py-1.5 text-left text-xs hover:bg-accent hover:text-foreground"
-            >
-              {STEP_KIND_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }

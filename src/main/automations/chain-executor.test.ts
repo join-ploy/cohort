@@ -77,6 +77,33 @@ describe('ChainExecutor', () => {
     ])
   })
 
+  it('persists step output on a non-terminal (needs-more-time) tick', async () => {
+    // Long-lived runners (watch-pr) emit durable progress as `output` on every
+    // waiting tick and rehydrate from state.output after a restart. The executor
+    // must write that output even though the step has not finished.
+    const tick = vi.fn().mockResolvedValue({
+      outcome: 'needs-more-time',
+      status: 'waiting',
+      output: { phase: 'watching', cycleIndex: 2 }
+    })
+    const runner: StepRunner = { tick }
+    const persisted: AutomationRun[] = []
+    const executor = new ChainExecutor({
+      getRunner: () => runner,
+      persistRun: (r) => persisted.push(structuredClone(r)),
+      now: () => 0
+    })
+    const r = run('a1', { stepStates: [] })
+    await executor.tick(automation([sampleStep]), r)
+    expect(r.stepStates![0]).toMatchObject({
+      status: 'waiting',
+      finishedAt: null, // still in progress
+      output: { phase: 'watching', cycleIndex: 2 }
+    })
+    // And it was flushed to the store, so a restart can rehydrate from it.
+    expect(persisted.at(-1)!.stepStates![0].output).toEqual({ phase: 'watching', cycleIndex: 2 })
+  })
+
   it('advances to the next step when current step returns done', async () => {
     const tick = vi
       .fn()
@@ -217,6 +244,81 @@ describe('ChainExecutor', () => {
         context: { trigger: { kind: 'manual' } }
       })
     )
+  })
+
+  describe('endChain', () => {
+    it('finalizes the run completed without advancing downstream', async () => {
+      // The first step ends the chain cleanly; the second must never run.
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded', endChain: true })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 1000
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const r = run('a1')
+      await executor.tick(automation([s1, s2]), r)
+      expect(r.status).toBe('completed')
+      expect(r.finishedAt).toBe(1000)
+      // s2 never materialized.
+      expect(r.stepStates!.map((s) => s.stepId)).toEqual(['s1'])
+      expect(tick).toHaveBeenCalledTimes(1)
+    })
+
+    it('finalizes the run completed when a parallel sibling ends the chain', async () => {
+      // One sibling ends the chain; the group settles then finalizes completed
+      // and the downstream solo step never runs.
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded', endChain: true })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 1000
+      })
+      const s1: Step = { ...sampleStep, id: 's1' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.status).toBe('completed')
+      expect(r.finishedAt).toBe(1000)
+      // s3 (downstream) never materialized.
+      expect(r.stepStates!.map((s) => s.stepId)).toEqual(['s1', 's2'])
+    })
+
+    it('halt-failure takes precedence over a sibling that ends the chain', async () => {
+      // A halt-policy sibling failing must poison the run even when another
+      // sibling asks to end the chain cleanly — the run is 'failed', not
+      // 'completed', and the downstream step never runs.
+      const tick = vi
+        .fn()
+        .mockResolvedValueOnce({ outcome: 'failed', status: 'failed' })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded', endChain: true })
+        .mockResolvedValueOnce({ outcome: 'done', status: 'succeeded' })
+      const runner: StepRunner = { tick }
+      const executor = new ChainExecutor({
+        getRunner: () => runner,
+        persistRun: vi.fn(),
+        now: () => 1000
+      })
+      const s1: Step = { ...sampleStep, id: 's1', onFailure: 'halt' }
+      const s2: Step = { ...sampleStep, id: 's2' }
+      const s3: Step = { ...sampleStep, id: 's3' }
+      const r = run('a1')
+      await executor.tick(automation([[s1, s2], s3]), r)
+      expect(r.status).toBe('failed')
+      // s3 (downstream) never materialized.
+      expect(r.stepStates!.map((s) => s.stepId)).toEqual(['s1', 's2'])
+    })
   })
 
   describe('parallel groups', () => {

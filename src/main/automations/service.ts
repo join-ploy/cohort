@@ -16,7 +16,8 @@ import type {
   Step,
   StepOrGroup,
   StepRunState,
-  TriggerSourceId
+  TriggerSourceId,
+  WatchPrConfig
 } from '../../shared/automations-types'
 import type { TuiAgent } from '../../shared/types'
 import type { CandidateEvent } from './trigger-sources/types'
@@ -40,8 +41,15 @@ import {
 import { UpdateLinearIssueRunner } from './runners/update-linear-issue-runner'
 import { CollectCiResultsRunner } from './runners/collect-ci-results-runner'
 import { HttpRequestRunner } from './runners/http-request-runner'
+import { WatchPrRunner, type AgentLiveStatus } from './runners/watch-pr-runner'
 import { updateIssue as linearUpdateIssue } from '../linear/issues'
-import { getPRChecks, getPRComments, getPRForBranch } from '../github/client'
+import {
+  getPRChecks,
+  getPRComments,
+  getPRForBranch,
+  getPRState,
+  getPRReviews
+} from '../github/client'
 import { gitExecFileAsync } from '../github/gh-utils'
 import type { StepRunner } from './step-runner'
 import { splitWorktreeId } from '../../shared/worktree-id'
@@ -185,6 +193,7 @@ export class AutomationService {
   private readonly updateLinearIssueRunner: UpdateLinearIssueRunner
   private readonly collectCiResultsRunner: CollectCiResultsRunner
   private readonly httpRequestRunner: HttpRequestRunner
+  private readonly watchPrRunner: WatchPrRunner
   private readonly chainExecutor: ChainExecutor
 
   constructor(store: Store, opts: AutomationServiceOpts = {}) {
@@ -309,6 +318,10 @@ export class AutomationService {
       // the full pane history.
       getPtyIdForPaneKey: this.getPtyIdForPaneKey,
       subscribePtyData: this.subscribePtyData,
+      // Pane FIFO queue: serialize concurrent run-prompts that drive the same
+      // agent pane (e.g. a detached watcher and the main chain).
+      acquirePane: (paneKey, token) => this.acquirePane(paneKey, token),
+      releasePane: (paneKey, token) => this.releasePane(paneKey, token),
       now: () => Date.now()
     })
 
@@ -415,19 +428,8 @@ export class AutomationService {
     })
 
     this.collectCiResultsRunner = new CollectCiResultsRunner({
-      getWorktreeMeta: (worktreeId) => {
-        const meta = this.store.getWorktreeMeta(worktreeId)
-        if (!meta) {
-          return undefined
-        }
-        const parsed = splitWorktreeId(worktreeId)
-        const repo = parsed ? this.store.getRepo(parsed.repoId) : null
-        return {
-          linkedPR: meta.linkedPR,
-          path: parsed?.worktreePath ?? worktreeId,
-          repoPath: repo?.path ?? ''
-        }
-      },
+      // Shared with watchPrRunner — see worktreeMetaForRunner/resolveLinkedPRForRunner.
+      getWorktreeMeta: (worktreeId) => this.worktreeMetaForRunner(worktreeId),
       getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
       hasChangesFromMain: async (worktreeId, path, connectionId) => {
         const result = await hasPromptTargetChangesFromMain([{ worktreeId, path, connectionId }])
@@ -437,26 +439,8 @@ export class AutomationService {
       getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
       getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
       getConnectionId: (repoId) => this.store.getRepo(repoId)?.connectionId ?? null,
-      resolveLinkedPR: async (worktreePath, repoPath) => {
-        try {
-          const { stdout } = await gitExecFileAsync(['branch', '--show-current'], {
-            cwd: worktreePath
-          })
-          const branch = stdout.trim()
-          if (!branch) {
-            return null
-          }
-          const ghCache = this.store.getGitHubCache()
-          const cached = ghCache.pr[`${repoPath}::${branch}`]
-          if (cached?.data?.number != null) {
-            return cached.data.number
-          }
-          const pr = await getPRForBranch(repoPath, branch)
-          return pr?.number ?? null
-        } catch {
-          return null
-        }
-      },
+      resolveLinkedPR: (worktreePath, repoPath) =>
+        this.resolveLinkedPRForRunner(worktreePath, repoPath),
       now: () => Date.now()
     })
 
@@ -464,6 +448,47 @@ export class AutomationService {
       // Why: resolve the referenced connection (sealed base URL + headers) from
       // settings at run time; execute defaults to the real guarded executor.
       getConnection: (id) => this.store.getSettings().httpConnections?.find((c) => c.id === id)
+    })
+
+    this.watchPrRunner = new WatchPrRunner({
+      // Same worktree→PR resolution collect-ci uses (shared methods).
+      getWorktreeMeta: (worktreeId) => this.worktreeMetaForRunner(worktreeId),
+      getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
+      resolveLinkedPR: (worktreePath, repoPath) =>
+        this.resolveLinkedPRForRunner(worktreePath, repoPath),
+      // Group expand/no-diff-skip deps — reuse collect-ci's exact closures so
+      // both runners resolve groups and member diffs identically.
+      getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
+      hasChangesFromMain: async (worktreeId, path, connectionId) => {
+        const result = await hasPromptTargetChangesFromMain([{ worktreeId, path, connectionId }])
+        return result.hasChanges
+      },
+      getConnectionId: (repoId) => this.store.getRepo(repoId)?.connectionId ?? null,
+      // True when the worktree is pruned (gone), archived directly, OR its
+      // workspace group is archived — each is a forced teardown signal for the
+      // watch loop.
+      isWorktreeArchived: (worktreeId) => {
+        const meta = this.store.getWorktreeMeta(worktreeId)
+        if (!meta) {
+          return true // pruned/removed
+        }
+        if (meta.isArchived) {
+          return true // worktree archived directly
+        }
+        return this.store
+          .getWorkspaceGroups()
+          .some((g) => g.isArchived && g.memberWorktreeIds.includes(worktreeId))
+      },
+      getPRState: (repoPath, prNumber, opts) => getPRState(repoPath, prNumber, opts),
+      getPRReviews: (repoPath, prNumber) => getPRReviews(repoPath, prNumber),
+      getPRComments: (repoPath, prNumber) => getPRComments(repoPath, prNumber),
+      getAgentLiveStatus: (paneKey) => this.toAgentLiveStatus(this.getAgentStatus(paneKey)),
+      spawnChildRun: (args) => this.spawnChildRun(args),
+      spawnDetachedWatcher: (args) => this.spawnDetachedWatcher(args),
+      getChildRunStatus: (childRunId) => this.getChildRunStatus(childRunId),
+      cancelChildRunsForStep: (parentRunId, parentStepId) =>
+        this.cancelChildRunsForStep(parentRunId, parentStepId),
+      now: () => Date.now()
     })
 
     this.chainExecutor = new ChainExecutor({
@@ -487,6 +512,75 @@ export class AutomationService {
       return
     }
     webContents.send('automations:changed')
+  }
+
+  /** Resolve a worktreeId to the {linkedPR, path, repoPath} shape both
+   *  collect-ci and watch-pr runners consume. Returns undefined when the
+   *  worktree is gone (pruned) so the runner can surface a clear error. */
+  private worktreeMetaForRunner(
+    worktreeId: string
+  ): { linkedPR: number | null; path: string; repoPath: string } | undefined {
+    const meta = this.store.getWorktreeMeta(worktreeId)
+    if (!meta) {
+      return undefined
+    }
+    const parsed = splitWorktreeId(worktreeId)
+    const repo = parsed ? this.store.getRepo(parsed.repoId) : null
+    return {
+      linkedPR: meta.linkedPR,
+      path: parsed?.worktreePath ?? worktreeId,
+      repoPath: repo?.path ?? ''
+    }
+  }
+
+  /** Resolve the PR number linked to a worktree's current branch — cache-first,
+   *  falling back to a live `gh pr` lookup. Shared by collect-ci and watch-pr. */
+  private async resolveLinkedPRForRunner(
+    worktreePath: string,
+    repoPath: string
+  ): Promise<number | null> {
+    try {
+      const { stdout } = await gitExecFileAsync(['branch', '--show-current'], {
+        cwd: worktreePath
+      })
+      const branch = stdout.trim()
+      if (!branch) {
+        return null
+      }
+      const ghCache = this.store.getGitHubCache()
+      const cached = ghCache.pr[`${repoPath}::${branch}`]
+      if (cached?.data?.number != null) {
+        return cached.data.number
+      }
+      const pr = await getPRForBranch(repoPath, branch)
+      return pr?.number ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** Map the main-process agent-status registry's richer state onto the
+   *  watch-pr runner's send gate. Only `done` is safe to interrupt with a new
+   *  prompt; everything else maps to `working` (do not send). */
+  private toAgentLiveStatus(entry: AgentStatusEntry | undefined): AgentLiveStatus {
+    if (!entry) {
+      return 'unknown'
+    }
+    switch (entry.state) {
+      case 'done':
+        return 'done'
+      // Only 'done' is safe to interrupt with a new prompt. 'working' is mid-turn;
+      // 'blocked'/'waiting' mean the agent needs human input (matching how
+      // run-prompt-runner and the canonical agent-status mapper treat them) — the
+      // review loop must not barge in until the user resolves it and the agent
+      // settles to 'done'.
+      case 'working':
+      case 'blocked':
+      case 'waiting':
+        return 'working'
+      default:
+        return 'unknown'
+    }
   }
 
   setWebContents(webContents: WebContents | null): void {
@@ -742,6 +836,9 @@ export class AutomationService {
     if (kind === 'http-request') {
       return this.httpRequestRunner
     }
+    if (kind === 'watch-pr') {
+      return this.watchPrRunner
+    }
     return undefined
   }
 
@@ -780,7 +877,10 @@ export class AutomationService {
     }
     const hasActiveRun = this.store
       .listAutomationRuns()
-      .some((run) => isActiveChainRunStatus(run.status) && !this.inFlightRunIds.has(run.id))
+      .some(
+        (run) =>
+          isActiveChainRunStatus(run.status) && !this.inFlightRunIds.has(run.id) && !run.paused
+      )
     if (!hasActiveRun) {
       return
     }
@@ -809,13 +909,34 @@ export class AutomationService {
       if (this.inFlightRunIds.has(run.id)) {
         continue
       }
+      // Paused (operator-held) run: skip the tick so all durable state is
+      // preserved until resumeRun clears the flag.
+      if (run.paused) {
+        continue
+      }
       const automation = automations.get(run.automationId)
       if (!automation) {
         continue
       }
+      // Synthetic step source: a detached watch run ticks against the SINGLE
+      // watch step (carrying its loop); a child (branch) run ticks against that
+      // step's branchSteps. Both resolve a transient automation; a normal run
+      // ticks against the automation as-is. A run is child XOR detached (never
+      // both — each spawner sets only its own field), so the order is safe.
+      const tickAutomation = run.detachedFromRunId
+        ? this.resolveDetachedRunAutomation(run, automation)
+        : run.parentRunId
+          ? this.resolveChildRunAutomation(run, automation)
+          : automation
+      if (!tickAutomation) {
+        // Orphaned child/detached run: its watch step was removed or changed
+        // kind. Finalize as failed so it stops re-arming the fast-tick loop.
+        this.finalizeFailedRun(run, new Error('Parent watch-pr step no longer exists'))
+        continue
+      }
       this.inFlightRunIds.add(run.id)
       try {
-        await this.chainExecutor.tick(automation, run)
+        await this.chainExecutor.tick(tickAutomation, run)
       } catch (e) {
         // Why: an unhandled runner error must not poison the tick loop for
         // every other run. Mark this run failed and persist so the operator
@@ -827,12 +948,230 @@ export class AutomationService {
     }
   }
 
+  /** FIFO pane queue: paneKey → ordered waiter tokens (`${runId}:${stepId}`). The
+   *  head holds the pane. Ephemeral (in-memory) so a restart can't deadlock — steps
+   *  re-register on their next tick. */
+  private readonly paneQueue = new Map<string, string[]>()
+
+  /** Register `token` for `paneKey` (tail) if new; return true iff it is the head
+   *  (the holder). Synchronous — callers acquire before any await so only the head
+   *  ever drives the agent. */
+  acquirePane(paneKey: string, token: string): boolean {
+    let q = this.paneQueue.get(paneKey)
+    if (!q) {
+      q = []
+      this.paneQueue.set(paneKey, q)
+    }
+    if (!q.includes(token)) {
+      q.push(token)
+    }
+    return q[0] === token
+  }
+
+  /** Remove `token` from `paneKey`'s queue (idempotent). The next waiter becomes
+   *  the holder on its next tick. */
+  releasePane(paneKey: string, token: string): void {
+    const q = this.paneQueue.get(paneKey)
+    if (!q) {
+      return
+    }
+    const idx = q.indexOf(token)
+    if (idx !== -1) {
+      q.splice(idx, 1)
+    }
+    if (q.length === 0) {
+      this.paneQueue.delete(paneKey)
+    }
+  }
+
+  /** Release every pane claim held/queued by a run (any step) — called from the
+   *  cancel path so a dead holder never blocks the queue. */
+  private releasePanesForRun(runId: string): void {
+    for (const [paneKey, q] of this.paneQueue) {
+      const filtered = q.filter((t) => !t.startsWith(`${runId}:`))
+      if (filtered.length === 0) {
+        this.paneQueue.delete(paneKey)
+      } else if (filtered.length !== q.length) {
+        this.paneQueue.set(paneKey, filtered)
+      }
+    }
+  }
+
+  /** The transient automation a child (branch) run executes against: same
+   *  trigger as the parent automation, steps = the watch step's branchSteps. */
+  private resolveChildRunAutomation(
+    child: AutomationRun,
+    parentAutomation: Automation
+  ): Automation | undefined {
+    const step = flattenSteps(parentAutomation.steps ?? []).find((s) => s.id === child.parentStepId)
+    if (!step || step.kind !== 'watch-pr') {
+      return undefined
+    }
+    const branchSteps = (step.config as WatchPrConfig).branchSteps ?? []
+    return { ...parentAutomation, steps: branchSteps }
+  }
+
+  /** The transient automation a detached watch run executes against: the SINGLE
+   *  watch step itself (carrying its full loop), not its branchSteps. Returns
+   *  undefined when the spawner step was removed or changed kind (orphan). */
+  private resolveDetachedRunAutomation(
+    detached: AutomationRun,
+    spawnerAutomation: Automation
+  ): Automation | undefined {
+    const step = flattenSteps(spawnerAutomation.steps ?? []).find(
+      (s) => s.id === detached.parentStepId
+    )
+    if (!step || step.kind !== 'watch-pr') {
+      return undefined
+    }
+    return { ...spawnerAutomation, steps: [step] }
+  }
+
+  /** Spawn a watch-pr response cycle as a child run. Clones the parent's
+   *  context and overlays this cycle's payload under the watch step id so the
+   *  branch resolves {{steps.<run-prompt>.paneKey}} and
+   *  {{steps.<watch-id>.commentsSummary}}. Persists as `running` and wakes the
+   *  tick loop so it's picked up promptly. */
+  spawnChildRun(args: {
+    parentRunId: string
+    parentStepId: string
+    cycleIndex: number
+    cycleOutput: Record<string, unknown>
+  }): string {
+    const parent = this.store.listAutomationRuns().find((r) => r.id === args.parentRunId)
+    if (!parent) {
+      throw new Error(`spawnChildRun: parent run ${args.parentRunId} not found`)
+    }
+    const automation = this.store.listAutomations().find((a) => a.id === parent.automationId)
+    if (!automation) {
+      throw new Error(`spawnChildRun: automation ${parent.automationId} not found`)
+    }
+    const child = this.store.createAutomationRun(automation, Date.now(), 'manual')
+    if (child.id === parent.id) {
+      // createAutomationRun dedups on (automationId, scheduledFor); a same-ms spawn
+      // would alias the parent row. Refuse rather than corrupt the parent.
+      throw new Error(
+        `spawnChildRun: child run aliased parent ${parent.id} (scheduledFor collision)`
+      )
+    }
+    child.parentRunId = parent.id
+    child.parentStepId = args.parentStepId
+    child.cycleIndex = args.cycleIndex
+    child.status = 'running'
+    child.stepStates = []
+    // Child context = clone of parent context + this cycle's payload under the
+    // watch step id, so the branch resolves {{steps.<run-prompt>.paneKey}} and
+    // {{steps.<watch-id>.commentsSummary}}. Parent context is JSON-ish
+    // (strings/numbers/objects), so structuredClone is safe here.
+    const ctx = structuredClone(parent.context ?? {})
+    const steps = (ctx.steps as Record<string, unknown> | undefined) ?? {}
+    steps[args.parentStepId] = args.cycleOutput
+    ctx.steps = steps
+    child.context = ctx
+    this.store.replaceAutomationRun(child)
+    this.broadcastAutomationsChanged()
+    this.wakeChains() // let the tick loop pick it up promptly
+    return child.id
+  }
+
+  /** Spawn a background detached watch run carrying the watch step's loop. The
+   *  spawner's watch step returns done immediately so its chain continues; this
+   *  run carries `__watchDetached` in its context so when IT ticks the runner's
+   *  detached branch is skipped and the normal loop runs (no re-spawn). Unlike a
+   *  child run it has no parentRunId — it's not torn down when the spawner stops. */
+  spawnDetachedWatcher(args: {
+    fromRunId: string
+    stepId: string
+    context: Record<string, unknown>
+  }): string {
+    const parent = this.store.listAutomationRuns().find((r) => r.id === args.fromRunId)
+    if (!parent) {
+      throw new Error(`spawnDetachedWatcher: run ${args.fromRunId} not found`)
+    }
+    const automation = this.store.listAutomations().find((a) => a.id === parent.automationId)
+    if (!automation) {
+      throw new Error(`spawnDetachedWatcher: automation ${parent.automationId} not found`)
+    }
+    const run = this.store.createAutomationRun(automation, Date.now(), 'manual')
+    if (run.id === parent.id) {
+      // createAutomationRun dedups on (automationId, scheduledFor); a same-ms spawn
+      // would alias the spawner row. Refuse rather than corrupt the spawner.
+      throw new Error('spawnDetachedWatcher: detached run aliased spawner (scheduledFor collision)')
+    }
+    run.detachedFromRunId = parent.id
+    run.parentStepId = args.stepId // resolves the single watch step (see tick interception)
+    run.status = 'running'
+    run.stepStates = []
+    // Carry the spawner's context (deep clone) so the loop re-resolves identically,
+    // plus the flag so the runner skips its detached branch on this run.
+    const ctx = structuredClone(args.context)
+    ctx.__watchDetached = true
+    run.context = ctx
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    this.wakeChains()
+    return run.id
+  }
+
+  /** Classify a child run's status for the watch-pr runner's responding phase.
+   *  `missing` covers a child cancelled/pruned out from under the parent. */
+  getChildRunStatus(childRunId: string): 'active' | 'completed' | 'failed' | 'missing' {
+    const r = this.store.listAutomationRuns().find((x) => x.id === childRunId)
+    if (!r) {
+      return 'missing'
+    }
+    if (isActiveChainRunStatus(r.status)) {
+      return 'active'
+    }
+    return r.status === 'completed' ? 'completed' : 'failed'
+  }
+
+  /** Cancel every active child run for a (parentRunId, parentStepId) pair.
+   *  Called by the runner on terminal/teardown paths (and by Task 12's
+   *  cancel/retry edits). v1 forbids nested watch-pr in branchSteps, so the
+   *  cancelRun recursion is bounded. */
+  private cancelChildRunsForStep(parentRunId: string, parentStepId: string): void {
+    for (const r of this.store.listAutomationRuns()) {
+      if (
+        r.parentRunId === parentRunId &&
+        r.parentStepId === parentStepId &&
+        isActiveChainRunStatus(r.status)
+      ) {
+        this.cancelRun(r.id)
+      }
+    }
+  }
+
+  /** Cancel every non-terminal child (branch) run of a parent run, regardless of
+   *  step. Store-querying so it survives a restart that wiped runner trackers.
+   *  Used by cancelRun so a Stop/delete also stops the watch loop's in-flight cycle. */
+  private cancelChildRunsForRun(parentRunId: string): void {
+    for (const r of this.store.listAutomationRuns()) {
+      if (r.parentRunId === parentRunId && isActiveChainRunStatus(r.status)) {
+        this.cancelRun(r.id)
+      }
+    }
+  }
+
   /** Operator-initiated stop: mark the run cancelled, finalize any trailing
    *  non-terminal step states with a "Cancelled" error so the UI doesn't
    *  show a step indefinitely `running` under a stopped run, and drop every
    *  runner tracker for the run so a stray tick can't pick the pane back up.
    *  Returns the updated run or undefined when the id doesn't exist / the
    *  run is already in a terminal state. */
+  /** Delete an automation. Cancel its active runs FIRST so panes, runner
+   *  trackers, and any detached/branch runs (which share this automationId) are
+   *  torn down — the store's hard-delete bypasses that cleanup on its own. */
+  deleteAutomation(id: string): void {
+    for (const run of this.store.listAutomationRuns()) {
+      if (run.automationId === id && isActiveChainRunStatus(run.status)) {
+        this.cancelRun(run.id)
+      }
+    }
+    this.store.deleteAutomation(id)
+    this.broadcastAutomationsChanged()
+  }
+
   cancelRun(runId: string): AutomationRun | undefined {
     const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
@@ -868,7 +1207,38 @@ export class AutomationService {
     for (const runner of this.allRunners()) {
       runner.dropRun?.(run.id)
     }
+    // Stop any watch-pr loop owned by this run by cancelling its child runs.
+    // Store-querying (restart-safe) — the runner's in-memory dropRun can miss
+    // children after an app restart.
+    this.cancelChildRunsForRun(run.id)
+    // Free this run's pane claims so a dead holder never blocks the queue.
+    this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
+    return run
+  }
+
+  /** Pause an active run: tickRunningChains skips it (state preserved) until resumed. */
+  pauseRun(runId: string): AutomationRun | undefined {
+    const run = this.store.listAutomationRuns().find((r) => r.id === runId)
+    if (!run || !isActiveChainRunStatus(run.status)) {
+      return run
+    }
+    run.paused = true
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    return run
+  }
+
+  /** Resume a paused run; it ticks again on the next cadence. */
+  resumeRun(runId: string): AutomationRun | undefined {
+    const run = this.store.listAutomationRuns().find((r) => r.id === runId)
+    if (!run) {
+      return undefined
+    }
+    run.paused = false
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    this.wakeChains()
     return run
   }
 
@@ -902,6 +1272,9 @@ export class AutomationService {
       for (const runner of this.allRunners()) {
         runner.dropStep?.(run.id, state.stepId)
       }
+      // Restart-safe: cancel any watch-pr child runs owned by this dropped step
+      // so the old loop stops before the chain re-reaches the node.
+      this.cancelChildRunsForStep(run.id, state.stepId)
     }
     // Why: close any panes the prior steps opened. The runner-tracker path
     // above only fires when the runner still has an in-memory tracker, which
@@ -1026,10 +1399,15 @@ export class AutomationService {
     for (const runner of this.allRunners()) {
       runner.dropStep?.(run.id, targetState.stepId)
     }
+    // Restart-safe: cancel any watch-pr child runs owned by this dropped step
+    // so the old loop stops before the chain re-reaches the node.
+    this.cancelChildRunsForStep(run.id, targetState.stepId)
     for (const downstream of droppedStates) {
       for (const runner of this.allRunners()) {
         runner.dropStep?.(run.id, downstream.stepId)
       }
+      // Restart-safe: cancel any watch-pr child runs owned by this dropped step.
+      this.cancelChildRunsForStep(run.id, downstream.stepId)
     }
     // Why: persistent fallback — same rationale as retryRunFromStep. Includes
     // the target's pre-reset snapshot plus every downstream state so the
@@ -1100,7 +1478,9 @@ export class AutomationService {
       this.createWorktreeRunner,
       this.createWorkspaceGroupRunner,
       this.updateLinearIssueRunner,
-      this.collectCiResultsRunner
+      this.collectCiResultsRunner,
+      this.httpRequestRunner,
+      this.watchPrRunner
     ]
   }
 
@@ -1137,6 +1517,12 @@ export class AutomationService {
     run.error = errorMessage
     run.finishedAt = now
     this.store.replaceAutomationRun(run)
+    // Mirror the cancel path's teardown: a failed run (e.g. a watch/detached
+    // watcher that threw mid-cycle) must cancel its in-flight branch child so it
+    // isn't left orphaned, and release its pane claims so the FIFO queue can't
+    // deadlock behind a dead holder. Both are idempotent.
+    this.cancelChildRunsForRun(run.id)
+    this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
   }
 

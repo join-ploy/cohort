@@ -2507,6 +2507,10 @@ const api = {
       ipcRenderer.invoke('automations:runNow', args),
     cancelRun: (args: { runId: string }): Promise<AutomationRun | null> =>
       ipcRenderer.invoke('automations:cancelRun', args),
+    pauseRun: (args: { runId: string }): Promise<AutomationRun | null> =>
+      ipcRenderer.invoke('automations:pauseRun', args),
+    resumeRun: (args: { runId: string }): Promise<AutomationRun | null> =>
+      ipcRenderer.invoke('automations:resumeRun', args),
     retryRunFromStep: (args: { runId: string; stepIndex: number }): Promise<AutomationRun | null> =>
       ipcRenderer.invoke('automations:retryRunFromStep', args),
     retryParallelStep: (args: { runId: string; stepId: string }): Promise<AutomationRun | null> =>

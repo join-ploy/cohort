@@ -19,7 +19,8 @@ const ALL_KINDS: StepKind[] = [
   'run-prompt',
   'run-command',
   'update-linear-issue',
-  'collect-ci-results'
+  'collect-ci-results',
+  'watch-pr'
 ]
 
 // An AvailableVariables that exercises every namespace, the Linear trigger

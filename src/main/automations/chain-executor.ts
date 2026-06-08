@@ -198,11 +198,14 @@ export class ChainExecutor {
     if (result.openedPane !== undefined) {
       state.openedPane = result.openedPane
     }
+    // Persist output on EVERY tick, not just terminal ones, so a long-lived
+    // runner's durable progress (e.g. watch-pr's WatchProgress) survives a
+    // restart — the runner rehydrates from state.output on the next tick.
+    if (result.output !== undefined) {
+      state.output = result.output
+    }
     if (result.outcome === 'done' || result.outcome === 'failed') {
       state.finishedAt = this.deps.now()
-      if (result.output !== undefined) {
-        state.output = result.output
-      }
       if (result.error != null) {
         state.error = result.error
       }
@@ -215,6 +218,15 @@ export class ChainExecutor {
     if (result.outcome === 'failed' && step.onFailure === 'halt') {
       run.status = 'failed'
       run.finishedAt = this.deps.now()
+      this.deps.persistRun(run)
+      return false
+    }
+
+    // Clean early exit: a runner can finish the run without advancing to
+    // downstream steps (e.g. watch-pr on PR close). Mirrors the lazy-stepStates
+    // model — downstream steps are simply never materialized.
+    if (result.outcome === 'done' && result.endChain) {
+      this.finalizeRun(automation, run)
       this.deps.persistRun(run)
       return false
     }
@@ -271,6 +283,7 @@ export class ChainExecutor {
 
     // Tick every non-terminal sibling concurrently.
     let anyAdvanced = false
+    const endChainFlags: boolean[] = []
     await Promise.all(
       group.map(async (step, i) => {
         const state = groupStates[i]
@@ -300,17 +313,25 @@ export class ChainExecutor {
         if (result.openedPane !== undefined) {
           state.openedPane = result.openedPane
         }
+        // Persist output on every tick (see solo path) so durable progress
+        // survives a restart even while the sibling is still 'waiting'.
+        if (result.output !== undefined) {
+          state.output = result.output
+        }
         if (result.outcome === 'done' || result.outcome === 'failed') {
           state.finishedAt = this.deps.now()
-          if (result.output !== undefined) {
-            state.output = result.output
-          }
           if (result.error != null) {
             state.error = result.error
           }
           this.applyContextPatch(run, result.contextPatch)
           if (result.status === 'skipped' && !result.contextPatch) {
             this.applyContextPatch(run, { steps: { [step.id]: {} } })
+          }
+          // Honor the documented contract — endChain is only meaningful with
+          // outcome 'done' (matches the solo path); a failed sibling never ends
+          // the chain cleanly.
+          if (result.outcome === 'done' && result.endChain) {
+            endChainFlags[i] = true
           }
           anyAdvanced = true
         }
@@ -345,6 +366,15 @@ export class ChainExecutor {
     if (haltFailure) {
       run.status = 'failed'
       run.finishedAt = this.deps.now()
+      this.deps.persistRun(run)
+      return false
+    }
+
+    // Clean early exit: any settled sibling that asked to end the chain
+    // finalizes the run without materializing downstream positions. Runs only
+    // once the whole group is terminal (the early-return above guarantees it).
+    if (endChainFlags.some(Boolean)) {
+      this.finalizeRun(automation, run)
       this.deps.persistRun(run)
       return false
     }

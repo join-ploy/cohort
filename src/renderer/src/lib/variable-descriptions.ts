@@ -83,6 +83,35 @@ const STEP_BY_KIND: Partial<Record<StepKind, Record<string, string>>> = {
     failedChecks: 'Names of failing checks (comma-separated)',
     hasFailures: 'Whether any CI check failed',
     prCount: 'Number of pull requests inspected'
+  },
+  // Why: a watch-pr node resolves to two different payloads by scope — the final
+  // output in the parent chain, the per-cycle review feedback inside the branch.
+  // Both map to kind 'watch-pr', so this entry merges the union of both schemas'
+  // leaf descriptions. Overlapping leaves (memberCount, membersJson, prNumber,
+  // prUrl) carry one description that reads true in either scope.
+  'watch-pr': {
+    // Final output (parent chain, after the watch node).
+    finalState:
+      "How the watch ended across all members: 'all-merged', 'approved', 'partial-closed', or 'archived'",
+    memberCount: 'Number of PRs the watch tracked (1 for a single PR)',
+    mergedCount: 'How many tracked PRs ended up merged',
+    closedCount: 'How many tracked PRs ended up closed without merging',
+    approvedCount: 'How many tracked PRs ended via approval (when End-on-approve is on)',
+    membersJson: 'JSON array of per-member PR info (worktree, number, url)',
+    cyclesRun: 'Number of review rounds the loop ran',
+    prNumber: 'Pull request number (first/only member)',
+    prUrl: 'Link to the PR on GitHub (first/only member)',
+    prTitle: 'Pull request title (first/only member)',
+    finishedAt: 'Unix epoch time (ms) the watch ended',
+    // Per-cycle payload (inside the branch).
+    combinedSummary: "Markdown digest of all batched members' review feedback",
+    cycleIndex: 'This review round (1-based)',
+    changeRequestCount: 'Arming events folded into this cycle (coalesced)',
+    reviewState: "Latest arming review's state, e.g. CHANGES_REQUESTED",
+    reviewAuthor: 'GitHub login of the reviewer who armed this cycle',
+    reviewBody: "That review's top-level body text",
+    commentsJson: 'Unresolved review threads as a JSON string',
+    commentsSummary: 'Markdown digest of the unresolved review feedback'
   }
 }
 

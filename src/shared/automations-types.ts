@@ -98,6 +98,18 @@ export type AutomationRun = {
   triggerRuleId?: string
   triggerEntityId?: string
   restartedFromRunId?: string
+  // Set when this run is a watch-pr response cycle. Its steps come from the
+  // parent automation's watch step `branchSteps`, not `automation.steps`.
+  parentRunId?: string
+  // The watch step id. On a branch child run it scopes branchSteps; on a detached
+  // run (detachedFromRunId set) it resolves the single watch step to tick.
+  parentStepId?: string
+  cycleIndex?: number // 1-based review round
+  // Set on a background watch run spawned by a detached watch-pr step (provenance
+  // / UI grouping only — no teardown coupling to the spawner).
+  detachedFromRunId?: string
+  // When true, tickRunningChains skips this run (paused). Durable state preserved.
+  paused?: boolean
 }
 
 export type AutomationCreateInput = {
@@ -370,6 +382,7 @@ export type StepKind =
   | 'update-linear-issue'
   | 'collect-ci-results'
   | 'http-request'
+  | 'watch-pr'
 
 export type RunPromptConfig = {
   worktreeRef: string
@@ -494,6 +507,30 @@ export type CollectCiResultsConfig = {
   includeComments: boolean
 }
 
+// Long-lived PR review-loop node. Watches a PR and runs `branchSteps` as a
+// child run each time changes are requested, until the PR is merged/closed.
+export type WatchPrConfig = {
+  worktreeRef: string // template — resolves the single worktree → PR
+  paneRef: string // template — supervised pane (idle gate + inherited by branch)
+  events: {
+    changesRequested: boolean // default true
+    newReviewComments: boolean // default false
+    anyReview: boolean // default false
+  }
+  pollIntervalSeconds: number // PR-state poll cadence (default 30)
+  agentIdleDebounceSeconds: number // idle window before firing a cycle
+  // When false (default) a failed branch cycle keeps the loop watching; the
+  // failure is recorded on that cycle's child run. True halts the whole watch.
+  failedCycleHaltsLoop?: boolean
+  // When true, an approved (but unmerged) PR ends the loop and continues the
+  // chain — for a group, only once every member PR is approved/merged.
+  endOnApprove?: boolean
+  // When true, the watch step spawns a background run and returns immediately so
+  // the chain continues; the background run carries the loop until terminal.
+  detached?: boolean
+  branchSteps: StepOrGroup[] // sub-graph run each cycle
+}
+
 // In-chain "Make HTTP request" step. A strict subset of HttpEndpointConfig — no
 // poll/dedup/picker fields — reusing the trigger's request builder + Test mapping.
 export type HttpRequestStepConfig = {
@@ -515,6 +552,7 @@ export type StepConfig =
   | UpdateLinearIssueConfig
   | CollectCiResultsConfig
   | HttpRequestStepConfig
+  | WatchPrConfig
 
 export type Step = {
   id: string
