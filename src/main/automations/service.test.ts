@@ -1583,6 +1583,147 @@ describe('AutomationService watch-pr child runs', () => {
   })
 })
 
+describe('AutomationService pause/resume runs', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-automations-test-'))
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-13T09:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  // A running automation whose single step would advance to `succeeded` on a
+  // tick, so we can prove a paused run is NOT advanced and a resumed one is.
+  async function seedTickableRun(): Promise<{
+    store: Awaited<ReturnType<typeof createStore>>
+    service: AutomationService
+    runId: string
+    ticks: { count: number }
+  }> {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    const automation = store.createAutomation({
+      name: 'Pausable chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [
+        {
+          id: 's1',
+          kind: 'fake-step' as unknown as Step['kind'],
+          config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'go', doneDebounceSeconds: 15 },
+          onFailure: 'halt',
+          timeoutSeconds: null
+        }
+      ]
+    })
+    const stored = store.listAutomations().find((a) => a.id === automation.id)!
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+
+    // Fake runner: records each tick and immediately succeeds the step.
+    const ticks = { count: 0 }
+    const fakeRunner = {
+      tick: async () => {
+        ticks.count++
+        return { outcome: 'done' as const, status: 'succeeded' as const }
+      }
+    }
+    const realResolve = (
+      service as unknown as { resolveRunner(kind: string): unknown }
+    ).resolveRunner.bind(service)
+    ;(service as unknown as { resolveRunner(kind: string): unknown }).resolveRunner = (
+      kind: string
+    ) => (kind === 'fake-step' ? fakeRunner : realResolve(kind))
+
+    const run = store.createAutomationRun(stored, Date.now(), 'manual')
+    run.status = 'running'
+    run.context = { automation: { workspaceId: 'wt1', projectId: 'p1' }, steps: {} }
+    store.replaceAutomationRun(run)
+    return { store, service, runId: run.id, ticks }
+  }
+
+  const driveTick = (service: AutomationService): Promise<void> =>
+    (service as unknown as { tickRunningChains(): Promise<void> }).tickRunningChains()
+
+  it('tickRunningChains skips a paused run (state preserved, still active)', async () => {
+    const { store, service, runId, ticks } = await seedTickableRun()
+    service.pauseRun(runId)
+
+    await driveTick(service)
+
+    // No tick fired, the step never advanced, and the run is still active.
+    expect(ticks.count).toBe(0)
+    const after = store.getAutomationRun(runId)!
+    expect(after.status).toBe('running')
+    expect(after.stepStates ?? []).toEqual([])
+    expect(after.paused).toBe(true)
+  })
+
+  it('pauseRun sets the flag only on an active run; no-op on a terminal run', async () => {
+    const { store, service, runId } = await seedTickableRun()
+
+    expect(service.pauseRun(runId)?.paused).toBe(true)
+    expect(store.getAutomationRun(runId)!.paused).toBe(true)
+
+    // Take the run terminal, then attempt to pause: should not flip the flag.
+    const terminal = store.getAutomationRun(runId)!
+    terminal.status = 'completed'
+    terminal.paused = false
+    store.replaceAutomationRun(terminal)
+    const result = service.pauseRun(runId)
+    expect(result?.paused).toBeFalsy()
+    expect(store.getAutomationRun(runId)!.paused).toBeFalsy()
+  })
+
+  it('resumeRun clears the paused flag', async () => {
+    const { store, service, runId } = await seedTickableRun()
+    service.pauseRun(runId)
+    expect(store.getAutomationRun(runId)!.paused).toBe(true)
+
+    service.resumeRun(runId)
+    expect(store.getAutomationRun(runId)!.paused).toBe(false)
+  })
+
+  it('a resumed run ticks again on the next pass', async () => {
+    const { store, service, runId, ticks } = await seedTickableRun()
+    service.pauseRun(runId)
+    await driveTick(service)
+    expect(ticks.count).toBe(0) // paused: skipped
+
+    service.resumeRun(runId)
+    await driveTick(service)
+
+    // Resumed: the step advanced this pass.
+    expect(ticks.count).toBe(1)
+    const after = store.getAutomationRun(runId)!
+    expect(after.stepStates?.[0]?.status).toBe('succeeded')
+  })
+
+  it('scheduleFastTickIfRunsActive does not arm the fast timer for a paused-only active run', async () => {
+    const { service, runId } = await seedTickableRun()
+    service.pauseRun(runId)
+
+    const svc = service as unknown as {
+      scheduleFastTickIfRunsActive(): void
+      fastTickTimer: ReturnType<typeof setTimeout> | null
+    }
+    svc.fastTickTimer = null
+    svc.scheduleFastTickIfRunsActive()
+    // The only active run is paused, so no fast timer should be armed.
+    expect(svc.fastTickTimer).toBeNull()
+  })
+})
+
 describe('AutomationService pane queue', () => {
   type PaneQ = {
     acquirePane(p: string, t: string): boolean

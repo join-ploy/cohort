@@ -877,7 +877,10 @@ export class AutomationService {
     }
     const hasActiveRun = this.store
       .listAutomationRuns()
-      .some((run) => isActiveChainRunStatus(run.status) && !this.inFlightRunIds.has(run.id))
+      .some(
+        (run) =>
+          isActiveChainRunStatus(run.status) && !this.inFlightRunIds.has(run.id) && !run.paused
+      )
     if (!hasActiveRun) {
       return
     }
@@ -904,6 +907,11 @@ export class AutomationService {
       // Skip it here so two ticks don't drive the same chain concurrently and
       // double-fire IPC side effects (openPromptPane etc.).
       if (this.inFlightRunIds.has(run.id)) {
+        continue
+      }
+      // Paused (operator-held) run: skip the tick so all durable state is
+      // preserved until resumeRun clears the flag.
+      if (run.paused) {
         continue
       }
       const automation = automations.get(run.automationId)
@@ -1193,6 +1201,31 @@ export class AutomationService {
     // Free this run's pane claims so a dead holder never blocks the queue.
     this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
+    return run
+  }
+
+  /** Pause an active run: tickRunningChains skips it (state preserved) until resumed. */
+  pauseRun(runId: string): AutomationRun | undefined {
+    const run = this.store.listAutomationRuns().find((r) => r.id === runId)
+    if (!run || !isActiveChainRunStatus(run.status)) {
+      return run
+    }
+    run.paused = true
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    return run
+  }
+
+  /** Resume a paused run; it ticks again on the next cadence. */
+  resumeRun(runId: string): AutomationRun | undefined {
+    const run = this.store.listAutomationRuns().find((r) => r.id === runId)
+    if (!run) {
+      return undefined
+    }
+    run.paused = false
+    this.store.replaceAutomationRun(run)
+    this.broadcastAutomationsChanged()
+    this.wakeChains()
     return run
   }
 
