@@ -678,6 +678,7 @@ export function defaultConfigForKind(kind: StepKind): StepConfig {
         agentIdleDebounceSeconds: 5,
         failedCycleHaltsLoop: false,
         endOnApprove: false,
+        detached: false,
         branchSteps: []
       }
       return cfg

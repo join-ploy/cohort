@@ -115,4 +115,11 @@ describe('WatchPrStepCard', () => {
     fireEvent.click(screen.getByLabelText('Halt the loop if a response cycle fails'))
     expect((onConfigChange.mock.calls[0][0] as WatchPrConfig).failedCycleHaltsLoop).toBe(true)
   })
+
+  it('toggling the run-in-background checkbox updates detached', () => {
+    const onConfigChange = vi.fn()
+    renderCard(makeStep(), onConfigChange)
+    fireEvent.click(screen.getByLabelText("Run in the background (don't block the chain)"))
+    expect((onConfigChange.mock.calls[0][0] as WatchPrConfig).detached).toBe(true)
+  })
 })

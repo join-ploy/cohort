@@ -60,6 +60,10 @@ type AutomationDetailProps = {
   onToggle: (automation: Automation) => void
   onDelete: (automation: Automation) => void
   onCancelRun: (run: AutomationRun) => void
+  /** Pause/Resume a long-lived detached watcher run. Optional so existing test
+   *  fixtures that omit run-action callbacks don't widen into tc:web errors. */
+  onPauseRun?: (run: AutomationRun) => void
+  onResumeRun?: (run: AutomationRun) => void
   onRetryRunFromStep: (run: AutomationRun, stepIndex: number) => void
   /** Retry a single sibling inside a parallel group. Only the targeted
    *  sibling re-runs; siblings are preserved, downstream is dropped so it
@@ -928,6 +932,8 @@ export function AutomationDetail({
   onToggle,
   onDelete,
   onCancelRun,
+  onPauseRun,
+  onResumeRun,
   onRetryRunFromStep,
   onRetryParallelStep,
   onRestartRun,
@@ -1130,6 +1136,15 @@ export function AutomationDetail({
               run.status === 'waiting' ||
               run.status === 'pending' ||
               run.status === 'dispatching'
+            // Why: Pause/Resume is scoped to detached watcher runs only — the
+            // sole UI surface for the general `paused` flag (design Part 3,
+            // YAGNI: no pausing arbitrary mid-chain runs). A paused run still
+            // counts as in-flight, so we surface Resume there too.
+            const isPausableWatcher =
+              run.detachedFromRunId != null &&
+              onPauseRun !== undefined &&
+              onResumeRun !== undefined &&
+              (isInFlight || run.paused === true)
             const triggerBadge = describeRunTrigger(run, automation, repos ?? [])
             const restartChildren = findRestartChildren(run.id, runs)
             const showRestart = isRestartable(run.status) && onRestartRun !== undefined
@@ -1158,10 +1173,15 @@ export function AutomationDetail({
                     <div className="mt-1 truncate text-xs text-muted-foreground">{run.error}</div>
                   ) : null}
                 </div>
-                <div className="flex justify-start">
+                <div className="flex items-center justify-start gap-1.5">
                   <Badge variant={getAutomationRunStatusVariant(run.status)}>
                     {getAutomationRunStatusLabel(run.status)}
                   </Badge>
+                  {run.paused ? (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Paused
+                    </Badge>
+                  ) : null}
                 </div>
                 <div className="flex items-center justify-end gap-1">
                   {showContinue ? (
@@ -1209,6 +1229,51 @@ export function AutomationDetail({
                         Restart run
                       </TooltipContent>
                     </Tooltip>
+                  ) : null}
+                  {isPausableWatcher ? (
+                    run.paused ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Resume run"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onResumeRun?.(run)
+                            }}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Play className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" sideOffset={6}>
+                          Resume run
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Pause run"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onPauseRun?.(run)
+                            }}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Pause className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" sideOffset={6}>
+                          Pause run
+                        </TooltipContent>
+                      </Tooltip>
+                    )
                   ) : null}
                   {isInFlight ? (
                     <Tooltip>

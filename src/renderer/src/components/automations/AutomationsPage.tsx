@@ -341,6 +341,26 @@ export default function AutomationsPage(): React.JSX.Element {
     }
   }
 
+  // Pause/resume mirror cancelRun: invoke + refresh (paused flips a durable
+  // run flag the tick loop honors). Only surfaced on detached watcher runs.
+  const pauseRun = async (run: AutomationRun): Promise<void> => {
+    try {
+      await window.api.automations.pauseRun({ runId: run.id })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to pause run.')
+    }
+  }
+
+  const resumeRun = async (run: AutomationRun): Promise<void> => {
+    try {
+      await window.api.automations.resumeRun({ runId: run.id })
+      await refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to resume run.')
+    }
+  }
+
   const retryRunFromStep = async (run: AutomationRun, stepIndex: number): Promise<void> => {
     try {
       await window.api.automations.retryRunFromStep({ runId: run.id, stepIndex })
@@ -653,6 +673,8 @@ export default function AutomationsPage(): React.JSX.Element {
             onToggle={(automation) => void toggleAutomation(automation)}
             onDelete={requestDeleteAutomation}
             onCancelRun={(run) => void cancelRun(run)}
+            onPauseRun={(run) => void pauseRun(run)}
+            onResumeRun={(run) => void resumeRun(run)}
             onRetryRunFromStep={(run, stepIndex) => void retryRunFromStep(run, stepIndex)}
             onRetryParallelStep={(run, stepId) => void retryParallelStep(run, stepId)}
             onRestartRun={(run) => void restartRun(run)}

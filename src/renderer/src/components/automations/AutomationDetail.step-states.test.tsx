@@ -511,6 +511,61 @@ describe('AutomationDetail restart button', () => {
   })
 })
 
+describe('AutomationDetail pause/resume controls', () => {
+  // Pause/Resume is scoped to detached watcher runs (detachedFromRunId set).
+  const detached = { detachedFromRunId: 'r-spawner-aaaaaaaa' } as const
+
+  async function renderRun(run: AutomationRun): Promise<string> {
+    const { AutomationDetail } = await import('./AutomationDetail')
+    return renderToStaticMarkup(
+      <AutomationDetail
+        automation={baseAutomation}
+        runs={[run]}
+        projectName="repo"
+        workspaceName="feature-x"
+        projectDefaultBaseRef={null}
+        worktreeMap={worktreeMap}
+        now={0}
+        onRunNow={noop}
+        onOpenRunWorkspace={noop}
+        onEdit={noop}
+        onToggle={noop}
+        onDelete={noop}
+        onCancelRun={noop}
+        onPauseRun={noop}
+        onResumeRun={noop}
+        onRetryRunFromStep={noop}
+        onRetryParallelStep={noop}
+      />
+    )
+  }
+
+  it('shows Pause on an active, non-paused detached watcher run', async () => {
+    const markup = await renderRun(makeRunWithStatus('running', detached))
+    expect(markup).toContain('Pause run')
+    expect(markup).not.toContain('Resume run')
+  })
+
+  it('shows Resume (and a Paused badge) on a paused detached watcher run', async () => {
+    const markup = await renderRun(makeRunWithStatus('running', { ...detached, paused: true }))
+    expect(markup).toContain('Resume run')
+    expect(markup).not.toContain('Pause run')
+    expect(markup).toContain('Paused')
+  })
+
+  it('does NOT show Pause/Resume on a non-detached active run', async () => {
+    const markup = await renderRun(makeRunWithStatus('running'))
+    expect(markup).not.toContain('Pause run')
+    expect(markup).not.toContain('Resume run')
+  })
+
+  it('does NOT show Pause on a terminal detached watcher run', async () => {
+    const markup = await renderRun(makeRunWithStatus('completed', detached))
+    expect(markup).not.toContain('Pause run')
+    expect(markup).not.toContain('Resume run')
+  })
+})
+
 describe('AutomationDetail restart lineage', () => {
   it('renders "Restarted from #..." when restartedFromRunId is set', async () => {
     const { AutomationDetail } = await import('./AutomationDetail')
