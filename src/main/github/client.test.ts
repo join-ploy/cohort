@@ -350,7 +350,9 @@ describe('getPRState', () => {
         state: 'OPEN',
         mergedAt: null,
         closedAt: null,
-        reviewDecision: 'CHANGES_REQUESTED'
+        reviewDecision: 'CHANGES_REQUESTED',
+        title: 'Add feature',
+        url: 'https://github.com/owner/repo/pull/42'
       })
     })
     const res = await getPRState('/repo/path', 42)
@@ -358,10 +360,12 @@ describe('getPRState', () => {
       state: 'OPEN',
       mergedAt: null,
       closedAt: null,
-      reviewDecision: 'CHANGES_REQUESTED'
+      reviewDecision: 'CHANGES_REQUESTED',
+      title: 'Add feature',
+      url: 'https://github.com/owner/repo/pull/42'
     })
     expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
-      ['pr', 'view', '42', '--json', 'state,mergedAt,closedAt,reviewDecision'],
+      ['pr', 'view', '42', '--json', 'state,mergedAt,closedAt,reviewDecision,title,url'],
       { cwd: '/repo/path' }
     )
   })
@@ -372,7 +376,9 @@ describe('getPRState', () => {
         state: 'MERGED',
         mergedAt: '2026-06-01T00:00:00Z',
         closedAt: '2026-06-01T00:00:00Z',
-        reviewDecision: null
+        reviewDecision: null,
+        title: 'Merged PR',
+        url: 'https://github.com/owner/repo/pull/7'
       })
     })
     const res = await getPRState('/repo/path', 7)
@@ -380,7 +386,9 @@ describe('getPRState', () => {
       state: 'MERGED',
       mergedAt: '2026-06-01T00:00:00Z',
       closedAt: '2026-06-01T00:00:00Z',
-      reviewDecision: null
+      reviewDecision: null,
+      title: 'Merged PR',
+      url: 'https://github.com/owner/repo/pull/7'
     })
   })
 
@@ -392,7 +400,9 @@ describe('getPRState', () => {
         state: 'OPEN',
         mergedAt: null,
         closedAt: null,
-        reviewDecision: ''
+        reviewDecision: '',
+        title: 'Open PR',
+        url: 'https://github.com/owner/repo/pull/9'
       })
     })
     const res = await getPRState('/repo/path', 9)

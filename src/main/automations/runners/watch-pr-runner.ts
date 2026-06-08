@@ -127,16 +127,70 @@ export class WatchPrRunner implements StepRunner {
       if (terminal) {
         return terminal
       }
-      await this.pollArming(tracker, config, this.deps.now())
-      // TODO(Task 8): four-part idle gate + spawn a cycle when dirty.
+      // Capture now once and reuse for poll cadence + idle-debounce math so a
+      // single tick reasons about one consistent instant.
+      const now = this.deps.now()
       const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
+      await this.pollArming(tracker, config, now)
+
+      // Four-part gate: dirty AND no active child AND agent idle (debounced).
+      if (tracker.dirty && tracker.activeChildRunId == null) {
+        const status = this.deps.getAgentLiveStatus(tracker.paneKey ?? '')
+        const idle = status === 'idle' || status === 'done'
+        if (!idle) {
+          tracker.idleSince = null // reset debounce; agent went back to work
+          return {
+            outcome: 'needs-more-time',
+            status: 'waiting',
+            statusMessage: `Changes requested on #${tracker.prNumber} — waiting for agent to finish`,
+            nextPollAt: now + pollIntervalMs,
+            output: this.progressOutput(tracker)
+          }
+        }
+        if (tracker.idleSince == null) {
+          tracker.idleSince = now
+        }
+        const debounceMs = (config.agentIdleDebounceSeconds ?? 5) * 1000
+        if (now - tracker.idleSince < debounceMs) {
+          return {
+            outcome: 'needs-more-time',
+            status: 'waiting',
+            statusMessage: `Agent idle — confirming before responding to #${tracker.prNumber}`,
+            output: this.progressOutput(tracker)
+          }
+        }
+        // Fire a cycle. cycleIndex bumps BEFORE buildCycleOutput so the payload
+        // carries the new index; handledCursor advances AFTER so buildCycleOutput's
+        // `armed` filter still captures this cycle's reviews against the old cursor.
+        tracker.cycleIndex += 1
+        const cycleOutput = await this.buildCycleOutput(tracker, config)
+        const childRunId = this.deps.spawnChildRun({
+          parentRunId: ctx.runId,
+          parentStepId: ctx.step.id,
+          cycleIndex: tracker.cycleIndex,
+          cycleOutput
+        })
+        tracker.activeChildRunId = childRunId
+        tracker.handledCursor = tracker.pendingWatermark // consume up to the watermark
+        tracker.dirty = false
+        tracker.idleSince = null
+        tracker.phase = 'responding'
+        return {
+          outcome: 'needs-more-time',
+          status: 'waiting',
+          statusMessage: `Responding to #${tracker.prNumber} (round ${tracker.cycleIndex})`,
+          nextPollAt: now + pollIntervalMs,
+          output: this.progressOutput(tracker)
+        }
+      }
+
       return {
         outcome: 'needs-more-time',
         status: 'waiting',
         statusMessage: tracker.dirty
           ? `Changes requested on #${tracker.prNumber} — pending`
           : `Watching #${tracker.prNumber}`,
-        nextPollAt: this.deps.now() + pollIntervalMs,
+        nextPollAt: now + pollIntervalMs,
         output: this.progressOutput(tracker)
       }
     }
@@ -245,6 +299,39 @@ export class WatchPrRunner implements StepRunner {
     }
   }
 
+  /** Build the per-cycle payload (WATCH_PR_CYCLE_SCHEMA) seeded into the child
+   *  run's context. `armed` reflects only the reviews this cycle consumes — those
+   *  newer than the still-old handledCursor that match the configured events. */
+  private async buildCycleOutput(
+    tracker: WatchTracker,
+    config: WatchPrConfig
+  ): Promise<Record<string, unknown>> {
+    const reviews = await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!)
+    const armed = reviews.filter(
+      (r) =>
+        r.submittedAt &&
+        r.submittedAt > tracker.handledCursor &&
+        this.armingMatches(r, config.events)
+    )
+    const latest = armed.at(-1)
+    const prState = await this.deps.getPRState(tracker.repoPath!, tracker.prNumber!)
+    tracker.prUrl = prState.url // cache so the final terminal output carries it too
+    const comments = await this.deps.getPRComments(tracker.repoPath!, tracker.prNumber!)
+    const unresolved = comments.filter((c) => !c.isResolved)
+    return {
+      prNumber: tracker.prNumber ?? 0,
+      prUrl: prState.url,
+      prTitle: prState.title,
+      reviewState: latest?.state ?? '',
+      reviewAuthor: latest?.author ?? '',
+      reviewBody: latest?.body ?? '',
+      commentsJson: JSON.stringify(unresolved),
+      commentsSummary: buildCommentsSummary(unresolved),
+      cycleIndex: tracker.cycleIndex,
+      changeRequestCount: armed.length
+    }
+  }
+
   // TODO(Task 10): cancel active child runs before clearing the tracker.
   dropRun(runId: string): void {
     this.trackers.delete(runId)
@@ -304,4 +391,20 @@ export class WatchPrRunner implements StepRunner {
       cycleIndex: t.cycleIndex
     }
   }
+}
+
+/** Markdown digest of the unresolved feedback, one bullet per comment, so the
+ *  child run has a readable summary alongside the structured commentsJson. */
+function buildCommentsSummary(comments: PRComment[]): string {
+  if (comments.length === 0) {
+    return 'No unresolved comments.'
+  }
+  const lines: string[] = []
+  for (const c of comments) {
+    const location = c.path ? `${c.path}${c.line != null ? `:${c.line}` : ''}` : 'conversation'
+    const firstLine = c.body.split('\n')[0]
+    lines.push(`- **${c.author}** (${location})`)
+    lines.push(`  > ${firstLine}`)
+  }
+  return lines.join('\n')
 }

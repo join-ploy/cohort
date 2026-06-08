@@ -1098,6 +1098,8 @@ export type PRWatchState = {
   mergedAt: string | null
   closedAt: string | null
   reviewDecision: 'CHANGES_REQUESTED' | 'APPROVED' | 'REVIEW_REQUIRED' | null
+  title: string
+  url: string
 }
 
 /**
@@ -1116,7 +1118,13 @@ export async function getPRState(
   await acquire()
   try {
     const { stdout } = await ghExecFileAsync(
-      ['pr', 'view', String(prNumber), '--json', 'state,mergedAt,closedAt,reviewDecision'],
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'state,mergedAt,closedAt,reviewDecision,title,url'
+      ],
       { cwd: repoPath }
     )
     const json = JSON.parse(stdout) as {
@@ -1124,12 +1132,16 @@ export async function getPRState(
       mergedAt: string | null
       closedAt: string | null
       reviewDecision: string | null
+      title: string | null
+      url: string | null
     }
     return {
       state: json.state as PRWatchState['state'],
       mergedAt: json.mergedAt ?? null,
       closedAt: json.closedAt ?? null,
-      reviewDecision: (json.reviewDecision || null) as PRWatchState['reviewDecision']
+      reviewDecision: (json.reviewDecision || null) as PRWatchState['reviewDecision'],
+      title: json.title ?? '',
+      url: json.url ?? ''
     }
   } finally {
     release()

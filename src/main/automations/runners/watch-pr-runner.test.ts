@@ -3,6 +3,7 @@ import { WatchPrRunner, type WatchPrDeps, type AgentLiveStatus } from './watch-p
 import type { StepRunnerCtx } from '../step-runner'
 import type { WatchPrConfig, Step } from '../../../shared/automations-types'
 import type { PRWatchState, PRReview } from '../../github/client'
+import type { PRComment } from '../../../shared/types'
 
 function makeDeps(overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
   return {
@@ -10,11 +11,19 @@ function makeDeps(overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
     getRepoPath: () => '/tmp/repo',
     resolveLinkedPR: async () => null,
     isWorktreeArchived: () => false,
-    getPRState: async () => ({ state: 'OPEN', reviewDecision: null }) as unknown as PRWatchState,
+    getPRState: async () =>
+      ({
+        state: 'OPEN',
+        mergedAt: null,
+        closedAt: null,
+        reviewDecision: null,
+        title: 'Test PR',
+        url: 'https://github.com/owner/repo/pull/42'
+      }) as PRWatchState,
     getPRReviews: async () => [],
-    getPRComments: async () => [],
+    getPRComments: vi.fn(async () => [] as PRComment[]),
     getAgentLiveStatus: (): AgentLiveStatus => 'idle',
-    spawnChildRun: () => 'child-run-1',
+    spawnChildRun: vi.fn(() => 'child-1'),
     getChildRunStatus: () => 'missing',
     cancelChildRunsForStep: vi.fn(),
     now: () => 1000,
@@ -179,6 +188,18 @@ function review(overrides: Partial<PRReview> = {}): PRReview {
   }
 }
 
+function comment(overrides: Partial<PRComment> = {}): PRComment {
+  return {
+    id: 1,
+    author: 'reviewer',
+    authorAvatarUrl: '',
+    body: 'please fix this',
+    createdAt: '2026-06-02T00:00:00Z',
+    url: 'https://example.com/c/1',
+    ...overrides
+  }
+}
+
 describe('WatchPrRunner — watching phase', () => {
   it('merged → done/succeeded, endChain falsy, finalState "merged"', async () => {
     const runner = new WatchPrRunner(
@@ -332,5 +353,208 @@ describe('WatchPrRunner — watching phase', () => {
     nowValue = 1_000_000 + 10_000
     await runner.tick(makeCtx({ stateOutput: watchingState() }))
     expect(getPRReviews).toHaveBeenCalledTimes(1)
+  })
+})
+
+// A watching-phase state.output that is already dirty (changes requested) with a
+// pending watermark, so the four-part idle gate is exercised on the first tick.
+function dirtyWatchingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return watchingState({
+    dirty: true,
+    pendingWatermark: '2026-06-02T00:00:00Z',
+    handledCursor: '',
+    ...overrides
+  })
+}
+
+// Typed spawnChildRun mock so `.mock.calls[0][0]` is the structured arg, not an
+// inferred empty-args tuple.
+function makeSpawnChildRun(): ReturnType<typeof vi.fn<WatchPrDeps['spawnChildRun']>> {
+  return vi.fn<WatchPrDeps['spawnChildRun']>(() => 'child-1')
+}
+
+// Reviews feed seeded so buildCycleOutput finds one CHANGES_REQUESTED review at
+// the watermark.
+function changesRequestedDeps(): Partial<WatchPrDeps> {
+  return {
+    getPRReviews: async () => [
+      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'fix it' })
+    ]
+  }
+}
+
+describe('WatchPrRunner — idle gate + cycle spawn', () => {
+  it('agent working → no spawn, parks waiting for agent to finish', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    const runner = new WatchPrRunner(
+      makeDeps({
+        ...changesRequestedDeps(),
+        getAgentLiveStatus: (): AgentLiveStatus => 'working',
+        spawnChildRun
+      })
+    )
+    const result = await runner.tick(makeCtx({ stateOutput: dirtyWatchingState() }))
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    expect(result.status).toBe('waiting')
+    expect(result.statusMessage).toContain('waiting for agent to finish')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('watching')
+  })
+
+  it('idle but within debounce → no spawn yet (first tick sets idleSince)', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    const runner = new WatchPrRunner(
+      makeDeps({
+        ...changesRequestedDeps(),
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        spawnChildRun
+      })
+    )
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 10 },
+        stateOutput: dirtyWatchingState()
+      })
+    )
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    expect(result.status).toBe('waiting')
+    expect(result.statusMessage).toContain('confirming')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('watching')
+  })
+
+  it('idle past debounce → spawns once and advances to responding', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    let nowValue = 1000
+    const runner = new WatchPrRunner(
+      makeDeps({
+        ...changesRequestedDeps(),
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        spawnChildRun,
+        now: () => nowValue
+      })
+    )
+    // Tick 1: idleSince is null → set to now (1000); 0 < debounce → no spawn yet.
+    await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState()
+      })
+    )
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    // Tick 2: advance now past the 5s debounce; same runner keeps idleSince in memory.
+    nowValue = 1000 + 6000
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState()
+      })
+    )
+    expect(spawnChildRun).toHaveBeenCalledTimes(1)
+    const arg = spawnChildRun.mock.calls[0][0] as {
+      parentRunId: string
+      parentStepId: string
+      cycleIndex: number
+      cycleOutput: Record<string, unknown>
+    }
+    expect(arg.parentRunId).toBe('run-1')
+    expect(arg.parentStepId).toBe('step-1')
+    expect(arg.cycleIndex).toBe(1)
+    expect(arg.cycleOutput.prNumber).toBe(42)
+    expect(arg.cycleOutput.reviewState).toBe('CHANGES_REQUESTED')
+    expect(arg.cycleOutput.cycleIndex).toBe(1)
+    expect(arg.cycleOutput.changeRequestCount).toBe(1)
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('responding')
+    expect(output.activeChildRunId).toBe('child-1')
+    expect(output.dirty).toBe(false)
+    expect(output.handledCursor).toBe('2026-06-02T00:00:00Z')
+    expect(result.statusMessage).toContain('Responding to #42')
+  })
+
+  it('buildCycleOutput: full WATCH_PR_CYCLE_SCHEMA shape, resolved comments excluded', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    let nowValue = 1000
+    const unresolved = comment({
+      id: 1,
+      body: 'unresolved feedback',
+      isResolved: false,
+      path: 'a.ts',
+      line: 3
+    })
+    const resolved = comment({ id: 2, body: 'already addressed', isResolved: true })
+    const runner = new WatchPrRunner(
+      makeDeps({
+        ...changesRequestedDeps(),
+        getPRComments: vi.fn(async () => [unresolved, resolved]),
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        spawnChildRun,
+        now: () => nowValue
+      })
+    )
+    await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState()
+      })
+    )
+    nowValue = 1000 + 6000
+    await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState()
+      })
+    )
+    expect(spawnChildRun).toHaveBeenCalledTimes(1)
+    const cycleOutput = (spawnChildRun.mock.calls[0][0] as { cycleOutput: Record<string, unknown> })
+      .cycleOutput
+    // All 10 WATCH_PR_CYCLE_SCHEMA keys present with the right types.
+    expect(typeof cycleOutput.prNumber).toBe('number')
+    expect(typeof cycleOutput.prUrl).toBe('string')
+    expect(typeof cycleOutput.prTitle).toBe('string')
+    expect(typeof cycleOutput.reviewState).toBe('string')
+    expect(typeof cycleOutput.reviewAuthor).toBe('string')
+    expect(typeof cycleOutput.reviewBody).toBe('string')
+    expect(typeof cycleOutput.commentsJson).toBe('string')
+    expect(typeof cycleOutput.commentsSummary).toBe('string')
+    expect(typeof cycleOutput.cycleIndex).toBe('number')
+    expect(typeof cycleOutput.changeRequestCount).toBe('number')
+    // commentsJson holds only the unresolved comment.
+    const parsed = JSON.parse(cycleOutput.commentsJson as string) as PRComment[]
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].id).toBe(1)
+    expect(parsed[0].body).toBe('unresolved feedback')
+    expect(cycleOutput.prUrl).toBe('https://github.com/owner/repo/pull/42')
+    expect(cycleOutput.prTitle).toBe('Test PR')
+  })
+
+  it('child already active → gate blocks a spawn even when idle + dirty', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    let nowValue = 1000
+    const runner = new WatchPrRunner(
+      makeDeps({
+        ...changesRequestedDeps(),
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        spawnChildRun,
+        now: () => nowValue
+      })
+    )
+    // Phase stays 'watching' (not 'responding') with an active child to verify the
+    // gate's `activeChildRunId == null` guard, independent of the responding phase.
+    await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState({ activeChildRunId: 'child-x' })
+      })
+    )
+    nowValue = 1000 + 6000
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: { agentIdleDebounceSeconds: 5 },
+        stateOutput: dirtyWatchingState({ activeChildRunId: 'child-x' })
+      })
+    )
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    expect(result.status).toBe('waiting')
   })
 })
