@@ -77,6 +77,33 @@ describe('ChainExecutor', () => {
     ])
   })
 
+  it('persists step output on a non-terminal (needs-more-time) tick', async () => {
+    // Long-lived runners (watch-pr) emit durable progress as `output` on every
+    // waiting tick and rehydrate from state.output after a restart. The executor
+    // must write that output even though the step has not finished.
+    const tick = vi.fn().mockResolvedValue({
+      outcome: 'needs-more-time',
+      status: 'waiting',
+      output: { phase: 'watching', cycleIndex: 2 }
+    })
+    const runner: StepRunner = { tick }
+    const persisted: AutomationRun[] = []
+    const executor = new ChainExecutor({
+      getRunner: () => runner,
+      persistRun: (r) => persisted.push(structuredClone(r)),
+      now: () => 0
+    })
+    const r = run('a1', { stepStates: [] })
+    await executor.tick(automation([sampleStep]), r)
+    expect(r.stepStates![0]).toMatchObject({
+      status: 'waiting',
+      finishedAt: null, // still in progress
+      output: { phase: 'watching', cycleIndex: 2 }
+    })
+    // And it was flushed to the store, so a restart can rehydrate from it.
+    expect(persisted.at(-1)!.stepStates![0].output).toEqual({ phase: 'watching', cycleIndex: 2 })
+  })
+
   it('advances to the next step when current step returns done', async () => {
     const tick = vi
       .fn()

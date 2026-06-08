@@ -198,11 +198,14 @@ export class ChainExecutor {
     if (result.openedPane !== undefined) {
       state.openedPane = result.openedPane
     }
+    // Persist output on EVERY tick, not just terminal ones, so a long-lived
+    // runner's durable progress (e.g. watch-pr's WatchProgress) survives a
+    // restart — the runner rehydrates from state.output on the next tick.
+    if (result.output !== undefined) {
+      state.output = result.output
+    }
     if (result.outcome === 'done' || result.outcome === 'failed') {
       state.finishedAt = this.deps.now()
-      if (result.output !== undefined) {
-        state.output = result.output
-      }
       if (result.error != null) {
         state.error = result.error
       }
@@ -310,11 +313,13 @@ export class ChainExecutor {
         if (result.openedPane !== undefined) {
           state.openedPane = result.openedPane
         }
+        // Persist output on every tick (see solo path) so durable progress
+        // survives a restart even while the sibling is still 'waiting'.
+        if (result.output !== undefined) {
+          state.output = result.output
+        }
         if (result.outcome === 'done' || result.outcome === 'failed') {
           state.finishedAt = this.deps.now()
-          if (result.output !== undefined) {
-            state.output = result.output
-          }
           if (result.error != null) {
             state.error = result.error
           }
