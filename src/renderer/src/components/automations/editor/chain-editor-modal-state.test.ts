@@ -782,3 +782,62 @@ describe('computeAllErrors — no nested watch-pr in branchSteps', () => {
     expect(computeAllErrors(draft).filter((e) => e.field === 'branchSteps')).toEqual([])
   })
 })
+
+describe('computeAllErrors — watch-pr branch step template references', () => {
+  function branchRunPrompt(id: string, prompt: string): Step {
+    return {
+      id,
+      kind: 'run-prompt',
+      config: { worktreeRef: '', agentId: 'claude', prompt, doneDebounceSeconds: 5 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  function upstreamRunPrompt(id: string): Step {
+    return {
+      id,
+      kind: 'run-prompt',
+      config: { worktreeRef: '', agentId: 'claude', prompt: '', doneDebounceSeconds: 5 },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  function watchWithBranch(id: string, branchSteps: StepOrGroup[]): Step {
+    return {
+      id,
+      kind: 'watch-pr',
+      config: { ...(defaultConfigForKind('watch-pr') as WatchPrConfig), branchSteps },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('flags a branch step that references a nonexistent variable', () => {
+    const draft = makeDraft([
+      watchWithBranch('watch', [branchRunPrompt('b1', 'address {{steps.nope.bad}}')])
+    ])
+    const errs = computeAllErrors(draft)
+    const branchErr = errs.find((e) => e.stepId === 'b1' && e.field === 'prompt')
+    expect(branchErr).toBeDefined()
+    expect(branchErr?.code).toBe('unknown-step')
+  })
+
+  it('does not flag a branch step referencing the per-cycle payload', () => {
+    const draft = makeDraft([
+      watchWithBranch('watch', [branchRunPrompt('b1', 'address {{steps.watch.commentsSummary}}')])
+    ])
+    const errs = computeAllErrors(draft).filter((e) => e.stepId === 'b1')
+    expect(errs).toEqual([])
+  })
+
+  it('does not flag a branch step referencing an upstream parent variable', () => {
+    const draft = makeDraft([
+      upstreamRunPrompt('rp'),
+      watchWithBranch('watch', [branchRunPrompt('b1', 'pane is {{steps.rp.paneKey}}')])
+    ])
+    const errs = computeAllErrors(draft).filter((e) => e.stepId === 'b1')
+    expect(errs).toEqual([])
+  })
+})

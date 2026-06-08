@@ -283,6 +283,9 @@ export class WatchPrRunner implements StepRunner {
     const state = await this.deps.getPRState(tracker.repoPath!, tracker.prNumber!, {
       noCache: true
     })
+    // Cache the url so finish() emits it even when the PR merges/closes before
+    // any response cycle ran (buildCycleOutput, which normally caches it, never ran).
+    tracker.prUrl = state.url
     if (state.state === 'MERGED') {
       this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id) // cancel any in-flight cycle (Q4)
       // endChain=false → the chain continues to downstream steps.

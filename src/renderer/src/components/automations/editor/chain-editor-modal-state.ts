@@ -336,6 +336,24 @@ export function computeAllErrors(
           field: 'branchSteps'
         })
       }
+      // Branch step templates resolve against the branch scope (parent vars +
+      // steps.<watch-id>.* mapped to the per-cycle payload + earlier branch
+      // steps), so a bad ref must gate Save just like a top-level step's does.
+      const branchFlat = flattenSteps(branchSteps)
+      for (let b = 0; b < branchFlat.length; b++) {
+        const branchStep = branchFlat[b]
+        const branchAvailable = getBranchAvailableVariablesAtStep(
+          available,
+          step.id,
+          branchSteps,
+          b
+        )
+        walkStepConfigStrings(branchStep.config, branchStep.kind, (field, value) => {
+          for (const err of dryRunTemplate(value, branchAvailable)) {
+            all.push({ ...err, stepId: branchStep.id, field })
+          }
+        })
+      }
     }
     if (step.kind === 'http-request') {
       const config = step.config as HttpRequestStepConfig

@@ -212,7 +212,9 @@ describe('WatchPrRunner — watching phase', () => {
             state: 'MERGED',
             mergedAt: '2026-06-03T00:00:00Z',
             closedAt: null,
-            reviewDecision: null
+            reviewDecision: null,
+            title: 'Test PR',
+            url: 'https://github.com/owner/repo/pull/42'
           }) as PRWatchState
       })
     )
@@ -222,8 +224,13 @@ describe('WatchPrRunner — watching phase', () => {
     expect(result.endChain).toBeFalsy()
     const output = result.output as Record<string, unknown>
     expect(output.finalState).toBe('merged')
+    // Merge before any response cycle ran: checkTerminal caches state.url onto
+    // the tracker so finish() emits the PR url even though buildCycleOutput
+    // (the usual cache point) never ran.
+    expect(output.prUrl).toBe('https://github.com/owner/repo/pull/42')
     const patch = result.contextPatch as { steps: Record<string, Record<string, unknown>> }
     expect(patch.steps['step-1'].finalState).toBe('merged')
+    expect(patch.steps['step-1'].prUrl).toBe('https://github.com/owner/repo/pull/42')
   })
 
   it('closed → done/succeeded + endChain true, finalState "closed"', async () => {
@@ -236,7 +243,9 @@ describe('WatchPrRunner — watching phase', () => {
             state: 'CLOSED',
             mergedAt: null,
             closedAt: '2026-06-03T00:00:00Z',
-            reviewDecision: null
+            reviewDecision: null,
+            title: 'Test PR',
+            url: 'https://github.com/owner/repo/pull/42'
           }) as PRWatchState
       })
     )
