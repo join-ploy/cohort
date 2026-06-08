@@ -100,8 +100,9 @@ describe('WatchPrRunner — resolving phase', () => {
     expect(result.status).toBe('waiting')
     expect(result.statusMessage).toBe('Watching #42')
     const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
     expect(output.phase).toBe('watching')
-    expect(output.prNumber).toBe(42)
+    expect(members[0].prNumber).toBe(42)
     expect(output.paneKey).toBe('tab1:2')
   })
 
@@ -116,8 +117,9 @@ describe('WatchPrRunner — resolving phase', () => {
     expect(result.outcome).toBe('needs-more-time')
     expect(result.status).toBe('waiting')
     const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
     expect(output.phase).toBe('watching')
-    expect(output.prNumber).toBe(7)
+    expect(members[0].prNumber).toBe(7)
   })
 
   it('rehydrates from persisted state.output without resetting', async () => {
@@ -126,20 +128,28 @@ describe('WatchPrRunner — resolving phase', () => {
       makeCtx({
         stateOutput: {
           phase: 'watching',
-          prNumber: 99,
-          repoPath: '/repo',
+          members: [
+            {
+              worktreeId: 'repo-a::/tmp/wt',
+              prNumber: 99,
+              repoPath: '/repo',
+              prUrl: '',
+              handledCursor: '2026-06-01T00:00:00Z',
+              pendingWatermark: '',
+              dirty: false,
+              settled: 'open'
+            }
+          ],
           paneKey: 'tab1:2',
-          handledCursor: '2026-06-01T00:00:00Z',
-          pendingWatermark: '',
-          dirty: false,
           activeChildRunId: null,
           cycleIndex: 3
         }
       })
     )
     const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
     expect(output.cycleIndex).toBe(3)
-    expect(output.prNumber).toBe(99)
+    expect(members[0].prNumber).toBe(99)
     expect(output.phase).toBe('watching')
   })
 
@@ -164,16 +174,29 @@ describe('WatchPrRunner — resolving phase', () => {
 })
 
 // A persisted state.output that lands the runner directly in the watching phase
-// on its first tick (skips resolving).
-function watchingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+// on its first tick (skips resolving). memberOverrides re-paths the old scalar
+// per-PR fields (dirty/handledCursor/pendingWatermark) onto the single member;
+// top-level overrides cover phase/activeChildRunId/cycleIndex.
+function watchingState(
+  overrides: Record<string, unknown> = {},
+  memberOverrides: Record<string, unknown> = {}
+): Record<string, unknown> {
   return {
     phase: 'watching',
-    prNumber: 42,
-    repoPath: '/tmp/repo',
+    members: [
+      {
+        worktreeId: 'repo-a::/tmp/wt',
+        prNumber: 42,
+        repoPath: '/tmp/repo',
+        prUrl: '',
+        handledCursor: '',
+        pendingWatermark: '',
+        dirty: false,
+        settled: 'open',
+        ...memberOverrides
+      }
+    ],
     paneKey: 'tab1:2',
-    handledCursor: '',
-    pendingWatermark: '',
-    dirty: false,
     activeChildRunId: null,
     cycleIndex: 0,
     ...overrides
@@ -204,7 +227,7 @@ function comment(overrides: Partial<PRComment> = {}): PRComment {
 }
 
 describe('WatchPrRunner — watching phase', () => {
-  it('merged → done/succeeded, endChain falsy, finalState "merged"', async () => {
+  it('merged → done/succeeded, endChain falsy, finalState "all-merged"', async () => {
     const runner = new WatchPrRunner(
       makeDeps({
         // now() past one poll interval so the cadence-gated terminal check runs
@@ -224,19 +247,21 @@ describe('WatchPrRunner — watching phase', () => {
     const result = await runner.tick(makeCtx({ stateOutput: watchingState() }))
     expect(result.outcome).toBe('done')
     expect(result.status).toBe('succeeded')
+    // Single member merging → all settled, all merged → all-merged → continue.
     expect(result.endChain).toBeFalsy()
     const output = result.output as Record<string, unknown>
-    expect(output.finalState).toBe('merged')
-    // Merge before any response cycle ran: checkTerminal caches state.url onto
-    // the tracker so finish() emits the PR url even though buildCycleOutput
+    expect(output.finalState).toBe('all-merged')
+    expect(output.mergedCount).toBe(1)
+    // Merge before any response cycle ran: the sweep caches state.url onto the
+    // member so finishAggregate emits the PR url even though buildCycleOutput
     // (the usual cache point) never ran.
     expect(output.prUrl).toBe('https://github.com/owner/repo/pull/42')
     const patch = result.contextPatch as { steps: Record<string, Record<string, unknown>> }
-    expect(patch.steps['step-1'].finalState).toBe('merged')
+    expect(patch.steps['step-1'].finalState).toBe('all-merged')
     expect(patch.steps['step-1'].prUrl).toBe('https://github.com/owner/repo/pull/42')
   })
 
-  it('closed → done/succeeded + endChain true, finalState "closed"', async () => {
+  it('closed → done/succeeded + endChain true, finalState "partial-closed"', async () => {
     const runner = new WatchPrRunner(
       makeDeps({
         // now() past one poll interval so the cadence-gated terminal check runs.
@@ -255,11 +280,13 @@ describe('WatchPrRunner — watching phase', () => {
     const result = await runner.tick(makeCtx({ stateOutput: watchingState() }))
     expect(result.outcome).toBe('done')
     expect(result.status).toBe('succeeded')
+    // Single member closed → all settled, not all merged → partial-closed → stop.
     expect(result.endChain).toBe(true)
     const output = result.output as Record<string, unknown>
-    expect(output.finalState).toBe('closed')
+    expect(output.finalState).toBe('partial-closed')
+    expect(output.closedCount).toBe(1)
     const patch = result.contextPatch as { steps: Record<string, Record<string, unknown>> }
-    expect(patch.steps['step-1'].finalState).toBe('closed')
+    expect(patch.steps['step-1'].finalState).toBe('partial-closed')
   })
 
   it('archived → endChain true, finalState "archived", cancelChildRunsForStep called', async () => {
@@ -307,8 +334,9 @@ describe('WatchPrRunner — watching phase', () => {
     )
     expect(result.status).toBe('waiting')
     const output = result.output as Record<string, unknown>
-    expect(output.dirty).toBe(true)
-    expect(output.pendingWatermark).toBe('2026-06-02T00:00:00Z')
+    const members = output.members as Record<string, unknown>[]
+    expect(members[0].dirty).toBe(true)
+    expect(members[0].pendingWatermark).toBe('2026-06-02T00:00:00Z')
   })
 
   it('arming negative: a COMMENTED review does NOT arm when only changesRequested enabled', async () => {
@@ -329,7 +357,8 @@ describe('WatchPrRunner — watching phase', () => {
       })
     )
     const output = result.output as Record<string, unknown>
-    expect(output.dirty).toBe(false)
+    const members = output.members as Record<string, unknown>[]
+    expect(members[0].dirty).toBe(false)
   })
 
   it('arming positive: a COMMENTED review arms when newReviewComments enabled', async () => {
@@ -351,8 +380,9 @@ describe('WatchPrRunner — watching phase', () => {
       })
     )
     const output = result.output as Record<string, unknown>
-    expect(output.dirty).toBe(true)
-    expect(output.pendingWatermark).toBe('2026-06-02T00:00:00Z')
+    const members = output.members as Record<string, unknown>[]
+    expect(members[0].dirty).toBe(true)
+    expect(members[0].pendingWatermark).toBe('2026-06-02T00:00:00Z')
   })
 
   it('poll cadence: within pollInterval, getPRReviews is NOT called again', async () => {
@@ -375,14 +405,15 @@ describe('WatchPrRunner — watching phase', () => {
   })
 })
 
-// A watching-phase state.output that is already dirty (changes requested) with a
-// pending watermark, so the four-part idle gate is exercised on the first tick.
+// A watching-phase state.output whose single member is already dirty (changes
+// requested) with a pending watermark, so the four-part idle gate is exercised on
+// the first tick. `overrides` cover the top-level tracker fields (e.g.
+// activeChildRunId); the member is always dirty at the watermark.
 function dirtyWatchingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return watchingState({
+  return watchingState(overrides, {
     dirty: true,
     pendingWatermark: '2026-06-02T00:00:00Z',
-    handledCursor: '',
-    ...overrides
+    handledCursor: ''
   })
 }
 
@@ -484,10 +515,11 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     expect(arg.cycleOutput.cycleIndex).toBe(1)
     expect(arg.cycleOutput.changeRequestCount).toBe(1)
     const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
     expect(output.phase).toBe('responding')
     expect(output.activeChildRunId).toBe('child-1')
-    expect(output.dirty).toBe(false)
-    expect(output.handledCursor).toBe('2026-06-02T00:00:00Z')
+    expect(members[0].dirty).toBe(false)
+    expect(members[0].handledCursor).toBe('2026-06-02T00:00:00Z')
     expect(result.statusMessage).toContain('Responding to #42')
   })
 
@@ -527,10 +559,13 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     expect(spawnChildRun).toHaveBeenCalledTimes(1)
     const cycleOutput = (spawnChildRun.mock.calls[0][0] as { cycleOutput: Record<string, unknown> })
       .cycleOutput
-    // All 10 WATCH_PR_CYCLE_SCHEMA keys present with the right types.
+    // WATCH_PR_CYCLE_SCHEMA keys present with the right types (no top-level prTitle).
+    expect(typeof cycleOutput.memberCount).toBe('number')
+    expect(typeof cycleOutput.combinedSummary).toBe('string')
+    expect(typeof cycleOutput.membersJson).toBe('string')
     expect(typeof cycleOutput.prNumber).toBe('number')
     expect(typeof cycleOutput.prUrl).toBe('string')
-    expect(typeof cycleOutput.prTitle).toBe('string')
+    expect(cycleOutput.prTitle).toBeUndefined()
     expect(typeof cycleOutput.reviewState).toBe('string')
     expect(typeof cycleOutput.reviewAuthor).toBe('string')
     expect(typeof cycleOutput.reviewBody).toBe('string')
@@ -544,7 +579,9 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     expect(parsed[0].id).toBe(1)
     expect(parsed[0].body).toBe('unresolved feedback')
     expect(cycleOutput.prUrl).toBe('https://github.com/owner/repo/pull/42')
-    expect(cycleOutput.prTitle).toBe('Test PR')
+    // prTitle lives per-member inside membersJson, not at the top level.
+    const members = JSON.parse(cycleOutput.membersJson as string) as { prTitle: string }[]
+    expect(members[0].prTitle).toBe('Test PR')
   })
 
   it('child already active → gate blocks a spawn even when idle + dirty', async () => {
@@ -583,12 +620,19 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
 function respondingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     phase: 'responding',
-    prNumber: 42,
-    repoPath: '/tmp/repo',
+    members: [
+      {
+        worktreeId: 'repo-a::/tmp/wt',
+        prNumber: 42,
+        repoPath: '/tmp/repo',
+        prUrl: '',
+        handledCursor: '',
+        pendingWatermark: '',
+        dirty: false,
+        settled: 'open'
+      }
+    ],
     paneKey: 'tab1:2',
-    handledCursor: '',
-    pendingWatermark: '',
-    dirty: false,
     activeChildRunId: 'child-1',
     cycleIndex: 1,
     ...overrides
@@ -648,7 +692,7 @@ describe('WatchPrRunner — responding phase', () => {
     expect(result.status).toBe('succeeded')
     expect(result.endChain).toBeFalsy()
     const output = result.output as Record<string, unknown>
-    expect(output.finalState).toBe('merged')
+    expect(output.finalState).toBe('all-merged')
   })
 
   it('child failed + failedCycleHaltsLoop true → run fails', async () => {
@@ -729,7 +773,7 @@ describe('WatchPrRunner — responding phase', () => {
     nowValue += 40_000 // past poll interval so responding re-polls reviews
     const t3 = (await tick()) as { output: Record<string, unknown> }
     expect(t3.output.phase).toBe('responding')
-    expect(t3.output.dirty).toBe(true)
+    expect((t3.output.members as Record<string, unknown>[])[0].dirty).toBe(true)
 
     // Tick 4: child-1 completes → loop back to watching.
     childStatus = 'completed'

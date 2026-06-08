@@ -46,15 +46,26 @@ export type WatchPrDeps = {
 
 type Phase = 'resolving' | 'watching' | 'responding'
 
-type WatchTracker = {
-  phase: Phase
-  prNumber: number | null
-  repoPath: string | null
-  paneKey: string | null
-  prUrl: string // best-effort; '' until Task 8's cycle-output fetch learns it
-  handledCursor: string // ISO; '' = nothing handled yet
+type Settled = 'open' | 'merged' | 'closed'
+
+// One watched member PR. A single-worktree node is the degenerate 1-member case;
+// a group node holds one entry per member with a diff-from-main.
+type MemberState = {
+  worktreeId: string
+  prNumber: number
+  repoPath: string
+  prUrl: string // best-effort; cached on first cycle-output or terminal read
+  handledCursor: string // per-member high-water (ISO); '' = nothing handled yet
   pendingWatermark: string // latest arming activity seen but not yet consumed
   dirty: boolean
+  settled: Settled
+}
+
+type WatchTracker = {
+  phase: Phase
+  members: Map<string, MemberState> // keyed by worktreeId
+  paneKey: string | null
+  // Shared pane-cycle state (singular — one pane, one in-flight cycle):
   activeChildRunId: string | null
   cycleIndex: number
   idleSince: number | null
@@ -63,19 +74,43 @@ type WatchTracker = {
 }
 
 // The durable subset persisted on state.output so a restart resumes correctly.
-type WatchProgress = Pick<
-  WatchTracker,
-  | 'phase'
+// members is a plain array (Map doesn't serialise); idleSince/lastPollAt/startedAt
+// stay in-memory only (same as before — they reset cleanly on restart).
+type DurableMember = Pick<
+  MemberState,
+  | 'worktreeId'
   | 'prNumber'
   | 'repoPath'
-  | 'paneKey'
   | 'prUrl'
   | 'handledCursor'
   | 'pendingWatermark'
   | 'dirty'
-  | 'activeChildRunId'
-  | 'cycleIndex'
+  | 'settled'
 >
+
+type WatchProgress = {
+  phase: Phase
+  members: DurableMember[]
+  paneKey: string | null
+  activeChildRunId: string | null
+  cycleIndex: number
+}
+
+// One batched member's feedback, assembled by buildCycleOutput. repoPath is
+// internal (drives the combinedSummary section header); it's stripped from the
+// durable membersJson payload.
+type PerMemberCycleEntry = {
+  worktreeId: string
+  prNumber: number
+  prUrl: string
+  prTitle: string
+  reviewState: string
+  reviewAuthor: string
+  reviewBody: string
+  commentsJson: string
+  commentsSummary: string
+  repoPath: string
+}
 
 export class WatchPrRunner implements StepRunner {
   private readonly trackers = new Map<string, Map<string, WatchTracker>>()
@@ -100,6 +135,7 @@ export class WatchPrRunner implements StepRunner {
 
     // ── Phase: resolving ──────────────────────────────────────────────
     if (tracker.phase === 'resolving') {
+      // Single-worktree resolve → exactly ONE member. Group expansion is Task 4.
       const meta = this.deps.getWorktreeMeta(worktreeId)
       if (!meta) {
         return { outcome: 'failed', status: 'failed', error: `Unknown worktree "${worktreeId}".` }
@@ -125,8 +161,16 @@ export class WatchPrRunner implements StepRunner {
         }
         throw e
       }
-      tracker.prNumber = prNumber
-      tracker.repoPath = repoPath
+      tracker.members.set(worktreeId, {
+        worktreeId,
+        prNumber,
+        repoPath,
+        prUrl: '',
+        handledCursor: '',
+        pendingWatermark: '',
+        dirty: false,
+        settled: 'open'
+      })
       tracker.paneKey = paneKey
       tracker.phase = 'watching'
     }
@@ -138,24 +182,21 @@ export class WatchPrRunner implements StepRunner {
       const now = this.deps.now()
       const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
       // Single cadence gate over BOTH network reads (terminal state + arming
-      // reviews) so getPRState/getPRReviews run at most once per poll interval —
+      // reviews) so the per-member sweep runs at most once per poll interval —
       // the idle gate below still runs every tick off the last-polled state.
       const due = now >= tracker.lastPollAt + pollIntervalMs
       if (due) {
         tracker.lastPollAt = now
-        const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
+        const terminal = await this.sweep(ctx, tracker, worktreeId, config)
         if (terminal) {
           return terminal
         }
-        this.armFromReviews(
-          await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!),
-          tracker,
-          config
-        )
       }
 
-      // Four-part gate: dirty AND no active child AND agent idle (debounced).
-      if (tracker.dirty && tracker.activeChildRunId == null) {
+      // Gate: any open member dirty AND no active child AND agent idle (debounced).
+      const dirtyOpen = [...tracker.members.values()].filter((m) => m.dirty && m.settled === 'open')
+      const prLabel = this.prLabel(tracker)
+      if (dirtyOpen.length > 0 && tracker.activeChildRunId == null) {
         const status = this.deps.getAgentLiveStatus(tracker.paneKey ?? '')
         const idle = status === 'idle' || status === 'done'
         if (!idle) {
@@ -163,7 +204,7 @@ export class WatchPrRunner implements StepRunner {
           return {
             outcome: 'needs-more-time',
             status: 'waiting',
-            statusMessage: `Changes requested on #${tracker.prNumber} — waiting for agent to finish`,
+            statusMessage: `Changes requested on ${prLabel} — waiting for agent to finish`,
             nextPollAt: now + pollIntervalMs,
             output: this.progressOutput(tracker)
           }
@@ -176,15 +217,17 @@ export class WatchPrRunner implements StepRunner {
           return {
             outcome: 'needs-more-time',
             status: 'waiting',
-            statusMessage: `Agent idle — confirming before responding to #${tracker.prNumber}`,
+            statusMessage: `Agent idle — confirming before responding to ${prLabel}`,
             output: this.progressOutput(tracker)
           }
         }
-        // Fire a cycle. cycleIndex bumps BEFORE buildCycleOutput so the payload
-        // carries the new index; handledCursor advances AFTER so buildCycleOutput's
-        // `armed` filter still captures this cycle's reviews against the old cursor.
+        // Fire a single batched cycle over all currently-dirty open members.
+        // cycleIndex bumps BEFORE buildCycleOutput so the payload carries the new
+        // index; handledCursor advances AFTER so buildCycleOutput's `armed` filter
+        // still captures this cycle's reviews against the old per-member cursor.
+        const batch = dirtyOpen
         tracker.cycleIndex += 1
-        const cycleOutput = await this.buildCycleOutput(tracker, config)
+        const cycleOutput = await this.buildCycleOutput(batch, tracker, config)
         const childRunId = this.deps.spawnChildRun({
           parentRunId: ctx.runId,
           parentStepId: ctx.step.id,
@@ -192,14 +235,16 @@ export class WatchPrRunner implements StepRunner {
           cycleOutput
         })
         tracker.activeChildRunId = childRunId
-        tracker.handledCursor = tracker.pendingWatermark // consume up to the watermark
-        tracker.dirty = false
+        for (const m of batch) {
+          m.handledCursor = m.pendingWatermark // consume up to the watermark
+          m.dirty = false
+        }
         tracker.idleSince = null
         tracker.phase = 'responding'
         return {
           outcome: 'needs-more-time',
           status: 'waiting',
-          statusMessage: `Responding to #${tracker.prNumber} (round ${tracker.cycleIndex})`,
+          statusMessage: `Responding to ${prLabel} (round ${tracker.cycleIndex})`,
           nextPollAt: now + pollIntervalMs,
           output: this.progressOutput(tracker)
         }
@@ -208,9 +253,10 @@ export class WatchPrRunner implements StepRunner {
       return {
         outcome: 'needs-more-time',
         status: 'waiting',
-        statusMessage: tracker.dirty
-          ? `Changes requested on #${tracker.prNumber} — pending`
-          : `Watching #${tracker.prNumber}`,
+        statusMessage:
+          dirtyOpen.length > 0
+            ? `Changes requested on ${prLabel} — pending`
+            : `Watching ${prLabel}`,
         nextPollAt: tracker.lastPollAt + pollIntervalMs,
         output: this.progressOutput(tracker)
       }
@@ -220,28 +266,22 @@ export class WatchPrRunner implements StepRunner {
     if (tracker.phase === 'responding') {
       const now = this.deps.now()
       const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
+      const prLabel = this.prLabel(tracker)
       // Child status is cheap/in-memory — check every tick.
       const childStatus = this.deps.getChildRunStatus(tracker.activeChildRunId!)
-      // Network reads gated to the poll interval (terminal + coalesce arming).
+      // Network reads gated to the poll interval (per-member terminal + coalesce arming).
       if (now >= tracker.lastPollAt + pollIntervalMs) {
         tracker.lastPollAt = now
-        const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
+        const terminal = await this.sweep(ctx, tracker, worktreeId, config)
         if (terminal) {
-          return terminal // merged/closed/archived cancels child + finishes (Q4)
+          return terminal // every member settled cancels child + finishes (Q4)
         }
-        // Keep arming during the cycle so feedback arriving mid-cycle coalesces
-        // into the next round.
-        this.armFromReviews(
-          await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!),
-          tracker,
-          config
-        )
       }
       if (childStatus === 'active') {
         return {
           outcome: 'needs-more-time',
           status: 'waiting',
-          statusMessage: `Responding to #${tracker.prNumber} (round ${tracker.cycleIndex})`,
+          statusMessage: `Responding to ${prLabel} (round ${tracker.cycleIndex})`,
           nextPollAt: tracker.lastPollAt + pollIntervalMs,
           output: this.progressOutput(tracker)
         }
@@ -254,14 +294,14 @@ export class WatchPrRunner implements StepRunner {
           error: `Review cycle ${tracker.cycleIndex} failed.`
         }
       }
-      // Loop back to watching. If feedback arrived mid-cycle (dirty), the watching
-      // gate fires the next cycle on the next tick (coalesced).
+      // Loop back to watching. If feedback arrived mid-cycle (any member dirty),
+      // the watching gate fires the next batched cycle on the next tick (coalesced).
       tracker.activeChildRunId = null
       tracker.phase = 'watching'
       return {
         outcome: 'needs-more-time',
         status: 'waiting',
-        statusMessage: `Watching #${tracker.prNumber}`,
+        statusMessage: `Watching ${prLabel}`,
         // nextPollAt: now so the watching gate re-evaluates promptly; lastPollAt
         // was just (or recently) set so a coalesced cycle fires without a redundant poll.
         nextPollAt: now,
@@ -273,67 +313,128 @@ export class WatchPrRunner implements StepRunner {
     return {
       outcome: 'needs-more-time',
       status: 'waiting',
-      statusMessage: `Watching #${tracker.prNumber}`,
+      statusMessage: `Watching ${this.prLabel(tracker)}`,
       output: this.progressOutput(tracker)
     }
   }
 
-  /** Returns a terminal step result (merged/closed/archived), or null to keep
-   *  watching. Archived is a forced teardown checked before any PR read. */
-  private async checkTerminal(
+  /** Per-interval per-member sweep: terminal settle + arming. Returns a terminal
+   *  step result when EVERY member is settled (or the workspace is archived), or
+   *  null to keep watching. Archived is a forced teardown checked before any PR
+   *  read. The caller owns the poll cadence gate. */
+  private async sweep(
     ctx: StepRunnerCtx,
     tracker: WatchTracker,
-    worktreeId: string
+    worktreeId: string,
+    config: WatchPrConfig
   ): Promise<StepRunnerResult | null> {
     // Forced teardown: workspace archived → stop the chain cleanly.
     if (this.deps.isWorktreeArchived(worktreeId)) {
       this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id)
-      return this.finish(ctx.step.id, tracker, 'archived', true, 'Stopped — workspace archived')
+      return this.finishArchived(ctx.step.id, tracker)
     }
-    const state = await this.deps.getPRState(tracker.repoPath!, tracker.prNumber!, {
-      noCache: true
-    })
-    // Cache the url so finish() emits it even when the PR merges/closes before
-    // any response cycle ran (buildCycleOutput, which normally caches it, never ran).
-    tracker.prUrl = state.url
-    if (state.state === 'MERGED') {
-      this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id) // cancel any in-flight cycle (Q4)
-      // endChain=false → the chain continues to downstream steps.
-      return this.finish(ctx.step.id, tracker, 'merged', false, 'PR merged')
+    for (const member of tracker.members.values()) {
+      if (member.settled !== 'open') {
+        continue
+      }
+      const state = await this.deps.getPRState(member.repoPath, member.prNumber, { noCache: true })
+      // Cache the url so finishAggregate emits it even when the PR merges/closes
+      // before any response cycle ran (buildCycleOutput, the usual cache point,
+      // never ran for this member).
+      member.prUrl = state.url
+      if (state.state === 'MERGED') {
+        member.settled = 'merged'
+      } else if (state.state === 'CLOSED') {
+        member.settled = 'closed'
+      } else {
+        // Still open — arm from its reviews against the member's own cursor.
+        this.armFromReviews(
+          await this.deps.getPRReviews(member.repoPath, member.prNumber),
+          member,
+          config
+        )
+      }
     }
-    if (state.state === 'CLOSED') {
+    const members = [...tracker.members.values()]
+    if (members.length > 0 && members.every((m) => m.settled !== 'open')) {
+      // Every member settled → cancel any in-flight cycle (Q4) and finalize.
       this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id)
-      // endChain=true → the chain stops cleanly, finalized as completed.
-      return this.finish(ctx.step.id, tracker, 'closed', true, 'PR closed')
+      return this.finishAggregate(ctx.step.id, tracker)
     }
     return null
   }
 
-  /** Build the WATCH_PR_OUTPUT_SCHEMA terminal result. Both output and the
-   *  contextPatch step entry carry the same final shape so downstream steps can
-   *  template {{steps.<id>.finalState}} etc. */
-  private finish(
+  /** Status-line PR label — '#<n>' of the lead member, or ''. Multi-member groups
+   *  show the lead PR here; full per-PR detail is in the cycle output. */
+  private prLabel(tracker: WatchTracker): string {
+    const first = tracker.members.values().next().value as MemberState | undefined
+    return first ? `#${first.prNumber}` : ''
+  }
+
+  /** Build the terminal result (output matches WATCH_PR_OUTPUT_SCHEMA). Shared by
+   *  the archived and aggregate finishers so the two payloads can't drift. */
+  private buildTerminalResult(
     stepId: string,
     tracker: WatchTracker,
-    finalState: 'merged' | 'closed' | 'archived',
+    finalState: string,
     endChain: boolean,
-    msg: string
+    statusMessage: string
   ): StepRunnerResult {
+    const members = [...tracker.members.values()]
+    const first = members[0]
     const output = {
       finalState,
+      memberCount: members.length,
+      mergedCount: members.filter((m) => m.settled === 'merged').length,
+      closedCount: members.filter((m) => m.settled === 'closed').length,
+      membersJson: JSON.stringify(
+        members.map((m) => ({
+          worktreeId: m.worktreeId,
+          prNumber: m.prNumber,
+          prUrl: m.prUrl,
+          finalState: m.settled
+        }))
+      ),
       cyclesRun: tracker.cycleIndex,
-      prNumber: tracker.prNumber ?? 0,
-      prUrl: tracker.prUrl,
+      prNumber: first?.prNumber ?? 0,
+      prUrl: first?.prUrl ?? '',
       finishedAt: this.deps.now()
     }
     return {
       outcome: 'done',
       status: 'succeeded',
       endChain,
-      statusMessage: msg,
+      statusMessage,
       output,
       contextPatch: { steps: { [stepId]: output } }
     }
+  }
+
+  /** Archived teardown — keeps the single-PR 'archived' finalState, stops the chain. */
+  private finishArchived(stepId: string, tracker: WatchTracker): StepRunnerResult {
+    return this.buildTerminalResult(
+      stepId,
+      tracker,
+      'archived',
+      true,
+      'Stopped — workspace archived'
+    )
+  }
+
+  /** Aggregate finish over all settled members: all merged → continue (endChain
+   *  false); any closed → stop cleanly (endChain true). With one member this
+   *  preserves single-PR semantics: 1 merged ⇒ all-merged ⇒ continue, 1 closed
+   *  ⇒ partial-closed ⇒ stop. */
+  private finishAggregate(stepId: string, tracker: WatchTracker): StepRunnerResult {
+    const members = [...tracker.members.values()]
+    const allMerged = members.length > 0 && members.every((m) => m.settled === 'merged')
+    return this.buildTerminalResult(
+      stepId,
+      tracker,
+      allMerged ? 'all-merged' : 'partial-closed',
+      !allMerged,
+      allMerged ? 'All PRs merged' : 'Group settled — some PRs closed'
+    )
   }
 
   /** True when a review should arm a cycle given the configured event filters. */
@@ -350,52 +451,81 @@ export class WatchPrRunner implements StepRunner {
     return false
   }
 
-  /** Arm (set dirty) when an already-fetched review newer than the handled
-   *  cursor matches the configured events. Cadence-free — the caller owns the
-   *  poll gate so this can run on freshly-polled reviews from either phase. */
-  private armFromReviews(reviews: PRReview[], tracker: WatchTracker, config: WatchPrConfig): void {
+  /** Arm (set dirty) the given MEMBER when an already-fetched review newer than
+   *  that member's handled cursor matches the configured events. Cadence-free —
+   *  the caller owns the poll gate so this can run on freshly-polled reviews from
+   *  either phase. */
+  private armFromReviews(reviews: PRReview[], member: MemberState, config: WatchPrConfig): void {
     const armed = reviews.filter(
       (r) =>
         r.submittedAt &&
-        r.submittedAt > tracker.handledCursor &&
+        r.submittedAt > member.handledCursor &&
         this.armingMatches(r, config.events)
     )
     if (armed.length > 0) {
-      tracker.dirty = true
-      tracker.pendingWatermark = armed.at(-1)!.submittedAt
+      member.dirty = true
+      member.pendingWatermark = armed.at(-1)!.submittedAt
     }
   }
 
-  /** Build the per-cycle payload (WATCH_PR_CYCLE_SCHEMA) seeded into the child
-   *  run's context. `armed` reflects only the reviews this cycle consumes — those
-   *  newer than the still-old handledCursor that match the configured events. */
+  /** Build the batched per-cycle payload (WATCH_PR_CYCLE_SCHEMA) seeded into the
+   *  child run's context. Loops the batch building one entry per member; the
+   *  first/only member's fields are also exposed as top-level convenience scalars
+   *  so single-PR branch prompts keep working. Each member's `armed` reflects only
+   *  the reviews this cycle consumes — those newer than its still-old handledCursor
+   *  that match the configured events. */
   private async buildCycleOutput(
+    batch: MemberState[],
     tracker: WatchTracker,
     config: WatchPrConfig
   ): Promise<Record<string, unknown>> {
-    const reviews = await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!)
-    const armed = reviews.filter(
-      (r) =>
-        r.submittedAt &&
-        r.submittedAt > tracker.handledCursor &&
-        this.armingMatches(r, config.events)
-    )
-    const latest = armed.at(-1)
-    const prState = await this.deps.getPRState(tracker.repoPath!, tracker.prNumber!)
-    tracker.prUrl = prState.url // cache so the final terminal output carries it too
-    const comments = await this.deps.getPRComments(tracker.repoPath!, tracker.prNumber!)
-    const unresolved = comments.filter((c) => !c.isResolved)
+    const perMember: PerMemberCycleEntry[] = []
+    let totalArmed = 0
+    for (const m of batch) {
+      const reviews = await this.deps.getPRReviews(m.repoPath, m.prNumber)
+      const armed = reviews.filter(
+        (r) =>
+          r.submittedAt && r.submittedAt > m.handledCursor && this.armingMatches(r, config.events)
+      )
+      totalArmed += armed.length
+      const latest = armed.at(-1)
+      const prState = await this.deps.getPRState(m.repoPath, m.prNumber)
+      m.prUrl = prState.url // cache so the final terminal output carries it too
+      const comments = (await this.deps.getPRComments(m.repoPath, m.prNumber)).filter(
+        (c) => !c.isResolved
+      )
+      perMember.push({
+        worktreeId: m.worktreeId,
+        prNumber: m.prNumber,
+        prUrl: prState.url,
+        prTitle: prState.title,
+        reviewState: latest?.state ?? '',
+        reviewAuthor: latest?.author ?? '',
+        reviewBody: latest?.body ?? '',
+        commentsJson: JSON.stringify(comments),
+        commentsSummary: buildCommentsSummary(comments),
+        repoPath: m.repoPath
+      })
+    }
+    const first = perMember[0]
+    // membersJson omits the internal repoPath (used only to derive the section
+    // header in combinedSummary); keep the durable per-member shape stable.
+    const membersJson = perMember.map(({ repoPath: _repoPath, ...rest }) => rest)
     return {
-      prNumber: tracker.prNumber ?? 0,
-      prUrl: prState.url,
-      prTitle: prState.title,
-      reviewState: latest?.state ?? '',
-      reviewAuthor: latest?.author ?? '',
-      reviewBody: latest?.body ?? '',
-      commentsJson: JSON.stringify(unresolved),
-      commentsSummary: buildCommentsSummary(unresolved),
+      memberCount: batch.length,
+      combinedSummary: buildCombinedSummary(perMember),
+      membersJson: JSON.stringify(membersJson),
       cycleIndex: tracker.cycleIndex,
-      changeRequestCount: armed.length
+      changeRequestCount: totalArmed,
+      prNumber: first?.prNumber ?? 0,
+      prUrl: first?.prUrl ?? '',
+      reviewState: first?.reviewState ?? '',
+      reviewAuthor: first?.reviewAuthor ?? '',
+      reviewBody: first?.reviewBody ?? '',
+      commentsJson: first?.commentsJson ?? '[]',
+      commentsSummary: first?.commentsSummary ?? ''
+      // prTitle lives only inside each membersJson entry, not top-level (the
+      // WATCH_PR_CYCLE_SCHEMA has no top-level prTitle).
     }
   }
 
@@ -430,15 +560,23 @@ export class WatchPrRunner implements StepRunner {
     }
     // Rehydrate durable progress from state.output so a restart resumes mid-watch.
     const persisted = (ctx.state.output ?? {}) as Partial<WatchProgress>
+    const members = new Map<string, MemberState>()
+    for (const m of persisted.members ?? []) {
+      members.set(m.worktreeId, {
+        worktreeId: m.worktreeId,
+        prNumber: m.prNumber,
+        repoPath: m.repoPath,
+        prUrl: m.prUrl ?? '',
+        handledCursor: m.handledCursor ?? '',
+        pendingWatermark: m.pendingWatermark ?? '',
+        dirty: m.dirty ?? false,
+        settled: m.settled ?? 'open'
+      })
+    }
     const tracker: WatchTracker = {
       phase: persisted.phase ?? 'resolving',
-      prNumber: persisted.prNumber ?? null,
-      repoPath: persisted.repoPath ?? null,
+      members,
       paneKey: persisted.paneKey ?? null,
-      prUrl: persisted.prUrl ?? '',
-      handledCursor: persisted.handledCursor ?? '',
-      pendingWatermark: persisted.pendingWatermark ?? '',
-      dirty: persisted.dirty ?? false,
       activeChildRunId: persisted.activeChildRunId ?? null,
       cycleIndex: persisted.cycleIndex ?? 0,
       idleSince: null,
@@ -453,17 +591,22 @@ export class WatchPrRunner implements StepRunner {
     return tracker
   }
 
-  /** Durable subset written to state.output every tick so a restart resumes. */
+  /** Durable subset written to state.output every tick so a restart resumes.
+   *  members serialises Map → array (idleSince/lastPollAt/startedAt stay in-memory). */
   private progressOutput(t: WatchTracker): WatchProgress {
     return {
       phase: t.phase,
-      prNumber: t.prNumber,
-      repoPath: t.repoPath,
+      members: [...t.members.values()].map((m) => ({
+        worktreeId: m.worktreeId,
+        prNumber: m.prNumber,
+        repoPath: m.repoPath,
+        prUrl: m.prUrl,
+        handledCursor: m.handledCursor,
+        pendingWatermark: m.pendingWatermark,
+        dirty: m.dirty,
+        settled: m.settled
+      })),
       paneKey: t.paneKey,
-      prUrl: t.prUrl,
-      handledCursor: t.handledCursor,
-      pendingWatermark: t.pendingWatermark,
-      dirty: t.dirty,
       activeChildRunId: t.activeChildRunId,
       cycleIndex: t.cycleIndex
     }
@@ -484,4 +627,21 @@ function buildCommentsSummary(comments: PRComment[]): string {
     lines.push(`  > ${firstLine}`)
   }
   return lines.join('\n')
+}
+
+/** Combined markdown over a batch: one '## PR #<n> (<repo>)' section per member,
+ *  carrying that member's comments summary (+ review body when present), joined
+ *  by blank lines. The child run gets one readable digest spanning all batched PRs. */
+function buildCombinedSummary(
+  perMember: Pick<PerMemberCycleEntry, 'prNumber' | 'repoPath' | 'commentsSummary' | 'reviewBody'>[]
+): string {
+  const sections = perMember.map((m) => {
+    const repoName = m.repoPath.split('/').pop() ?? m.repoPath
+    const parts = [`## PR #${m.prNumber} (${repoName})`, m.commentsSummary]
+    if (m.reviewBody) {
+      parts.push(m.reviewBody)
+    }
+    return parts.join('\n')
+  })
+  return sections.join('\n\n')
 }
