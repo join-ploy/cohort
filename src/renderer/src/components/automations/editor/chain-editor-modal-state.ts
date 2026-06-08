@@ -321,6 +321,22 @@ export function computeAllErrors(
         all.push({ ...err, stepId: step.id, field })
       }
     })
+    if (step.kind === 'watch-pr') {
+      // Belt-and-suspenders for the no-nested-watch-pr invariant the runtime
+      // relies on: the branch palette/paste already block it, but a
+      // hand-edited or imported automation could still nest one, so surface an
+      // error before save. Recurse through parallel groups in branchSteps too.
+      const branchSteps = (step.config as WatchPrConfig).branchSteps ?? []
+      if (flattenSteps(branchSteps).some((s) => s.kind === 'watch-pr')) {
+        all.push({
+          path: step.id,
+          code: 'unknown-path',
+          message: 'A Watch PR branch cannot contain another Watch PR node.',
+          stepId: step.id,
+          field: 'branchSteps'
+        })
+      }
+    }
     if (step.kind === 'http-request') {
       const config = step.config as HttpRequestStepConfig
       // Why: the step's downstream variables come only from a saved Test mapping, so

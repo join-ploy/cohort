@@ -740,3 +740,45 @@ describe('getBranchAvailableVariablesAtStep — watch-pr branch scope', () => {
     expect(out.steps.b3).toBeUndefined()
   })
 })
+
+describe('computeAllErrors — no nested watch-pr in branchSteps', () => {
+  function watchStep(id: string, branchSteps: StepOrGroup[]): Step {
+    return {
+      id,
+      kind: 'watch-pr',
+      config: { ...(defaultConfigForKind('watch-pr') as WatchPrConfig), branchSteps },
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  function runCommandStep(id: string): Step {
+    return {
+      id,
+      kind: 'run-command',
+      config: defaultConfigForKind('run-command'),
+      onFailure: 'halt',
+      timeoutSeconds: null
+    }
+  }
+
+  it('flags a watch-pr whose branchSteps contains another watch-pr', () => {
+    const draft = makeDraft([watchStep('outer', [watchStep('inner', [])])])
+    const errs = computeAllErrors(draft).filter((e) => e.field === 'branchSteps')
+    expect(errs).toHaveLength(1)
+    expect(errs[0].stepId).toBe('outer')
+    expect(errs[0].message).toMatch(/cannot contain another Watch PR/i)
+  })
+
+  it('flags a nested watch-pr even inside a parallel group in branchSteps', () => {
+    const draft = makeDraft([watchStep('outer', [[runCommandStep('a'), watchStep('inner', [])]])])
+    const errs = computeAllErrors(draft).filter((e) => e.field === 'branchSteps')
+    expect(errs).toHaveLength(1)
+    expect(errs[0].stepId).toBe('outer')
+  })
+
+  it('does not flag a branch with only allowed kinds', () => {
+    const draft = makeDraft([watchStep('outer', [runCommandStep('a'), runCommandStep('b')])])
+    expect(computeAllErrors(draft).filter((e) => e.field === 'branchSteps')).toEqual([])
+  })
+})

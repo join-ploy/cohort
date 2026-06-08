@@ -205,10 +205,18 @@ export function ChainStepList(props: ChainStepListProps): React.JSX.Element {
         toast.error('No automation node on the clipboard')
         return
       }
+      // Reject kinds the palette excludes (the branch editor omits 'watch-pr')
+      // so copy-paste can't bypass the no-nested-watch-pr invariant the runtime
+      // relies on. The top-level chain's availableStepKinds includes every kind,
+      // so its paste is unaffected.
+      if (!isPasteAllowed(step.kind, props.availableStepKinds)) {
+        toast.error("Watch PR can't be nested inside a review-loop branch.")
+        return
+      }
       onStepsChange(place(steps, step))
       toast.success('Node pasted')
     },
-    [steps, onStepsChange]
+    [steps, onStepsChange, props.availableStepKinds]
   )
 
   const extractFromGroup = React.useCallback(
@@ -384,6 +392,16 @@ export function ChainStepList(props: ChainStepListProps): React.JSX.Element {
       />
     </div>
   )
+}
+
+/**
+ * True when a clipboard step of `kind` may be pasted into a list whose palette
+ * offers `availableStepKinds`. The branch (nested) editor omits 'watch-pr', so
+ * this keeps paste consistent with the palette and closes the copy-paste hole
+ * around the no-nested-watch-pr invariant.
+ */
+export function isPasteAllowed(kind: StepKind, availableStepKinds: StepKind[]): boolean {
+  return availableStepKinds.includes(kind)
 }
 
 /**
