@@ -41,6 +41,7 @@ type WatchTracker = {
   prNumber: number | null
   repoPath: string | null
   paneKey: string | null
+  prUrl: string // best-effort; '' until Task 8's cycle-output fetch learns it
   handledCursor: string // ISO; '' = nothing handled yet
   pendingWatermark: string // latest arming activity seen but not yet consumed
   dirty: boolean
@@ -58,6 +59,7 @@ type WatchProgress = Pick<
   | 'prNumber'
   | 'repoPath'
   | 'paneKey'
+  | 'prUrl'
   | 'handledCursor'
   | 'pendingWatermark'
   | 'dirty'
@@ -74,17 +76,20 @@ export class WatchPrRunner implements StepRunner {
     const config = ctx.step.config as WatchPrConfig
     const tracker = this.getOrCreateTracker(ctx)
 
+    // worktreeId is needed by both resolving and watching (terminal check), so
+    // resolve it once up front and guard the template error in a single place.
+    let worktreeId: string
+    try {
+      worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
+    } catch (e) {
+      if (e instanceof TemplateResolutionError) {
+        return { outcome: 'failed', status: 'failed', error: e.message }
+      }
+      throw e
+    }
+
     // ── Phase: resolving ──────────────────────────────────────────────
     if (tracker.phase === 'resolving') {
-      let worktreeId: string
-      try {
-        worktreeId = resolveTemplate(config.worktreeRef, ctx.context)
-      } catch (e) {
-        if (e instanceof TemplateResolutionError) {
-          return { outcome: 'failed', status: 'failed', error: e.message }
-        }
-        throw e
-      }
       const meta = this.deps.getWorktreeMeta(worktreeId)
       if (!meta) {
         return { outcome: 'failed', status: 'failed', error: `Unknown worktree "${worktreeId}".` }
@@ -116,13 +121,127 @@ export class WatchPrRunner implements StepRunner {
       tracker.phase = 'watching'
     }
 
-    // TODO(Task 7-9): watching + responding phases. For now, once resolved we
-    // simply park in 'waiting' so the run stays alive without doing anything.
+    // ── Phase: watching ──────────────────────────────────────────────
+    if (tracker.phase === 'watching') {
+      const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
+      if (terminal) {
+        return terminal
+      }
+      await this.pollArming(tracker, config, this.deps.now())
+      // TODO(Task 8): four-part idle gate + spawn a cycle when dirty.
+      const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
+      return {
+        outcome: 'needs-more-time',
+        status: 'waiting',
+        statusMessage: tracker.dirty
+          ? `Changes requested on #${tracker.prNumber} — pending`
+          : `Watching #${tracker.prNumber}`,
+        nextPollAt: this.deps.now() + pollIntervalMs,
+        output: this.progressOutput(tracker)
+      }
+    }
+
+    // TODO(Task 9): responding phase. For now, any other phase parks in waiting
+    // so the run stays alive without doing anything.
     return {
       outcome: 'needs-more-time',
       status: 'waiting',
       statusMessage: `Watching #${tracker.prNumber}`,
       output: this.progressOutput(tracker)
+    }
+  }
+
+  /** Returns a terminal step result (merged/closed/archived), or null to keep
+   *  watching. Archived is a forced teardown checked before any PR read. */
+  private async checkTerminal(
+    ctx: StepRunnerCtx,
+    tracker: WatchTracker,
+    worktreeId: string
+  ): Promise<StepRunnerResult | null> {
+    // Forced teardown: workspace archived → stop the chain cleanly.
+    if (this.deps.isWorktreeArchived(worktreeId)) {
+      this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id)
+      return this.finish(ctx.step.id, tracker, 'archived', true, 'Stopped — workspace archived')
+    }
+    const state = await this.deps.getPRState(tracker.repoPath!, tracker.prNumber!, {
+      noCache: true
+    })
+    if (state.state === 'MERGED') {
+      this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id) // cancel any in-flight cycle (Q4)
+      // endChain=false → the chain continues to downstream steps.
+      return this.finish(ctx.step.id, tracker, 'merged', false, 'PR merged')
+    }
+    if (state.state === 'CLOSED') {
+      this.deps.cancelChildRunsForStep(ctx.runId, ctx.step.id)
+      // endChain=true → the chain stops cleanly, finalized as completed.
+      return this.finish(ctx.step.id, tracker, 'closed', true, 'PR closed')
+    }
+    return null
+  }
+
+  /** Build the WATCH_PR_OUTPUT_SCHEMA terminal result. Both output and the
+   *  contextPatch step entry carry the same final shape so downstream steps can
+   *  template {{steps.<id>.finalState}} etc. */
+  private finish(
+    stepId: string,
+    tracker: WatchTracker,
+    finalState: 'merged' | 'closed' | 'archived',
+    endChain: boolean,
+    msg: string
+  ): StepRunnerResult {
+    const output = {
+      finalState,
+      cyclesRun: tracker.cycleIndex,
+      prNumber: tracker.prNumber ?? 0,
+      prUrl: tracker.prUrl,
+      finishedAt: this.deps.now()
+    }
+    return {
+      outcome: 'done',
+      status: 'succeeded',
+      endChain,
+      statusMessage: msg,
+      output,
+      contextPatch: { steps: { [stepId]: output } }
+    }
+  }
+
+  /** True when a review should arm a cycle given the configured event filters. */
+  private armingMatches(review: PRReview, events: WatchPrConfig['events']): boolean {
+    if (events.anyReview) {
+      return true
+    }
+    if (events.changesRequested && review.state === 'CHANGES_REQUESTED') {
+      return true
+    }
+    if (events.newReviewComments && review.state === 'COMMENTED') {
+      return true
+    }
+    return false
+  }
+
+  /** Poll the review feed at the configured cadence; arm (set dirty) when a
+   *  matching review newer than the handled cursor appears. */
+  private async pollArming(
+    tracker: WatchTracker,
+    config: WatchPrConfig,
+    now: number
+  ): Promise<void> {
+    const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
+    if (now < tracker.lastPollAt + pollIntervalMs) {
+      return
+    }
+    tracker.lastPollAt = now
+    const reviews = await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!)
+    const armed = reviews.filter(
+      (r) =>
+        r.submittedAt &&
+        r.submittedAt > tracker.handledCursor &&
+        this.armingMatches(r, config.events)
+    )
+    if (armed.length > 0) {
+      tracker.dirty = true
+      tracker.pendingWatermark = armed.at(-1)!.submittedAt
     }
   }
 
@@ -152,6 +271,7 @@ export class WatchPrRunner implements StepRunner {
       prNumber: persisted.prNumber ?? null,
       repoPath: persisted.repoPath ?? null,
       paneKey: persisted.paneKey ?? null,
+      prUrl: persisted.prUrl ?? '',
       handledCursor: persisted.handledCursor ?? '',
       pendingWatermark: persisted.pendingWatermark ?? '',
       dirty: persisted.dirty ?? false,
@@ -176,6 +296,7 @@ export class WatchPrRunner implements StepRunner {
       prNumber: t.prNumber,
       repoPath: t.repoPath,
       paneKey: t.paneKey,
+      prUrl: t.prUrl,
       handledCursor: t.handledCursor,
       pendingWatermark: t.pendingWatermark,
       dirty: t.dirty,
