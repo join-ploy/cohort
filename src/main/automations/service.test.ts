@@ -1130,6 +1130,152 @@ describe('AutomationService watch-pr child runs', () => {
     expect(statusOf(otherParent)).toBe('running')
   })
 
+  it('cancelRun stops a live child run (restart-safe, no in-memory tracker primed)', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    store.replaceAutomationRun(parent)
+
+    // Active child of the watch step. We never prime the WatchPrRunner's
+    // in-memory tracker, simulating a post-restart state where dropRun would
+    // find nothing — so only the store-querying teardown can catch this child.
+    vi.advanceTimersByTime(1000)
+    const childId = service.spawnChildRun({
+      parentRunId: parent.id,
+      parentStepId: 'watch',
+      cycleIndex: 0,
+      cycleOutput: {}
+    })
+    expect(store.getAutomationRun(childId)!.status).toBe('running')
+
+    service.cancelRun(parent.id)
+
+    const status = (
+      service as unknown as { getChildRunStatus(id: string): string }
+    ).getChildRunStatus(childId)
+    expect(status).toBe('failed') // cancelled → no longer active
+    expect(store.getAutomationRun(childId)!.status).toBe('cancelled')
+  })
+
+  it('cancelRun leaves terminal children and other parents alone', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    store.replaceAutomationRun(parent)
+
+    const makeChild = (overrides: Partial<AutomationRun>): string => {
+      vi.advanceTimersByTime(1000)
+      const r = store.createAutomationRun(stored, Date.now(), 'manual')
+      r.parentRunId = parent.id
+      r.parentStepId = 'watch'
+      Object.assign(r, overrides)
+      store.replaceAutomationRun(r)
+      return r.id
+    }
+    const completedChild = makeChild({ status: 'completed' }) // terminal — untouched
+    const otherParentChild = makeChild({ status: 'running', parentRunId: 'other-parent' })
+
+    service.cancelRun(parent.id)
+
+    expect(store.getAutomationRun(completedChild)!.status).toBe('completed')
+    expect(store.getAutomationRun(otherParentChild)!.status).toBe('running')
+  })
+
+  it('retryRunFromStep before the watch step cancels the live child (restart-safe)', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    // Flat stepStates for the single watch step — retrying from flat index 0
+    // drops the watch step, which owns the child.
+    parent.stepStates = [
+      {
+        stepId: 'watch',
+        status: 'running',
+        startedAt: 0,
+        finishedAt: null,
+        output: null,
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(parent)
+
+    // Active child of the watch step; no in-memory tracker primed (post-restart).
+    vi.advanceTimersByTime(1000)
+    const childId = service.spawnChildRun({
+      parentRunId: parent.id,
+      parentStepId: 'watch',
+      cycleIndex: 0,
+      cycleOutput: {}
+    })
+    expect(store.getAutomationRun(childId)!.status).toBe('running')
+
+    const result = service.retryRunFromStep(parent.id, 0)
+    expect(result).toBeTruthy()
+
+    expect(store.getAutomationRun(childId)!.status).toBe('cancelled')
+  })
+
+  it('retryParallelStep cancels children owned by the dropped target + downstream steps', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    // Parallel group [a, b] followed by a downstream watch step. Retrying 'a'
+    // resets the group target and drops the downstream watch step; both the
+    // target step ('a') and the dropped downstream step ('watch') should have
+    // their child runs cancelled.
+    const automation = store.createAutomation({
+      name: 'Parallel + watch chain',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [[runPromptStep('a'), runPromptStep('b')], watchStep('watch')]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    parent.stepStates = [
+      { stepId: 'a', status: 'succeeded', startedAt: 0, finishedAt: 1, output: null, error: null },
+      { stepId: 'b', status: 'succeeded', startedAt: 0, finishedAt: 1, output: null, error: null },
+      {
+        stepId: 'watch',
+        status: 'running',
+        startedAt: 0,
+        finishedAt: null,
+        output: null,
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(parent)
+
+    const makeChild = (parentStepId: string): string => {
+      vi.advanceTimersByTime(1000)
+      const r = store.createAutomationRun(stored, Date.now(), 'manual')
+      r.parentRunId = parent.id
+      r.parentStepId = parentStepId
+      r.status = 'running'
+      store.replaceAutomationRun(r)
+      return r.id
+    }
+    const targetChild = makeChild('a') // owned by the retried (reset) target
+    const downstreamChild = makeChild('watch') // owned by the dropped downstream step
+
+    service.retryParallelStep(parent.id, 'a')
+
+    expect(store.getAutomationRun(targetChild)!.status).toBe('cancelled')
+    expect(store.getAutomationRun(downstreamChild)!.status).toBe('cancelled')
+  })
+
   it('resolveChildRunAutomation returns branchSteps as the child automation steps', async () => {
     const branch = [runPromptStep('rp')]
     const { store, service, automationId } = await seedWatchAutomation(branch)

@@ -1012,6 +1012,17 @@ export class AutomationService {
     }
   }
 
+  /** Cancel every non-terminal child (branch) run of a parent run, regardless of
+   *  step. Store-querying so it survives a restart that wiped runner trackers.
+   *  Used by cancelRun so a Stop/delete also stops the watch loop's in-flight cycle. */
+  private cancelChildRunsForRun(parentRunId: string): void {
+    for (const r of this.store.listAutomationRuns()) {
+      if (r.parentRunId === parentRunId && isActiveChainRunStatus(r.status)) {
+        this.cancelRun(r.id)
+      }
+    }
+  }
+
   /** Operator-initiated stop: mark the run cancelled, finalize any trailing
    *  non-terminal step states with a "Cancelled" error so the UI doesn't
    *  show a step indefinitely `running` under a stopped run, and drop every
@@ -1053,6 +1064,10 @@ export class AutomationService {
     for (const runner of this.allRunners()) {
       runner.dropRun?.(run.id)
     }
+    // Stop any watch-pr loop owned by this run by cancelling its child runs.
+    // Store-querying (restart-safe) — the runner's in-memory dropRun can miss
+    // children after an app restart.
+    this.cancelChildRunsForRun(run.id)
     this.broadcastAutomationsChanged()
     return run
   }
@@ -1087,6 +1102,9 @@ export class AutomationService {
       for (const runner of this.allRunners()) {
         runner.dropStep?.(run.id, state.stepId)
       }
+      // Restart-safe: cancel any watch-pr child runs owned by this dropped step
+      // so the old loop stops before the chain re-reaches the node.
+      this.cancelChildRunsForStep(run.id, state.stepId)
     }
     // Why: close any panes the prior steps opened. The runner-tracker path
     // above only fires when the runner still has an in-memory tracker, which
@@ -1211,10 +1229,15 @@ export class AutomationService {
     for (const runner of this.allRunners()) {
       runner.dropStep?.(run.id, targetState.stepId)
     }
+    // Restart-safe: cancel any watch-pr child runs owned by this dropped step
+    // so the old loop stops before the chain re-reaches the node.
+    this.cancelChildRunsForStep(run.id, targetState.stepId)
     for (const downstream of droppedStates) {
       for (const runner of this.allRunners()) {
         runner.dropStep?.(run.id, downstream.stepId)
       }
+      // Restart-safe: cancel any watch-pr child runs owned by this dropped step.
+      this.cancelChildRunsForStep(run.id, downstream.stepId)
     }
     // Why: persistent fallback — same rationale as retryRunFromStep. Includes
     // the target's pre-reset snapshot plus every downstream state so the
