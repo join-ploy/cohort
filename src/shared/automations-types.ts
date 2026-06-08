@@ -103,6 +103,11 @@ export type AutomationRun = {
   parentRunId?: string
   parentStepId?: string
   cycleIndex?: number // 1-based review round
+  // Set on a background watch run spawned by a detached watch-pr step (provenance
+  // / UI grouping only — no teardown coupling to the spawner).
+  detachedFromRunId?: string
+  // When true, tickRunningChains skips this run (paused). Durable state preserved.
+  paused?: boolean
 }
 
 export type AutomationCreateInput = {
@@ -518,6 +523,9 @@ export type WatchPrConfig = {
   // When true, an approved (but unmerged) PR ends the loop and continues the
   // chain — for a group, only once every member PR is approved/merged.
   endOnApprove?: boolean
+  // When true, the watch step spawns a background run and returns immediately so
+  // the chain continues; the background run carries the loop until terminal.
+  detached?: boolean
   branchSteps: StepOrGroup[] // sub-graph run each cycle
 }
 
