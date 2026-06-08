@@ -930,6 +930,55 @@ export class AutomationService {
     }
   }
 
+  /** FIFO pane queue: paneKey → ordered waiter tokens (`${runId}:${stepId}`). The
+   *  head holds the pane. Ephemeral (in-memory) so a restart can't deadlock — steps
+   *  re-register on their next tick. */
+  private readonly paneQueue = new Map<string, string[]>()
+
+  /** Register `token` for `paneKey` (tail) if new; return true iff it is the head
+   *  (the holder). Synchronous — callers acquire before any await so only the head
+   *  ever drives the agent. */
+  acquirePane(paneKey: string, token: string): boolean {
+    let q = this.paneQueue.get(paneKey)
+    if (!q) {
+      q = []
+      this.paneQueue.set(paneKey, q)
+    }
+    if (!q.includes(token)) {
+      q.push(token)
+    }
+    return q[0] === token
+  }
+
+  /** Remove `token` from `paneKey`'s queue (idempotent). The next waiter becomes
+   *  the holder on its next tick. */
+  releasePane(paneKey: string, token: string): void {
+    const q = this.paneQueue.get(paneKey)
+    if (!q) {
+      return
+    }
+    const idx = q.indexOf(token)
+    if (idx !== -1) {
+      q.splice(idx, 1)
+    }
+    if (q.length === 0) {
+      this.paneQueue.delete(paneKey)
+    }
+  }
+
+  /** Release every pane claim held/queued by a run (any step) — called from the
+   *  cancel path so a dead holder never blocks the queue. */
+  private releasePanesForRun(runId: string): void {
+    for (const [paneKey, q] of this.paneQueue) {
+      const filtered = q.filter((t) => !t.startsWith(`${runId}:`))
+      if (filtered.length === 0) {
+        this.paneQueue.delete(paneKey)
+      } else if (filtered.length !== q.length) {
+        this.paneQueue.set(paneKey, filtered)
+      }
+    }
+  }
+
   /** The transient automation a child (branch) run executes against: same
    *  trigger as the parent automation, steps = the watch step's branchSteps. */
   private resolveChildRunAutomation(
@@ -1076,6 +1125,8 @@ export class AutomationService {
     // Store-querying (restart-safe) — the runner's in-memory dropRun can miss
     // children after an app restart.
     this.cancelChildRunsForRun(run.id)
+    // Free this run's pane claims so a dead holder never blocks the queue.
+    this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
     return run
   }

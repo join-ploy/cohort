@@ -1404,3 +1404,98 @@ describe('AutomationService watch-pr child runs', () => {
     expect(map(undefined)).toBe('unknown')
   })
 })
+
+describe('AutomationService pane queue', () => {
+  type PaneQ = {
+    acquirePane(p: string, t: string): boolean
+    releasePane(p: string, t: string): void
+  }
+
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-automations-test-'))
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-13T09:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  async function makeService(): Promise<{
+    store: Awaited<ReturnType<typeof createStore>>
+    service: AutomationService
+    automationId: string
+  }> {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    const automation = store.createAutomation({
+      name: 'Pane queue',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [
+        {
+          id: 'rp',
+          kind: 'run-prompt',
+          config: { worktreeRef: 'wt1', agentId: 'claude', prompt: 'fix', doneDebounceSeconds: 15 },
+          onFailure: 'halt',
+          timeoutSeconds: null
+        }
+      ]
+    })
+    const stored = store.listAutomations().find((entry) => entry.id === automation.id)!
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+    return { store, service, automationId: stored.id }
+  }
+
+  it('grants the pane FIFO; others wait until release', async () => {
+    const { service } = await makeService()
+    const q = service as unknown as PaneQ
+    expect(q.acquirePane('pane1', 'A')).toBe(true)
+    expect(q.acquirePane('pane1', 'B')).toBe(false)
+    expect(q.acquirePane('pane1', 'A')).toBe(true) // idempotent re-acquire by head
+    q.releasePane('pane1', 'A')
+    expect(q.acquirePane('pane1', 'B')).toBe(true) // B now head
+  })
+
+  it('keeps panes independent', async () => {
+    const { service } = await makeService()
+    const q = service as unknown as PaneQ
+    expect(q.acquirePane('p1', 'A')).toBe(true)
+    expect(q.acquirePane('p2', 'B')).toBe(true)
+  })
+
+  it('releasePane on an unknown token is a no-op', async () => {
+    const { service } = await makeService()
+    const q = service as unknown as PaneQ
+    q.acquirePane('p', 'A')
+    q.releasePane('p', 'NOPE')
+    expect(q.acquirePane('p', 'A')).toBe(true)
+  })
+
+  it("cancelRun frees the cancelled run's pane claims so the next waiter proceeds", async () => {
+    const { store, service, automationId } = await makeService()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const run = store.createAutomationRun(stored, Date.now(), 'manual')
+    run.status = 'running'
+    store.replaceAutomationRun(run)
+
+    const q = service as unknown as PaneQ
+    // run-1 holds the pane (head); run-2 queues behind it.
+    expect(q.acquirePane('pane', `${run.id}:s1`)).toBe(true)
+    expect(q.acquirePane('pane', 'run-2:s1')).toBe(false)
+
+    service.cancelRun(run.id)
+
+    // run-1's token is gone, so run-2 is now the head.
+    expect(q.acquirePane('pane', 'run-2:s1')).toBe(true)
+  })
+})
