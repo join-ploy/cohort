@@ -453,11 +453,15 @@ export class WatchPrRunner implements StepRunner {
     return null
   }
 
-  /** Status-line PR label — '#<n>' of the lead member, or ''. Multi-member groups
-   *  show the lead PR here; full per-PR detail is in the cycle output. */
+  /** Status-line PR label — '#<n>' for a single PR, '#<n> +N more' for a group.
+   *  Full per-PR detail is in the cycle output. */
   private prLabel(tracker: WatchTracker): string {
-    const first = tracker.members.values().next().value as MemberState | undefined
-    return first ? `#${first.prNumber}` : ''
+    const members = [...tracker.members.values()]
+    if (members.length === 0) {
+      return ''
+    }
+    const lead = `#${members[0].prNumber}`
+    return members.length === 1 ? lead : `${lead} +${members.length - 1} more`
   }
 
   /** Build the terminal result (output matches WATCH_PR_OUTPUT_SCHEMA). Shared by

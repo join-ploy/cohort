@@ -1019,6 +1019,14 @@ describe('WatchPrRunner — group', () => {
     expect(output.phase).toBe('watching')
   })
 
+  it('status label reflects multiple members (#lead +N more)', async () => {
+    const runner = new WatchPrRunner(makeGroupDeps([MEMBER_A, MEMBER_B]))
+    const result = await runner.tick(
+      groupCtx({ stateOutput: groupWatchingState(), configOverrides: { pollIntervalSeconds: 0 } })
+    )
+    expect(result.statusMessage).toBe('Watching #101 +1 more')
+  })
+
   it('tears down when an open member worktree is archived', async () => {
     const runner = new WatchPrRunner(
       makeGroupDeps([MEMBER_A, MEMBER_B], { isWorktreeArchived: (id) => id === MEMBER_A })
