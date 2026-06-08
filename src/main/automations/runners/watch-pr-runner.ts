@@ -1,7 +1,7 @@
 import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner'
 import type { WatchPrConfig } from '../../../shared/automations-types'
 import type { PRWatchState, PRReview } from '../../github/client'
-import type { PRComment } from '../../../shared/types'
+import type { PRComment, WorkspaceGroup } from '../../../shared/types'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 // Liveness of the supervised pane's agent, normalized for the idle gate. The
@@ -14,6 +14,16 @@ export type WatchPrDeps = {
   ) => { linkedPR: number | null; path: string; repoPath: string } | undefined
   getRepoPath: (repoId: string) => string | undefined
   resolveLinkedPR: (worktreePath: string, repoPath: string) => Promise<number | null>
+  /** All workspace groups — for expanding a group:<uuid> worktreeRef into members. */
+  getWorkspaceGroups: () => readonly WorkspaceGroup[]
+  /** True when the worktree has a diff from main — a no-diff member has no PR. */
+  hasChangesFromMain: (
+    worktreeId: string,
+    path: string,
+    connectionId: string | null
+  ) => Promise<boolean>
+  /** Connection id for a repo (SSH-aware), passed to hasChangesFromMain. */
+  getConnectionId: (repoId: string) => string | null
   isWorktreeArchived: (worktreeId: string) => boolean
   getPRState: (
     repoPath: string,

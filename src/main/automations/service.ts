@@ -452,6 +452,14 @@ export class AutomationService {
       getRepoPath: (repoId) => this.store.getRepo(repoId)?.path,
       resolveLinkedPR: (worktreePath, repoPath) =>
         this.resolveLinkedPRForRunner(worktreePath, repoPath),
+      // Group expand/no-diff-skip deps — reuse collect-ci's exact closures so
+      // both runners resolve groups and member diffs identically.
+      getWorkspaceGroups: () => this.store.getWorkspaceGroups(),
+      hasChangesFromMain: async (worktreeId, path, connectionId) => {
+        const result = await hasPromptTargetChangesFromMain([{ worktreeId, path, connectionId }])
+        return result.hasChanges
+      },
+      getConnectionId: (repoId) => this.store.getRepo(repoId)?.connectionId ?? null,
       // True when the worktree is pruned (gone), archived directly, OR its
       // workspace group is archived — each is a forced teardown signal for the
       // watch loop.

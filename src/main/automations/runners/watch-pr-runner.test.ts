@@ -10,6 +10,9 @@ function makeDeps(overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
     getWorktreeMeta: () => ({ linkedPR: 42, path: '/tmp/wt', repoPath: '/tmp/repo' }),
     getRepoPath: () => '/tmp/repo',
     resolveLinkedPR: async () => null,
+    getWorkspaceGroups: vi.fn(() => []),
+    hasChangesFromMain: vi.fn(async () => true),
+    getConnectionId: vi.fn(() => null),
     isWorktreeArchived: () => false,
     getPRState: async () =>
       ({
