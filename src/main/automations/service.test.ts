@@ -1863,4 +1863,23 @@ describe('AutomationService pane queue', () => {
     expect(q.getChildRunStatus(child.id)).toBe('failed')
     expect(q.acquirePane('pane', 'waiter:b1')).toBe(true)
   })
+
+  it('deleteAutomation cancels active runs and frees their pane claims', async () => {
+    const { store, service, automationId } = await makeService()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const run = store.createAutomationRun(stored, Date.now(), 'manual')
+    run.status = 'running'
+    store.replaceAutomationRun(run)
+
+    const q = service as unknown as PaneQ
+    expect(q.acquirePane('pane', `${run.id}:s1`)).toBe(true)
+    expect(q.acquirePane('pane', 'waiter:s1')).toBe(false)
+
+    service.deleteAutomation(automationId)
+
+    // Automation + its runs are gone, and the run's pane is freed → waiter promoted.
+    expect(store.listAutomations().find((a) => a.id === automationId)).toBeUndefined()
+    expect(store.listAutomationRuns().find((r) => r.id === run.id)).toBeUndefined()
+    expect(q.acquirePane('pane', 'waiter:s1')).toBe(true)
+  })
 })

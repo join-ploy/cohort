@@ -69,7 +69,9 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
       maskAutomation(store.updateAutomation(args.id, sealUpdates(args.id, args.updates)))
   )
   ipcMain.handle('automations:delete', (_event, args: { id: string }): void => {
-    store.deleteAutomation(args.id)
+    // Via the service so active runs (incl. detached watchers + branch cycles)
+    // are cancelled — releasing panes/trackers — before the store hard-deletes.
+    service.deleteAutomation(args.id)
   })
   ipcMain.handle(
     'automations:runNow',

@@ -1159,6 +1159,19 @@ export class AutomationService {
    *  runner tracker for the run so a stray tick can't pick the pane back up.
    *  Returns the updated run or undefined when the id doesn't exist / the
    *  run is already in a terminal state. */
+  /** Delete an automation. Cancel its active runs FIRST so panes, runner
+   *  trackers, and any detached/branch runs (which share this automationId) are
+   *  torn down — the store's hard-delete bypasses that cleanup on its own. */
+  deleteAutomation(id: string): void {
+    for (const run of this.store.listAutomationRuns()) {
+      if (run.automationId === id && isActiveChainRunStatus(run.status)) {
+        this.cancelRun(run.id)
+      }
+    }
+    this.store.deleteAutomation(id)
+    this.broadcastAutomationsChanged()
+  }
+
   cancelRun(runId: string): AutomationRun | undefined {
     const run = this.store.listAutomationRuns().find((entry) => entry.id === runId)
     if (!run) {
