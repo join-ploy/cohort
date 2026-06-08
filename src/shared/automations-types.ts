@@ -98,6 +98,11 @@ export type AutomationRun = {
   triggerRuleId?: string
   triggerEntityId?: string
   restartedFromRunId?: string
+  // Set when this run is a watch-pr response cycle. Its steps come from the
+  // parent automation's watch step `branchSteps`, not `automation.steps`.
+  parentRunId?: string
+  parentStepId?: string
+  cycleIndex?: number // 1-based review round
 }
 
 export type AutomationCreateInput = {
@@ -370,6 +375,7 @@ export type StepKind =
   | 'update-linear-issue'
   | 'collect-ci-results'
   | 'http-request'
+  | 'watch-pr'
 
 export type RunPromptConfig = {
   worktreeRef: string
@@ -494,6 +500,24 @@ export type CollectCiResultsConfig = {
   includeComments: boolean
 }
 
+// Long-lived PR review-loop node. Watches a PR and runs `branchSteps` as a
+// child run each time changes are requested, until the PR is merged/closed.
+export type WatchPrConfig = {
+  worktreeRef: string // template — resolves the single worktree → PR
+  paneRef: string // template — supervised pane (idle gate + inherited by branch)
+  events: {
+    changesRequested: boolean // default true
+    newReviewComments: boolean // default false
+    anyReview: boolean // default false
+  }
+  pollIntervalSeconds: number // PR-state poll cadence (default 30)
+  agentIdleDebounceSeconds: number // idle window before firing a cycle
+  // When false (default) a failed branch cycle keeps the loop watching; the
+  // failure is recorded on that cycle's child run. True halts the whole watch.
+  failedCycleHaltsLoop?: boolean
+  branchSteps: StepOrGroup[] // sub-graph run each cycle
+}
+
 // In-chain "Make HTTP request" step. A strict subset of HttpEndpointConfig — no
 // poll/dedup/picker fields — reusing the trigger's request builder + Test mapping.
 export type HttpRequestStepConfig = {
@@ -515,6 +539,7 @@ export type StepConfig =
   | UpdateLinearIssueConfig
   | CollectCiResultsConfig
   | HttpRequestStepConfig
+  | WatchPrConfig
 
 export type Step = {
   id: string

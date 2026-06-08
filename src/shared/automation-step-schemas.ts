@@ -66,6 +66,10 @@ export const COLLECT_CI_RESULTS_OUTPUT_SCHEMA: OutputSchema = {
 // map. The empty entry only keeps SCHEMA_BY_KIND exhaustive.
 export const HTTP_REQUEST_OUTPUT_SCHEMA: OutputSchema = {}
 
+// Empty for now: watch-pr is a long-lived loop node whose value is spawning
+// child runs, not template-consumable output. Keeps SCHEMA_BY_KIND exhaustive.
+export const WATCH_PR_OUTPUT_SCHEMA: OutputSchema = {}
+
 export const MANUAL_TRIGGER_SCHEMA: OutputSchema = {
   firedAt: 'number',
   actorEmail: 'string'
@@ -116,7 +120,8 @@ const SCHEMA_BY_KIND: Record<StepKind, OutputSchema> = {
   'run-command': RUN_COMMAND_OUTPUT_SCHEMA,
   'update-linear-issue': UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
   'collect-ci-results': COLLECT_CI_RESULTS_OUTPUT_SCHEMA,
-  'http-request': HTTP_REQUEST_OUTPUT_SCHEMA
+  'http-request': HTTP_REQUEST_OUTPUT_SCHEMA,
+  'watch-pr': WATCH_PR_OUTPUT_SCHEMA
 }
 
 export function getOutputSchemaForKind(kind: StepKind): OutputSchema {
