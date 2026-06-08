@@ -66,28 +66,37 @@ export const COLLECT_CI_RESULTS_OUTPUT_SCHEMA: OutputSchema = {
 // map. The empty entry only keeps SCHEMA_BY_KIND exhaustive.
 export const HTTP_REQUEST_OUTPUT_SCHEMA: OutputSchema = {}
 
-// Final output (parent-chain scope), available to steps AFTER the watch node.
+// Final output (parent-chain scope). For a single PR: memberCount=1, finalState
+// 'all-merged'|'partial-closed' (1 merged ⇒ all-merged ⇒ chain continues; 1
+// closed ⇒ partial-closed ⇒ chain stops). prNumber/prUrl = first/only member.
 export const WATCH_PR_OUTPUT_SCHEMA: OutputSchema = {
-  finalState: 'string', // 'merged' | 'closed' | 'archived'
+  finalState: 'string',
+  memberCount: 'number',
+  mergedCount: 'number',
+  closedCount: 'number',
+  membersJson: 'string',
   cyclesRun: 'number',
   prNumber: 'number',
   prUrl: 'string',
   finishedAt: 'number'
 }
 
-// Per-cycle payload (branch scope) — seeded into each child run's context
-// under steps.<watch-id>.*. Surfaced only inside the branch editor.
+// Per-cycle payload (branch scope), seeded under steps.<watch-id>.*. For a group
+// batch this carries all batched members; the convenience scalars point at the
+// first member so single-PR branch prompts keep working unchanged.
 export const WATCH_PR_CYCLE_SCHEMA: OutputSchema = {
+  memberCount: 'number',
+  combinedSummary: 'string',
+  membersJson: 'string',
+  cycleIndex: 'number',
+  changeRequestCount: 'number',
   prNumber: 'number',
   prUrl: 'string',
-  prTitle: 'string',
   reviewState: 'string',
   reviewAuthor: 'string',
   reviewBody: 'string',
   commentsJson: 'string',
-  commentsSummary: 'string',
-  cycleIndex: 'number',
-  changeRequestCount: 'number'
+  commentsSummary: 'string'
 }
 
 export const MANUAL_TRIGGER_SCHEMA: OutputSchema = {

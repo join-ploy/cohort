@@ -128,31 +128,35 @@ describe('getOutputSchemaForStep', () => {
 })
 
 describe('watch-pr schema', () => {
-  it('registers the full final-output schema for watch-pr', () => {
-    // Lock the whole contract so a field-name/type typo is caught before the
-    // runner (Task 9) and editor (Task 13) build against it.
-    expect(SCHEMA_BY_KIND['watch-pr']).toBe(WATCH_PR_OUTPUT_SCHEMA)
-    expect(WATCH_PR_OUTPUT_SCHEMA).toEqual({
-      finalState: 'string',
-      cyclesRun: 'number',
-      prNumber: 'number',
-      prUrl: 'string',
-      finishedAt: 'number'
-    })
-  })
-
-  it('exposes the full per-cycle (branch-scope) schema, not registered in SCHEMA_BY_KIND', () => {
+  it('cycle schema carries batched + convenience fields', () => {
     expect(WATCH_PR_CYCLE_SCHEMA).toEqual({
+      memberCount: 'number',
+      combinedSummary: 'string',
+      membersJson: 'string',
+      cycleIndex: 'number',
+      changeRequestCount: 'number',
       prNumber: 'number',
       prUrl: 'string',
-      prTitle: 'string',
       reviewState: 'string',
       reviewAuthor: 'string',
       reviewBody: 'string',
       commentsJson: 'string',
-      commentsSummary: 'string',
-      cycleIndex: 'number',
-      changeRequestCount: 'number'
+      commentsSummary: 'string'
+    })
+  })
+
+  it('final schema (SCHEMA_BY_KIND) carries the group tally', () => {
+    expect(SCHEMA_BY_KIND['watch-pr']).toBe(WATCH_PR_OUTPUT_SCHEMA)
+    expect(WATCH_PR_OUTPUT_SCHEMA).toEqual({
+      finalState: 'string',
+      memberCount: 'number',
+      mergedCount: 'number',
+      closedCount: 'number',
+      membersJson: 'string',
+      cyclesRun: 'number',
+      prNumber: 'number',
+      prUrl: 'string',
+      finishedAt: 'number'
     })
   })
 })
