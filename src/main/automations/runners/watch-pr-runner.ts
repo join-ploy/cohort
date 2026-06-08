@@ -2,6 +2,8 @@ import type { StepRunner, StepRunnerCtx, StepRunnerResult } from '../step-runner
 import type { WatchPrConfig } from '../../../shared/automations-types'
 import type { PRWatchState, PRReview } from '../../github/client'
 import type { PRComment, WorkspaceGroup } from '../../../shared/types'
+import { parseMemberScopedRef } from '../../../shared/automation-member-scoped-ref'
+import { findGroupById } from '../../workspace-group-runtime'
 import { resolveTemplate, TemplateResolutionError } from '../template'
 
 // Liveness of the supervised pane's agent, normalized for the idle gate. The
@@ -135,23 +137,72 @@ export class WatchPrRunner implements StepRunner {
 
     // ── Phase: resolving ──────────────────────────────────────────────
     if (tracker.phase === 'resolving') {
-      // Single-worktree resolve → exactly ONE member. Group expansion is Task 4.
-      const meta = this.deps.getWorktreeMeta(worktreeId)
-      if (!meta) {
-        return { outcome: 'failed', status: 'failed', error: `Unknown worktree "${worktreeId}".` }
-      }
-      // worktreeId is "<repoId>::<path>" — same convention collect-ci uses.
-      const repoId = worktreeId.split('::')[0]
-      const repoPath = this.deps.getRepoPath(repoId) ?? meta.repoPath
-      const prNumber = meta.linkedPR ?? (await this.deps.resolveLinkedPR(meta.path, repoPath))
-      if (prNumber == null) {
+      // Expand the ref into members: single worktree → [id]; group → its members.
+      const worktreeIds = this.expandRef(worktreeId)
+      if (!worktreeIds) {
         return {
-          outcome: 'needs-more-time',
-          status: 'waiting',
-          statusMessage: 'Waiting for PR to be linked',
-          output: this.progressOutput(tracker)
+          outcome: 'failed',
+          status: 'failed',
+          error: `Could not resolve worktreeRef "${worktreeId}".`
         }
       }
+
+      // Filter to members that have a diff from main — a no-diff member has no PR,
+      // so it's skipped. worktreeId is "<repoId>::<path>" (the collect-ci convention).
+      const eligible: {
+        id: string
+        repoPath: string
+        meta: NonNullable<ReturnType<WatchPrDeps['getWorktreeMeta']>>
+      }[] = []
+      for (const id of worktreeIds) {
+        const meta = this.deps.getWorktreeMeta(id)
+        if (!meta) {
+          continue // member worktree gone — skip it
+        }
+        const repoId = id.split('::')[0]
+        const repoPath = this.deps.getRepoPath(repoId) ?? meta.repoPath
+        const connectionId = this.deps.getConnectionId(repoId)
+        const hasChanges = await this.deps.hasChangesFromMain(id, meta.path, connectionId)
+        if (hasChanges) {
+          eligible.push({ id, repoPath, meta })
+        }
+      }
+
+      // Empty group (no member has a diff): nothing to watch. Returning a clean
+      // done (mirroring collect-ci's "nothing to collect") rather than routing
+      // through finishAggregate — with zero members that path yields
+      // partial-closed + endChain true, which would wrongly halt the chain.
+      if (eligible.length === 0) {
+        // members is still empty here, so buildTerminalResult emits memberCount 0
+        // / all-merged / endChain false — reusing it keeps this payload from
+        // drifting from the other terminal outputs.
+        return this.buildTerminalResult(
+          ctx.step.id,
+          tracker,
+          'all-merged',
+          false,
+          'No member worktrees with changes — nothing to watch.'
+        )
+      }
+
+      // Resolve each eligible member's PR. If ANY isn't linked yet, wait and
+      // re-resolve next tick (don't partially populate) — mirrors collect-ci's
+      // phase-2 "wait until every expected PR is linked" so we only transition to
+      // watching once the whole group is ready.
+      const resolved: { id: string; prNumber: number; repoPath: string }[] = []
+      for (const { id, repoPath, meta } of eligible) {
+        const prNumber = meta.linkedPR ?? (await this.deps.resolveLinkedPR(meta.path, repoPath))
+        if (prNumber == null) {
+          return {
+            outcome: 'needs-more-time',
+            status: 'waiting',
+            statusMessage: 'Waiting for PRs to be linked',
+            output: this.progressOutput(tracker)
+          }
+        }
+        resolved.push({ id, prNumber, repoPath })
+      }
+
       let paneKey: string
       try {
         paneKey = resolveTemplate(config.paneRef, ctx.context)
@@ -161,16 +212,18 @@ export class WatchPrRunner implements StepRunner {
         }
         throw e
       }
-      tracker.members.set(worktreeId, {
-        worktreeId,
-        prNumber,
-        repoPath,
-        prUrl: '',
-        handledCursor: '',
-        pendingWatermark: '',
-        dirty: false,
-        settled: 'open'
-      })
+      for (const { id, prNumber, repoPath } of resolved) {
+        tracker.members.set(id, {
+          worktreeId: id,
+          prNumber,
+          repoPath,
+          prUrl: '',
+          handledCursor: '',
+          pendingWatermark: '',
+          dirty: false,
+          settled: 'open'
+        })
+      }
       tracker.paneKey = paneKey
       tracker.phase = 'watching'
     }
@@ -550,6 +603,21 @@ export class WatchPrRunner implements StepRunner {
     if (runMap && runMap.size === 0) {
       this.trackers.delete(runId)
     }
+  }
+
+  /** Expand a resolved worktreeRef into one or more worktreeIds: a member-scoped
+   *  ref or single worktree → [id]; a group:<uuid> ref → its members (null when
+   *  the group can't be found). Mirrors collect-ci's expandRef. */
+  private expandRef(ref: string): string[] | null {
+    const memberScoped = parseMemberScopedRef(ref)
+    if (memberScoped) {
+      return [memberScoped.worktreeId]
+    }
+    if (ref.startsWith('group:')) {
+      const group = findGroupById(ref, this.deps.getWorkspaceGroups())
+      return group ? group.memberWorktreeIds : null
+    }
+    return [ref] // single worktree
   }
 
   private getOrCreateTracker(ctx: StepRunnerCtx): WatchTracker {

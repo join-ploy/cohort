@@ -3,7 +3,7 @@ import { WatchPrRunner, type WatchPrDeps, type AgentLiveStatus } from './watch-p
 import type { StepRunnerCtx } from '../step-runner'
 import type { WatchPrConfig, Step } from '../../../shared/automations-types'
 import type { PRWatchState, PRReview } from '../../github/client'
-import type { PRComment } from '../../../shared/types'
+import type { PRComment, WorkspaceGroup } from '../../../shared/types'
 
 function makeDeps(overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
   return {
@@ -83,7 +83,7 @@ describe('WatchPrRunner — resolving phase', () => {
     const result = await runner.tick(makeCtx({}))
     expect(result.outcome).toBe('needs-more-time')
     expect(result.status).toBe('waiting')
-    expect(result.statusMessage).toBe('Waiting for PR to be linked')
+    expect(result.statusMessage).toBe('Waiting for PRs to be linked')
   })
 
   it('resolves PR (via linkedPR) + pane and advances to watching', async () => {
@@ -153,11 +153,17 @@ describe('WatchPrRunner — resolving phase', () => {
     expect(output.phase).toBe('watching')
   })
 
-  it('fails on unknown worktree', async () => {
+  it('unknown worktree (meta gone) is skipped → clean done with no members', async () => {
+    // A gone member is skipped (mirrors collect-ci); a single-worktree ref with
+    // no eligible members resolves to the empty-group clean done, not a failure.
     const runner = new WatchPrRunner(makeDeps({ getWorktreeMeta: () => undefined }))
     const result = await runner.tick(makeCtx({}))
-    expect(result.outcome).toBe('failed')
-    expect(result.status).toBe('failed')
+    expect(result.outcome).toBe('done')
+    expect(result.status).toBe('succeeded')
+    expect(result.endChain).toBeFalsy()
+    const output = result.output as Record<string, unknown>
+    expect(output.memberCount).toBe(0)
+    expect(output.finalState).toBe('all-merged')
   })
 
   it('fails on a bad worktreeRef template (unresolved intermediate path)', async () => {
@@ -855,5 +861,446 @@ describe('WatchPrRunner — poll cost (Part A)', () => {
     nowValue = 1_000_000 + 10_000
     await runner.tick(makeCtx({ stateOutput: watchingState() }))
     expect(getPRState).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ─── Group expansion ────────────────────────────────────────────────────
+// A two-member group: repoA::/a (PR 101) and repoB::/b (PR 202). The shared
+// pane is the same single paneRef the single-PR config uses. Per-member mocks
+// are keyed by repoPath ('/a' vs '/b') so members get distinct PR data.
+
+const GROUP_ID = 'group:g1'
+const MEMBER_A = 'repoA::/a'
+const MEMBER_B = 'repoB::/b'
+const MEMBER_C = 'repoC::/c'
+
+function group(memberWorktreeIds: string[]): WorkspaceGroup {
+  return {
+    id: GROUP_ID,
+    workspaceName: 'feat-x',
+    displayName: 'Feat X',
+    parentPath: 'workspaces/feat-x/',
+    memberWorktreeIds,
+    branchName: 'feat-x',
+    isArchived: false,
+    archivedAt: null,
+    isPinned: false,
+    sortOrder: 0,
+    lastActivityAt: 0,
+    isUnread: false,
+    comment: '',
+    createdAt: 0,
+    linkedIssue: null,
+    linkedLinearIssue: null
+  }
+}
+
+// getWorktreeMeta keyed by worktreeId so each member carries its own linkedPR.
+function metaFor(
+  id: string
+): { linkedPR: number | null; path: string; repoPath: string } | undefined {
+  const byId: Record<string, { linkedPR: number | null; path: string; repoPath: string }> = {
+    [MEMBER_A]: { linkedPR: 101, path: '/a/wt', repoPath: '/a' },
+    [MEMBER_B]: { linkedPR: 202, path: '/b/wt', repoPath: '/b' },
+    [MEMBER_C]: { linkedPR: 303, path: '/c/wt', repoPath: '/c' }
+  }
+  return byId[id]
+}
+
+function prState(overrides: Partial<PRWatchState>): PRWatchState {
+  return {
+    state: 'OPEN',
+    mergedAt: null,
+    closedAt: null,
+    reviewDecision: null,
+    title: 'PR',
+    url: '',
+    ...overrides
+  } as PRWatchState
+}
+
+// makeDeps tuned for a group: getWorkspaceGroups returns the seeded group,
+// per-member metas, every member has changes by default.
+function makeGroupDeps(members: string[], overrides: Partial<WatchPrDeps> = {}): WatchPrDeps {
+  return makeDeps({
+    getWorkspaceGroups: vi.fn(() => [group(members)]),
+    getWorktreeMeta: (id) => metaFor(id),
+    getRepoPath: (repoId) => `/${repoId.replace('repo', '').toLowerCase()}`,
+    hasChangesFromMain: vi.fn(async () => true),
+    getConnectionId: vi.fn(() => null),
+    getPRState: async (repoPath) =>
+      prState({ url: `https://gh/pull${repoPath}`, title: `PR ${repoPath}` }),
+    getPRReviews: async () => [],
+    ...overrides
+  })
+}
+
+// A group state.output landing directly in the watching phase with two open
+// members (A=101, B=202). memberOverrides re-paths per-member fields onto BOTH
+// members; top-level overrides cover phase/activeChildRunId/cycleIndex.
+function groupWatchingState(
+  overrides: Record<string, unknown> = {},
+  aOverrides: Record<string, unknown> = {},
+  bOverrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const base = (id: string, prNumber: number, repoPath: string): Record<string, unknown> => ({
+    worktreeId: id,
+    prNumber,
+    repoPath,
+    prUrl: '',
+    handledCursor: '',
+    pendingWatermark: '',
+    dirty: false,
+    settled: 'open'
+  })
+  return {
+    phase: 'watching',
+    members: [
+      { ...base(MEMBER_A, 101, '/a'), ...aOverrides },
+      { ...base(MEMBER_B, 202, '/b'), ...bOverrides }
+    ],
+    paneKey: 'tab1:2',
+    activeChildRunId: null,
+    cycleIndex: 0,
+    ...overrides
+  }
+}
+
+function groupCtx(opts: {
+  configOverrides?: Partial<WatchPrConfig>
+  stateOutput?: unknown
+}): StepRunnerCtx {
+  return makeCtx({
+    configOverrides: { worktreeRef: GROUP_ID, paneRef: 'tab1:2', ...opts.configOverrides },
+    stateOutput: opts.stateOutput
+  })
+}
+
+describe('WatchPrRunner — group', () => {
+  it('member-scoped ref resolves to a single member', async () => {
+    // `member:<groupId>:<worktreeId>` expands to just that one worktree.
+    const runner = new WatchPrRunner(makeGroupDeps([MEMBER_A, MEMBER_B]))
+    const result = await runner.tick(
+      groupCtx({ configOverrides: { worktreeRef: `member:${GROUP_ID}:${MEMBER_A}` } })
+    )
+    expect(result.outcome).toBe('needs-more-time')
+    const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
+    expect(output.phase).toBe('watching')
+    expect(members).toHaveLength(1)
+    expect(members[0].prNumber).toBe(101)
+  })
+
+  it('fails when a group: ref resolves to no known group', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A], { getWorkspaceGroups: vi.fn(() => []) })
+    )
+    const result = await runner.tick(groupCtx({}))
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('Could not resolve')
+  })
+
+  it('expansion: 2 members with changes + PRs → 2 members; no-diff 3rd skipped', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B, MEMBER_C], {
+        // MEMBER_C has no diff from main → no PR → skipped.
+        hasChangesFromMain: vi.fn(async (id) => id !== MEMBER_C)
+      })
+    )
+    const result = await runner.tick(groupCtx({}))
+    expect(result.outcome).toBe('needs-more-time')
+    const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
+    expect(output.phase).toBe('watching')
+    expect(members).toHaveLength(2)
+    expect(members.map((m) => m.worktreeId).sort()).toEqual([MEMBER_A, MEMBER_B])
+    expect(members.find((m) => m.worktreeId === MEMBER_C)).toBeUndefined()
+  })
+
+  it('waits until all member PRs are linked', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        // MEMBER_B isn't PR-linked yet and resolveLinkedPR can't find one.
+        getWorktreeMeta: (id) =>
+          id === MEMBER_B ? { linkedPR: null, path: '/b/wt', repoPath: '/b' } : metaFor(id),
+        resolveLinkedPR: async () => null
+      })
+    )
+    const result = await runner.tick(groupCtx({}))
+    expect(result.outcome).toBe('needs-more-time')
+    expect(result.status).toBe('waiting')
+    expect(result.statusMessage).toBe('Waiting for PRs to be linked')
+    // Phase still resolving — no members populated until the whole group is ready.
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('resolving')
+    expect((output.members as unknown[]).length).toBe(0)
+  })
+
+  it('batched arming/firing: both members armed → ONE spawn over the batch of 2', async () => {
+    const spawnChildRun = makeSpawnChildRun()
+    let nowValue = 1_000_000
+    const reviewA = review({
+      state: 'CHANGES_REQUESTED',
+      submittedAt: '2026-06-02T00:00:00Z',
+      body: 'fix a'
+    })
+    const reviewB = review({
+      state: 'CHANGES_REQUESTED',
+      submittedAt: '2026-06-03T00:00:00Z',
+      body: 'fix b'
+    })
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => nowValue,
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        getPRReviews: async (repoPath) => (repoPath === '/a' ? [reviewA] : [reviewB]),
+        getPRState: async (repoPath) =>
+          prState({ url: `https://gh/pull${repoPath}`, title: `PR ${repoPath}` }),
+        spawnChildRun
+      })
+    )
+    // Tick 1: poll arms both members; idle → sets idleSince (debounce not met).
+    await runner.tick(groupCtx({ stateOutput: groupWatchingState() }))
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    // Tick 2: past debounce → exactly ONE batched cycle over both members.
+    nowValue += 6_000
+    const result = await runner.tick(groupCtx({ stateOutput: groupWatchingState() }))
+    expect(spawnChildRun).toHaveBeenCalledTimes(1)
+    const cycleOutput = spawnChildRun.mock.calls[0][0].cycleOutput
+    expect(cycleOutput.memberCount).toBe(2)
+    // combinedSummary carries a section per member PR.
+    expect(cycleOutput.combinedSummary).toContain('## PR #101')
+    expect(cycleOutput.combinedSummary).toContain('## PR #202')
+    const membersJson = JSON.parse(cycleOutput.membersJson as string) as unknown[]
+    expect(membersJson).toHaveLength(2)
+    // Both members consumed their watermark: handledCursor advanced, dirty cleared.
+    const output = result.output as Record<string, unknown>
+    const outMembers = output.members as Record<string, unknown>[]
+    const a = outMembers.find((m) => m.worktreeId === MEMBER_A)!
+    const b = outMembers.find((m) => m.worktreeId === MEMBER_B)!
+    expect(a.dirty).toBe(false)
+    expect(a.handledCursor).toBe('2026-06-02T00:00:00Z')
+    expect(b.dirty).toBe(false)
+    expect(b.handledCursor).toBe('2026-06-03T00:00:00Z')
+    expect(output.phase).toBe('responding')
+  })
+
+  it('per-member settle: A merges while B open → keep watching; then B merges → all-merged', async () => {
+    let aState: 'OPEN' | 'MERGED' = 'MERGED'
+    const bStateRef = { value: 'OPEN' as 'OPEN' | 'MERGED' }
+    let nowValue = 1_000_000
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => nowValue,
+        getPRState: async (repoPath) => {
+          if (repoPath === '/a') {
+            return prState({ state: aState, url: 'https://gh/pull/a' })
+          }
+          return prState({ state: bStateRef.value, url: 'https://gh/pull/b' })
+        }
+      })
+    )
+    // Tick 1: A MERGED, B still open → not all settled → keep watching.
+    const t1 = await runner.tick(groupCtx({ stateOutput: groupWatchingState() }))
+    expect(t1.outcome).toBe('needs-more-time')
+    const out1 = t1.output as Record<string, unknown>
+    expect(out1.phase).toBe('watching')
+    const m1 = out1.members as Record<string, unknown>[]
+    expect(m1.find((m) => m.worktreeId === MEMBER_A)!.settled).toBe('merged')
+    expect(m1.find((m) => m.worktreeId === MEMBER_B)!.settled).toBe('open')
+    // Tick 2: B now MERGED → every member settled → finishAggregate all-merged.
+    bStateRef.value = 'MERGED'
+    aState = 'MERGED'
+    nowValue += 40_000 // past poll interval so the terminal sweep re-runs
+    const t2 = await runner.tick(groupCtx({ stateOutput: groupWatchingState() }))
+    // Seed the prior settle (A merged) so this tick only needs B to settle.
+    expect(t2.outcome).toBe('done')
+    const out2 = t2.output as Record<string, unknown>
+    expect(out2.finalState).toBe('all-merged')
+    expect(t2.endChain).toBeFalsy()
+  })
+
+  it('aggregate any-closed: A merged + B closed → partial-closed, endChain true', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => 1_000_000,
+        getPRState: async (repoPath) =>
+          repoPath === '/a'
+            ? prState({ state: 'MERGED', url: 'https://gh/pull/a' })
+            : prState({ state: 'CLOSED', url: 'https://gh/pull/b' })
+      })
+    )
+    const result = await runner.tick(groupCtx({ stateOutput: groupWatchingState() }))
+    expect(result.outcome).toBe('done')
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('partial-closed')
+    expect(output.mergedCount).toBe(1)
+    expect(output.closedCount).toBe(1)
+    expect(result.endChain).toBe(true)
+  })
+
+  it('settle-mid-cycle (last member): A pre-settled, B merges → cancel child + finish', async () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => 1_000_000,
+        getChildRunStatus: () => 'active',
+        cancelChildRunsForStep: cancel,
+        getPRState: async (repoPath) =>
+          repoPath === '/b' ? prState({ state: 'MERGED', url: 'https://gh/pull/b' }) : prState({})
+      })
+    )
+    // Responding with an active child; A already settled (merged), B about to merge.
+    const result = await runner.tick(
+      groupCtx({
+        stateOutput: {
+          phase: 'responding',
+          members: [
+            {
+              worktreeId: MEMBER_A,
+              prNumber: 101,
+              repoPath: '/a',
+              prUrl: 'https://gh/pull/a',
+              handledCursor: '',
+              pendingWatermark: '',
+              dirty: false,
+              settled: 'merged'
+            },
+            {
+              worktreeId: MEMBER_B,
+              prNumber: 202,
+              repoPath: '/b',
+              prUrl: '',
+              handledCursor: '',
+              pendingWatermark: '',
+              dirty: false,
+              settled: 'open'
+            }
+          ],
+          paneKey: 'tab1:2',
+          activeChildRunId: 'child-1',
+          cycleIndex: 1
+        }
+      })
+    )
+    expect(cancel).toHaveBeenCalledWith('run-1', 'step-1')
+    expect(result.outcome).toBe('done')
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('all-merged')
+  })
+
+  it('cross-member coalesce: child active with batch [A]; B arms mid-cycle → next gate fires batch [B]', async () => {
+    const spawnChildRun = vi.fn<WatchPrDeps['spawnChildRun']>((args) => `child-${args.cycleIndex}`)
+    let nowValue = 1_000_000
+    let childStatus: 'active' | 'completed' = 'active'
+    // A's review armed cycle 1 (already consumed). B's review arrives later.
+    const reviewsByRepo: Record<string, PRReview[]> = {
+      '/a': [
+        review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'a' })
+      ],
+      '/b': []
+    }
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => nowValue,
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        getPRReviews: async (repoPath) => reviewsByRepo[repoPath] ?? [],
+        getPRState: async (repoPath) =>
+          prState({ url: `https://gh/pull${repoPath}`, title: `PR ${repoPath}` }),
+        getChildRunStatus: () => childStatus,
+        spawnChildRun
+      })
+    )
+    const tick = (state: unknown): Promise<unknown> => runner.tick(groupCtx({ stateOutput: state }))
+
+    // Tick 1: A dirty (handledCursor ''), B clean; idle → sets idleSince.
+    await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    // Tick 2: past debounce → fires cycle 1 over batch [A] only (B not dirty).
+    nowValue += 6_000
+    const t2 = (await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))) as {
+      output: Record<string, unknown>
+    }
+    expect(spawnChildRun).toHaveBeenCalledTimes(1)
+    expect(spawnChildRun.mock.calls[0][0].cycleOutput.memberCount).toBe(1)
+    const batch1 = JSON.parse(spawnChildRun.mock.calls[0][0].cycleOutput.membersJson as string) as {
+      prNumber: number
+    }[]
+    expect(batch1[0].prNumber).toBe(101)
+    expect(t2.output.phase).toBe('responding')
+
+    // B's review arrives mid-cycle.
+    reviewsByRepo['/b'] = [
+      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-04T00:00:00Z', body: 'b' })
+    ]
+    // Tick 3: responding, child active, re-poll arms B dirty (coalesced).
+    nowValue += 40_000
+    const t3 = (await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))) as {
+      output: Record<string, unknown>
+    }
+    expect(t3.output.phase).toBe('responding')
+    expect(
+      (t3.output.members as Record<string, unknown>[]).find((m) => m.worktreeId === MEMBER_B)!.dirty
+    ).toBe(true)
+
+    // Tick 4: child completes → back to watching.
+    childStatus = 'completed'
+    await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))
+
+    // Tick 5 + 6: watching, B dirty + idle past debounce → fires cycle 2 over [B].
+    nowValue += 40_000
+    await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))
+    nowValue += 6_000
+    await tick(groupWatchingState({}, { dirty: false }, { dirty: false }))
+    expect(spawnChildRun).toHaveBeenCalledTimes(2)
+    expect(spawnChildRun.mock.calls[1][0].cycleIndex).toBe(2)
+    expect(spawnChildRun.mock.calls[1][0].cycleOutput.memberCount).toBe(1)
+    const batch2 = JSON.parse(spawnChildRun.mock.calls[1][0].cycleOutput.membersJson as string) as {
+      prNumber: number
+    }[]
+    expect(batch2[0].prNumber).toBe(202)
+  })
+
+  it('empty group: no member has changes → clean done, memberCount 0, endChain falsy', async () => {
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        hasChangesFromMain: vi.fn(async () => false)
+      })
+    )
+    const result = await runner.tick(groupCtx({}))
+    expect(result.outcome).toBe('done')
+    expect(result.status).toBe('succeeded')
+    expect(result.endChain).toBeFalsy()
+    const output = result.output as Record<string, unknown>
+    expect(output.memberCount).toBe(0)
+    expect(output.finalState).toBe('all-merged')
+    expect(output.membersJson).toBe('[]')
+  })
+
+  it('restart: a settled member is not re-polled/armed; the open member is still swept', async () => {
+    const getPRState = vi.fn<WatchPrDeps['getPRState']>(async (repoPath) =>
+      prState({ state: 'OPEN', url: `https://gh/pull${repoPath}` })
+    )
+    const getPRReviews = vi.fn<WatchPrDeps['getPRReviews']>(async () => [] as PRReview[])
+    const runner = new WatchPrRunner(
+      makeGroupDeps([MEMBER_A, MEMBER_B], {
+        now: () => 1_000_000,
+        getPRState,
+        getPRReviews
+      })
+    )
+    // A already merged (settled), B open — rehydrated from persisted output.
+    await runner.tick(
+      groupCtx({
+        stateOutput: groupWatchingState({}, { settled: 'merged', prUrl: 'https://gh/pull/a' }, {})
+      })
+    )
+    // The settled member (A=/a) is never re-read; only the open member (B=/b) is swept.
+    const stateRepos = getPRState.mock.calls.map((c) => c[0])
+    expect(stateRepos).not.toContain('/a')
+    expect(stateRepos).toContain('/b')
+    const reviewRepos = getPRReviews.mock.calls.map((c) => c[0])
+    expect(reviewRepos).not.toContain('/a')
   })
 })
