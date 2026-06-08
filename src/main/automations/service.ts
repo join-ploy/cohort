@@ -1504,9 +1504,11 @@ export class AutomationService {
     run.error = errorMessage
     run.finishedAt = now
     this.store.replaceAutomationRun(run)
-    // Backstop: a runner that threw after acquiring a pane must not leave the
-    // FIFO queue deadlocked behind a dead holder. Idempotent with the runner's
-    // own release on its return paths.
+    // Mirror the cancel path's teardown: a failed run (e.g. a watch/detached
+    // watcher that threw mid-cycle) must cancel its in-flight branch child so it
+    // isn't left orphaned, and release its pane claims so the FIFO queue can't
+    // deadlock behind a dead holder. Both are idempotent.
+    this.cancelChildRunsForRun(run.id)
     this.releasePanesForRun(run.id)
     this.broadcastAutomationsChanged()
   }

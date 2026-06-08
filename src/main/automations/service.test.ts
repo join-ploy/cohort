@@ -1835,4 +1835,32 @@ describe('AutomationService pane queue', () => {
     q.finalizeFailedRun(run, new Error('boom'))
     expect(q.acquirePane('pane', 'other:s1')).toBe(true)
   })
+
+  it("finalizeFailedRun cancels the failed run's in-flight branch child and frees its pane", async () => {
+    const { store, service, automationId } = await makeService()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    store.replaceAutomationRun(parent)
+
+    // A branch child run holding a pane (distinct scheduledFor to avoid dedup).
+    vi.advanceTimersByTime(1000)
+    const child = store.createAutomationRun(stored, Date.now(), 'manual')
+    child.parentRunId = parent.id
+    child.status = 'running'
+    store.replaceAutomationRun(child)
+
+    const q = service as unknown as PaneQ & {
+      finalizeFailedRun(run: { id: string }, error: unknown): void
+      getChildRunStatus(id: string): string
+    }
+    expect(q.acquirePane('pane', `${child.id}:b1`)).toBe(true)
+    expect(q.acquirePane('pane', 'waiter:b1')).toBe(false)
+
+    // The watcher fails mid-cycle → its in-flight child must be torn down too,
+    // freeing the pane so the waiter is promoted (mirrors the cancel contract).
+    q.finalizeFailedRun(parent, new Error('boom'))
+    expect(q.getChildRunStatus(child.id)).toBe('failed')
+    expect(q.acquirePane('pane', 'waiter:b1')).toBe(true)
+  })
 })
