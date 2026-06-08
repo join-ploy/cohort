@@ -123,15 +123,26 @@ export class WatchPrRunner implements StepRunner {
 
     // ── Phase: watching ──────────────────────────────────────────────
     if (tracker.phase === 'watching') {
-      const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
-      if (terminal) {
-        return terminal
-      }
       // Capture now once and reuse for poll cadence + idle-debounce math so a
       // single tick reasons about one consistent instant.
       const now = this.deps.now()
       const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
-      await this.pollArming(tracker, config, now)
+      // Single cadence gate over BOTH network reads (terminal state + arming
+      // reviews) so getPRState/getPRReviews run at most once per poll interval —
+      // the idle gate below still runs every tick off the last-polled state.
+      const due = now >= tracker.lastPollAt + pollIntervalMs
+      if (due) {
+        tracker.lastPollAt = now
+        const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
+        if (terminal) {
+          return terminal
+        }
+        this.armFromReviews(
+          await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!),
+          tracker,
+          config
+        )
+      }
 
       // Four-part gate: dirty AND no active child AND agent idle (debounced).
       if (tracker.dirty && tracker.activeChildRunId == null) {
@@ -190,13 +201,65 @@ export class WatchPrRunner implements StepRunner {
         statusMessage: tracker.dirty
           ? `Changes requested on #${tracker.prNumber} — pending`
           : `Watching #${tracker.prNumber}`,
-        nextPollAt: now + pollIntervalMs,
+        nextPollAt: tracker.lastPollAt + pollIntervalMs,
         output: this.progressOutput(tracker)
       }
     }
 
-    // TODO(Task 9): responding phase. For now, any other phase parks in waiting
-    // so the run stays alive without doing anything.
+    // ── Phase: responding ─────────────────────────────────────────────
+    if (tracker.phase === 'responding') {
+      const now = this.deps.now()
+      const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
+      // Child status is cheap/in-memory — check every tick.
+      const childStatus = this.deps.getChildRunStatus(tracker.activeChildRunId!)
+      // Network reads gated to the poll interval (terminal + coalesce arming).
+      if (now >= tracker.lastPollAt + pollIntervalMs) {
+        tracker.lastPollAt = now
+        const terminal = await this.checkTerminal(ctx, tracker, worktreeId)
+        if (terminal) {
+          return terminal // merged/closed/archived cancels child + finishes (Q4)
+        }
+        // Keep arming during the cycle so feedback arriving mid-cycle coalesces
+        // into the next round.
+        this.armFromReviews(
+          await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!),
+          tracker,
+          config
+        )
+      }
+      if (childStatus === 'active') {
+        return {
+          outcome: 'needs-more-time',
+          status: 'waiting',
+          statusMessage: `Responding to #${tracker.prNumber} (round ${tracker.cycleIndex})`,
+          nextPollAt: tracker.lastPollAt + pollIntervalMs,
+          output: this.progressOutput(tracker)
+        }
+      }
+      // Cycle finished (completed | failed | missing).
+      if (childStatus === 'failed' && config.failedCycleHaltsLoop) {
+        return {
+          outcome: 'failed',
+          status: 'failed',
+          error: `Review cycle ${tracker.cycleIndex} failed.`
+        }
+      }
+      // Loop back to watching. If feedback arrived mid-cycle (dirty), the watching
+      // gate fires the next cycle on the next tick (coalesced).
+      tracker.activeChildRunId = null
+      tracker.phase = 'watching'
+      return {
+        outcome: 'needs-more-time',
+        status: 'waiting',
+        statusMessage: `Watching #${tracker.prNumber}`,
+        // nextPollAt: now so the watching gate re-evaluates promptly; lastPollAt
+        // was just (or recently) set so a coalesced cycle fires without a redundant poll.
+        nextPollAt: now,
+        output: this.progressOutput(tracker)
+      }
+    }
+
+    // Unreachable: every phase above returns. Park in waiting as a safety net.
     return {
       outcome: 'needs-more-time',
       status: 'waiting',
@@ -274,19 +337,10 @@ export class WatchPrRunner implements StepRunner {
     return false
   }
 
-  /** Poll the review feed at the configured cadence; arm (set dirty) when a
-   *  matching review newer than the handled cursor appears. */
-  private async pollArming(
-    tracker: WatchTracker,
-    config: WatchPrConfig,
-    now: number
-  ): Promise<void> {
-    const pollIntervalMs = (config.pollIntervalSeconds ?? 30) * 1000
-    if (now < tracker.lastPollAt + pollIntervalMs) {
-      return
-    }
-    tracker.lastPollAt = now
-    const reviews = await this.deps.getPRReviews(tracker.repoPath!, tracker.prNumber!)
+  /** Arm (set dirty) when an already-fetched review newer than the handled
+   *  cursor matches the configured events. Cadence-free — the caller owns the
+   *  poll gate so this can run on freshly-polled reviews from either phase. */
+  private armFromReviews(reviews: PRReview[], tracker: WatchTracker, config: WatchPrConfig): void {
     const armed = reviews.filter(
       (r) =>
         r.submittedAt &&

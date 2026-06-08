@@ -204,6 +204,9 @@ describe('WatchPrRunner — watching phase', () => {
   it('merged → done/succeeded, endChain falsy, finalState "merged"', async () => {
     const runner = new WatchPrRunner(
       makeDeps({
+        // now() past one poll interval so the cadence-gated terminal check runs
+        // on the first watching tick (lastPollAt seeds to 0).
+        now: () => 1_000_000,
         getPRState: async () =>
           ({
             state: 'MERGED',
@@ -226,6 +229,8 @@ describe('WatchPrRunner — watching phase', () => {
   it('closed → done/succeeded + endChain true, finalState "closed"', async () => {
     const runner = new WatchPrRunner(
       makeDeps({
+        // now() past one poll interval so the cadence-gated terminal check runs.
+        now: () => 1_000_000,
         getPRState: async () =>
           ({
             state: 'CLOSED',
@@ -250,6 +255,8 @@ describe('WatchPrRunner — watching phase', () => {
     const getPRState = vi.fn(async () => ({ state: 'OPEN' }) as unknown as PRWatchState)
     const runner = new WatchPrRunner(
       makeDeps({
+        // now() past one poll interval so the cadence-gated terminal check runs.
+        now: () => 1_000_000,
         isWorktreeArchived: () => true,
         cancelChildRunsForStep: cancel,
         getPRState
@@ -556,5 +563,195 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     )
     expect(spawnChildRun).not.toHaveBeenCalled()
     expect(result.status).toBe('waiting')
+  })
+})
+
+// A persisted state.output that lands the runner directly in the responding
+// phase with an in-flight child cycle. lastPollAt is implicitly 0 in-memory.
+function respondingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    phase: 'responding',
+    prNumber: 42,
+    repoPath: '/tmp/repo',
+    paneKey: 'tab1:2',
+    handledCursor: '',
+    pendingWatermark: '',
+    dirty: false,
+    activeChildRunId: 'child-1',
+    cycleIndex: 1,
+    ...overrides
+  }
+}
+
+describe('WatchPrRunner — responding phase', () => {
+  it('child active → stays responding', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({
+        getChildRunStatus: () => 'active',
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState
+      })
+    )
+    const result = await runner.tick(makeCtx({ stateOutput: respondingState() }))
+    expect(result.status).toBe('waiting')
+    expect(result.statusMessage).toContain('Responding to #42 (round 1)')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('responding')
+    expect(output.activeChildRunId).toBe('child-1')
+  })
+
+  it('child completed → back to watching', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({
+        getChildRunStatus: () => 'completed',
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState
+      })
+    )
+    const result = await runner.tick(makeCtx({ stateOutput: respondingState() }))
+    expect(result.status).toBe('waiting')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('watching')
+    expect(output.activeChildRunId).toBe(null)
+  })
+
+  it('merged mid-cycle → cancels child + finishes merged', async () => {
+    const cancel = vi.fn()
+    const runner = new WatchPrRunner(
+      makeDeps({
+        // now() past one poll interval so the cadence-gated terminal check runs.
+        now: () => 1_000_000,
+        getChildRunStatus: () => 'active',
+        cancelChildRunsForStep: cancel,
+        getPRState: async () =>
+          ({
+            state: 'MERGED',
+            mergedAt: '2026-06-03T00:00:00Z',
+            closedAt: null,
+            reviewDecision: null
+          }) as PRWatchState
+      })
+    )
+    const result = await runner.tick(makeCtx({ stateOutput: respondingState() }))
+    expect(cancel).toHaveBeenCalledWith('run-1', 'step-1')
+    expect(result.outcome).toBe('done')
+    expect(result.status).toBe('succeeded')
+    expect(result.endChain).toBeFalsy()
+    const output = result.output as Record<string, unknown>
+    expect(output.finalState).toBe('merged')
+  })
+
+  it('child failed + failedCycleHaltsLoop true → run fails', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({
+        getChildRunStatus: () => 'failed',
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState
+      })
+    )
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: { failedCycleHaltsLoop: true },
+        stateOutput: respondingState()
+      })
+    )
+    expect(result.outcome).toBe('failed')
+    expect(result.status).toBe('failed')
+  })
+
+  it('child failed + default (failedCycleHaltsLoop false) → loops back to watching', async () => {
+    const runner = new WatchPrRunner(
+      makeDeps({
+        getChildRunStatus: () => 'failed',
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState
+      })
+    )
+    const result = await runner.tick(makeCtx({ stateOutput: respondingState() }))
+    expect(result.outcome).not.toBe('failed')
+    const output = result.output as Record<string, unknown>
+    expect(output.phase).toBe('watching')
+  })
+
+  it('COALESCE: full loop on one instance spawns twice (cycle 1 then coalesced cycle 2)', async () => {
+    // ONE runner instance keeps the in-memory tracker across every tick. This
+    // drives the whole machine: watching → spawn cycle 1 → responding (new
+    // feedback arrives mid-cycle → coalesces dirty) → child completes → watching
+    // → spawn cycle 2. The seeded child id changes per cycle so coalescing is real.
+    const spawnChildRun = vi.fn<WatchPrDeps['spawnChildRun']>((args) => `child-${args.cycleIndex}`)
+    let nowValue = 1_000_000
+    let childStatus: 'active' | 'completed' = 'active'
+    // A new CHANGES_REQUESTED review newer than handledCursor ('') arms dirty.
+    const reviews: PRReview[] = [
+      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'more' })
+    ]
+    const runner = new WatchPrRunner(
+      makeDeps({
+        now: () => nowValue,
+        getAgentLiveStatus: (): AgentLiveStatus => 'idle',
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState,
+        getPRReviews: async () => reviews,
+        getChildRunStatus: () => childStatus,
+        spawnChildRun
+      })
+    )
+    const cfg = {
+      events: { changesRequested: true, newReviewComments: false, anyReview: false },
+      agentIdleDebounceSeconds: 5
+    }
+    const tick = (): Promise<unknown> =>
+      runner.tick(makeCtx({ configOverrides: cfg, stateOutput: watchingState() }))
+
+    // Tick 1: watching, polls + arms dirty, agent idle → sets idleSince (debounce).
+    await tick()
+    expect(spawnChildRun).not.toHaveBeenCalled()
+    // Tick 2: past debounce → fires cycle 1, advances to responding.
+    nowValue += 6_000
+    const t2 = (await tick()) as { output: Record<string, unknown> }
+    expect(spawnChildRun).toHaveBeenCalledTimes(1)
+    expect(spawnChildRun.mock.calls[0][0].cycleIndex).toBe(1)
+    expect(t2.output.phase).toBe('responding')
+    expect(t2.output.activeChildRunId).toBe('child-1')
+
+    // A FRESH review arrives mid-cycle, newer than the just-consumed cursor.
+    reviews.push(
+      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-04T00:00:00Z', body: 'again' })
+    )
+    // Tick 3: responding, child-1 still active; cadence-gated arming coalesces dirty.
+    nowValue += 40_000 // past poll interval so responding re-polls reviews
+    const t3 = (await tick()) as { output: Record<string, unknown> }
+    expect(t3.output.phase).toBe('responding')
+    expect(t3.output.dirty).toBe(true)
+
+    // Tick 4: child-1 completes → loop back to watching.
+    childStatus = 'completed'
+    const t4 = (await tick()) as { output: Record<string, unknown> }
+    expect(t4.output.phase).toBe('watching')
+
+    // Tick 5 + 6: watching, dirty + idle past debounce → fires the COALESCED cycle 2.
+    nowValue += 40_000 // first watching tick sets idleSince
+    await tick()
+    expect(spawnChildRun).toHaveBeenCalledTimes(1) // still just cycle 1 — debounce not met
+    nowValue += 6_000
+    await tick()
+    expect(spawnChildRun).toHaveBeenCalledTimes(2)
+    expect(spawnChildRun.mock.calls[1][0].cycleIndex).toBe(2)
+  })
+})
+
+describe('WatchPrRunner — poll cost (Part A)', () => {
+  it('two watching ticks within one poll interval → getPRState called at most once', async () => {
+    let nowValue = 1_000_000
+    const getPRState = vi.fn(async () => ({ state: 'OPEN' }) as unknown as PRWatchState)
+    const runner = new WatchPrRunner(
+      makeDeps({
+        getPRState,
+        getPRReviews: async () => [],
+        now: () => nowValue
+      })
+    )
+    // Tick 1 polls (lastPollAt seeds to 0).
+    await runner.tick(makeCtx({ stateOutput: watchingState() }))
+    expect(getPRState).toHaveBeenCalledTimes(1)
+    // Tick 2 within the 30s poll interval → cadence gate skips the state read.
+    nowValue = 1_000_000 + 10_000
+    await runner.tick(makeCtx({ stateOutput: watchingState() }))
+    expect(getPRState).toHaveBeenCalledTimes(1)
   })
 })
