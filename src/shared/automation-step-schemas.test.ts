@@ -11,6 +11,9 @@ import {
   RUN_PROMPT_OUTPUT_SCHEMA,
   RUN_COMMAND_OUTPUT_SCHEMA,
   UPDATE_LINEAR_ISSUE_OUTPUT_SCHEMA,
+  WATCH_PR_OUTPUT_SCHEMA,
+  WATCH_PR_CYCLE_SCHEMA,
+  SCHEMA_BY_KIND,
   type SchemaLeafType
 } from './automation-step-schemas'
 
@@ -121,6 +124,36 @@ describe('getOutputSchemaForStep', () => {
       timeoutSeconds: null
     }
     expect(getOutputSchemaForStep(step)).toEqual(getOutputSchemaForKind('create-worktree'))
+  })
+})
+
+describe('watch-pr schema', () => {
+  it('registers the full final-output schema for watch-pr', () => {
+    // Lock the whole contract so a field-name/type typo is caught before the
+    // runner (Task 9) and editor (Task 13) build against it.
+    expect(SCHEMA_BY_KIND['watch-pr']).toBe(WATCH_PR_OUTPUT_SCHEMA)
+    expect(WATCH_PR_OUTPUT_SCHEMA).toEqual({
+      finalState: 'string',
+      cyclesRun: 'number',
+      prNumber: 'number',
+      prUrl: 'string',
+      finishedAt: 'number'
+    })
+  })
+
+  it('exposes the full per-cycle (branch-scope) schema, not registered in SCHEMA_BY_KIND', () => {
+    expect(WATCH_PR_CYCLE_SCHEMA).toEqual({
+      prNumber: 'number',
+      prUrl: 'string',
+      prTitle: 'string',
+      reviewState: 'string',
+      reviewAuthor: 'string',
+      reviewBody: 'string',
+      commentsJson: 'string',
+      commentsSummary: 'string',
+      cycleIndex: 'number',
+      changeRequestCount: 'number'
+    })
   })
 })
 
