@@ -63,8 +63,8 @@ type MemberState = {
   prNumber: number
   repoPath: string
   prUrl: string // best-effort; cached on first cycle-output or terminal read
-  handledCursor: string // per-member high-water (ISO); '' = nothing handled yet
-  pendingWatermark: string // latest arming activity seen but not yet consumed
+  handledCursor: string // per-member high-water (review id, numeric string); '' = nothing handled yet
+  pendingWatermark: string // latest armed review id seen but not yet consumed (numeric string)
   dirty: boolean
   settled: Settled
 }
@@ -559,13 +559,16 @@ export class WatchPrRunner implements StepRunner {
   private armFromReviews(reviews: PRReview[], member: MemberState, config: WatchPrConfig): void {
     const armed = reviews.filter(
       (r) =>
-        r.submittedAt &&
-        r.submittedAt > member.handledCursor &&
+        r.submittedAt && // only submitted reviews (pending ones aren't actionable)
+        Number(r.id) > Number(member.handledCursor || '0') &&
         this.armingMatches(r, config.events)
     )
     if (armed.length > 0) {
       member.dirty = true
-      member.pendingWatermark = armed.at(-1)!.submittedAt
+      // Review id is monotonic, so the newest submitted review (armed.at(-1), since
+      // getPRReviews sorts by submittedAt) carries the high-water id. Using the id
+      // (not submittedAt) means two reviews in the same second can't be dropped.
+      member.pendingWatermark = armed.at(-1)!.id
     }
   }
 
@@ -586,7 +589,9 @@ export class WatchPrRunner implements StepRunner {
       const reviews = await this.deps.getPRReviews(m.repoPath, m.prNumber)
       const armed = reviews.filter(
         (r) =>
-          r.submittedAt && r.submittedAt > m.handledCursor && this.armingMatches(r, config.events)
+          r.submittedAt &&
+          Number(r.id) > Number(m.handledCursor || '0') &&
+          this.armingMatches(r, config.events)
       )
       totalArmed += armed.length
       const latest = armed.at(-1)

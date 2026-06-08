@@ -135,7 +135,7 @@ describe('WatchPrRunner — resolving phase', () => {
               prNumber: 99,
               repoPath: '/repo',
               prUrl: '',
-              handledCursor: '2026-06-01T00:00:00Z',
+              handledCursor: '100',
               pendingWatermark: '',
               dirty: false,
               settled: 'open'
@@ -210,9 +210,12 @@ function watchingState(
   }
 }
 
+// The arming cursor is the monotonic review id (numeric string), so the helper
+// defaults to a numeric id. Tests with multiple distinct reviews give explicit
+// ascending ids; the id high-water (armed.at(-1)) is what handledCursor advances to.
 function review(overrides: Partial<PRReview> = {}): PRReview {
   return {
-    id: 'r1',
+    id: '1',
     author: 'reviewer',
     state: 'COMMENTED',
     submittedAt: '2026-06-02T00:00:00Z',
@@ -327,7 +330,7 @@ describe('WatchPrRunner — watching phase', () => {
         now: () => 1_000_000,
         getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState,
         getPRReviews: async () => [
-          review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z' })
+          review({ id: '5', state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z' })
         ]
       })
     )
@@ -343,7 +346,7 @@ describe('WatchPrRunner — watching phase', () => {
     const output = result.output as Record<string, unknown>
     const members = output.members as Record<string, unknown>[]
     expect(members[0].dirty).toBe(true)
-    expect(members[0].pendingWatermark).toBe('2026-06-02T00:00:00Z')
+    expect(members[0].pendingWatermark).toBe('5')
   })
 
   it('arming negative: a COMMENTED review does NOT arm when only changesRequested enabled', async () => {
@@ -374,7 +377,7 @@ describe('WatchPrRunner — watching phase', () => {
         now: () => 1_000_000,
         getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState,
         getPRReviews: async () => [
-          review({ state: 'COMMENTED', submittedAt: '2026-06-02T00:00:00Z' })
+          review({ id: '5', state: 'COMMENTED', submittedAt: '2026-06-02T00:00:00Z' })
         ]
       })
     )
@@ -389,7 +392,63 @@ describe('WatchPrRunner — watching phase', () => {
     const output = result.output as Record<string, unknown>
     const members = output.members as Record<string, unknown>[]
     expect(members[0].dirty).toBe(true)
-    expect(members[0].pendingWatermark).toBe('2026-06-02T00:00:00Z')
+    expect(members[0].pendingWatermark).toBe('5')
+  })
+
+  it('same-second dedup: two reviews share submittedAt; cursor on id 5 → only id 6 arms', async () => {
+    // Two distinct CHANGES_REQUESTED reviews landed in the SAME wall-clock second.
+    // With the old submittedAt cursor, review 6 would be dropped (its submittedAt
+    // equals the consumed cursor). The id cursor (5) lets review 6 (id > 5) arm.
+    const sameSecond = '2026-06-02T00:00:00Z'
+    const runner = new WatchPrRunner(
+      makeDeps({
+        now: () => 1_000_000,
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState,
+        getPRReviews: async () => [
+          review({ id: '5', state: 'CHANGES_REQUESTED', submittedAt: sameSecond }),
+          review({ id: '6', state: 'CHANGES_REQUESTED', submittedAt: sameSecond })
+        ]
+      })
+    )
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: {
+          events: { changesRequested: true, newReviewComments: false, anyReview: false }
+        },
+        // handledCursor '5' = review 5 already consumed; only review 6 is new.
+        stateOutput: watchingState({}, { handledCursor: '5' })
+      })
+    )
+    const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
+    expect(members[0].dirty).toBe(true)
+    expect(members[0].pendingWatermark).toBe('6')
+  })
+
+  it('same-second dedup control: cursor on id 6 (both consumed) → nothing arms', async () => {
+    const sameSecond = '2026-06-02T00:00:00Z'
+    const runner = new WatchPrRunner(
+      makeDeps({
+        now: () => 1_000_000,
+        getPRState: async () => ({ state: 'OPEN' }) as unknown as PRWatchState,
+        getPRReviews: async () => [
+          review({ id: '5', state: 'CHANGES_REQUESTED', submittedAt: sameSecond }),
+          review({ id: '6', state: 'CHANGES_REQUESTED', submittedAt: sameSecond })
+        ]
+      })
+    )
+    const result = await runner.tick(
+      makeCtx({
+        configOverrides: {
+          events: { changesRequested: true, newReviewComments: false, anyReview: false }
+        },
+        // Both reviews (ids 5 and 6) already consumed → no new arming.
+        stateOutput: watchingState({}, { handledCursor: '6' })
+      })
+    )
+    const output = result.output as Record<string, unknown>
+    const members = output.members as Record<string, unknown>[]
+    expect(members[0].dirty).toBe(false)
   })
 
   it('poll cadence: within pollInterval, getPRReviews is NOT called again', async () => {
@@ -419,7 +478,7 @@ describe('WatchPrRunner — watching phase', () => {
 function dirtyWatchingState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return watchingState(overrides, {
     dirty: true,
-    pendingWatermark: '2026-06-02T00:00:00Z',
+    pendingWatermark: '5', // review id 5 armed but not yet consumed
     handledCursor: ''
   })
 }
@@ -435,7 +494,12 @@ function makeSpawnChildRun(): ReturnType<typeof vi.fn<WatchPrDeps['spawnChildRun
 function changesRequestedDeps(): Partial<WatchPrDeps> {
   return {
     getPRReviews: async () => [
-      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'fix it' })
+      review({
+        id: '5',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: '2026-06-02T00:00:00Z',
+        body: 'fix it'
+      })
     ]
   }
 }
@@ -526,7 +590,7 @@ describe('WatchPrRunner — idle gate + cycle spawn', () => {
     expect(output.phase).toBe('responding')
     expect(output.activeChildRunId).toBe('child-1')
     expect(members[0].dirty).toBe(false)
-    expect(members[0].handledCursor).toBe('2026-06-02T00:00:00Z')
+    expect(members[0].handledCursor).toBe('5')
     expect(result.statusMessage).toContain('Responding to #42')
   })
 
@@ -742,7 +806,12 @@ describe('WatchPrRunner — responding phase', () => {
     let childStatus: 'active' | 'completed' = 'active'
     // A new CHANGES_REQUESTED review newer than handledCursor ('') arms dirty.
     const reviews: PRReview[] = [
-      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'more' })
+      review({
+        id: '5',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: '2026-06-02T00:00:00Z',
+        body: 'more'
+      })
     ]
     const runner = new WatchPrRunner(
       makeDeps({
@@ -772,9 +841,14 @@ describe('WatchPrRunner — responding phase', () => {
     expect(t2.output.phase).toBe('responding')
     expect(t2.output.activeChildRunId).toBe('child-1')
 
-    // A FRESH review arrives mid-cycle, newer than the just-consumed cursor.
+    // A FRESH review arrives mid-cycle, with a higher id than the just-consumed cursor.
     reviews.push(
-      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-04T00:00:00Z', body: 'again' })
+      review({
+        id: '6',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: '2026-06-04T00:00:00Z',
+        body: 'again'
+      })
     )
     // Tick 3: responding, child-1 still active; cadence-gated arming coalesces dirty.
     nowValue += 40_000 // past poll interval so responding re-polls reviews
@@ -1080,11 +1154,13 @@ describe('WatchPrRunner — group', () => {
     const spawnChildRun = makeSpawnChildRun()
     let nowValue = 1_000_000
     const reviewA = review({
+      id: '5',
       state: 'CHANGES_REQUESTED',
       submittedAt: '2026-06-02T00:00:00Z',
       body: 'fix a'
     })
     const reviewB = review({
+      id: '6',
       state: 'CHANGES_REQUESTED',
       submittedAt: '2026-06-03T00:00:00Z',
       body: 'fix b'
@@ -1119,9 +1195,9 @@ describe('WatchPrRunner — group', () => {
     const a = outMembers.find((m) => m.worktreeId === MEMBER_A)!
     const b = outMembers.find((m) => m.worktreeId === MEMBER_B)!
     expect(a.dirty).toBe(false)
-    expect(a.handledCursor).toBe('2026-06-02T00:00:00Z')
+    expect(a.handledCursor).toBe('5')
     expect(b.dirty).toBe(false)
-    expect(b.handledCursor).toBe('2026-06-03T00:00:00Z')
+    expect(b.handledCursor).toBe('6')
     expect(output.phase).toBe('responding')
   })
 
@@ -1236,7 +1312,12 @@ describe('WatchPrRunner — group', () => {
     // A's review armed cycle 1 (already consumed). B's review arrives later.
     const reviewsByRepo: Record<string, PRReview[]> = {
       '/a': [
-        review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-02T00:00:00Z', body: 'a' })
+        review({
+          id: '5',
+          state: 'CHANGES_REQUESTED',
+          submittedAt: '2026-06-02T00:00:00Z',
+          body: 'a'
+        })
       ],
       '/b': []
     }
@@ -1271,7 +1352,12 @@ describe('WatchPrRunner — group', () => {
 
     // B's review arrives mid-cycle.
     reviewsByRepo['/b'] = [
-      review({ state: 'CHANGES_REQUESTED', submittedAt: '2026-06-04T00:00:00Z', body: 'b' })
+      review({
+        id: '6',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: '2026-06-04T00:00:00Z',
+        body: 'b'
+      })
     ]
     // Tick 3: responding, child active, re-poll arms B dirty (coalesced).
     nowValue += 40_000
