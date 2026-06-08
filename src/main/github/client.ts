@@ -1136,6 +1136,69 @@ export async function getPRState(
   }
 }
 
+export type PRReview = {
+  id: string
+  author: string
+  state: string // 'CHANGES_REQUESTED' | 'APPROVED' | 'COMMENTED' | 'DISMISSED' | ...
+  submittedAt: string // ISO; '' when a pending review has no submission time
+  body: string
+}
+
+/**
+ * List a PR's reviews (the watch-pr "arming feed"). Sorted oldest→newest by
+ * submittedAt so the runner can compare against a high-water cursor and detect
+ * new "changes requested" reviews. Errors propagate so the poll loop retries.
+ */
+export async function getPRReviews(
+  repoPath: string,
+  prNumber: number,
+  options?: { noCache?: boolean }
+): Promise<PRReview[]> {
+  const ownerRepo = await getOwnerRepo(repoPath)
+  // Why: reviews only exist on a GitHub remote; a non-GitHub remote has no
+  // arming feed, so throw (no fallback) and let the poll loop surface it.
+  if (!ownerRepo) {
+    throw new Error(`getPRReviews: ${repoPath} is not a GitHub remote`)
+  }
+  await acquire()
+  try {
+    // Why: --cache 60s saves rate-limit budget during polling, but a manual
+    // refresh passes noCache so gh fetches fresh data.
+    const cacheArgs = options?.noCache ? [] : ['--cache', '60s']
+    // Why: per_page=100 (single page, no --paginate) instead of --paginate.
+    // gh concatenates per-page arrays into invalid JSON ([..][..]) under
+    // --paginate, which a single JSON.parse can't read (see issues.ts). 100
+    // reviews is a generous cap for one PR, matching getPRComments on the same
+    // endpoint.
+    const { stdout } = await ghExecFileAsync(
+      [
+        'api',
+        ...cacheArgs,
+        `repos/${ownerRepo.owner}/${ownerRepo.repo}/pulls/${prNumber}/reviews?per_page=100`
+      ],
+      { cwd: repoPath }
+    )
+    const arr = JSON.parse(stdout) as {
+      id: number
+      user: { login: string } | null
+      state: string
+      submitted_at: string | null
+      body: string | null
+    }[]
+    return arr
+      .map((r) => ({
+        id: String(r.id),
+        author: r.user?.login ?? 'unknown',
+        state: r.state,
+        submittedAt: r.submitted_at ?? '',
+        body: r.body ?? ''
+      }))
+      .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt))
+  } finally {
+    release()
+  }
+}
+
 // Why: review thread resolution status and thread IDs are only available via
 // GraphQL. The REST pulls/{n}/comments endpoint does not expose them, so we
 // use GraphQL for review threads and REST for issue-level comments.

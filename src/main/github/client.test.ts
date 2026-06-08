@@ -42,6 +42,7 @@ vi.mock('../git/runner', () => ({
 
 import {
   getPRForBranch,
+  getPRReviews,
   getPRState,
   getPullRequestPushTarget,
   _resetOwnerRepoCache
@@ -403,6 +404,84 @@ describe('getPRState', () => {
     // poll loop must see the rejection and retry. Guard against a future swallow.
     ghExecFileAsyncMock.mockRejectedValueOnce(new Error('gh exploded'))
     await expect(getPRState('/repo/path', 1)).rejects.toThrow('gh exploded')
+    expect(releaseMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('getPRReviews', () => {
+  beforeEach(() => {
+    ghExecFileAsyncMock.mockReset()
+    getOwnerRepoMock.mockReset()
+    acquireMock.mockReset()
+    releaseMock.mockReset()
+    acquireMock.mockResolvedValue(undefined)
+  })
+
+  it('maps and sorts reviews by submittedAt, pending (no submitted_at) first', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          id: 2,
+          user: { login: 'bob' },
+          state: 'CHANGES_REQUESTED',
+          submitted_at: '2026-06-02T00:00:00Z',
+          body: 'fix this'
+        },
+        {
+          id: 1,
+          user: { login: 'amy' },
+          state: 'APPROVED',
+          submitted_at: '2026-06-01T00:00:00Z',
+          body: ''
+        },
+        { id: 3, user: { login: 'cat' }, state: 'PENDING', submitted_at: null, body: '' }
+      ])
+    })
+    const reviews = await getPRReviews('/repo/path', 42)
+    // Empty submittedAt (pending) sorts to the front — harmless since it's < any
+    // real high-water cursor the runner compares against.
+    expect(reviews.map((r) => r.id)).toEqual(['3', '1', '2'])
+    expect(reviews[1]).toEqual({
+      id: '1',
+      author: 'amy',
+      state: 'APPROVED',
+      submittedAt: '2026-06-01T00:00:00Z',
+      body: ''
+    })
+    expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
+      ['api', '--cache', '60s', 'repos/acme/widgets/pulls/42/reviews?per_page=100'],
+      { cwd: '/repo/path' }
+    )
+  })
+
+  it('handles a null user and missing submitted_at/body', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { id: 5, user: null, state: 'COMMENTED', submitted_at: null, body: null }
+      ])
+    })
+    const reviews = await getPRReviews('/repo/path', 7)
+    expect(reviews).toEqual([
+      { id: '5', author: 'unknown', state: 'COMMENTED', submittedAt: '', body: '' }
+    ])
+  })
+
+  it('passes the empty cache-args array when noCache is set', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock.mockResolvedValueOnce({ stdout: '[]' })
+    await getPRReviews('/repo/path', 3, { noCache: true })
+    expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
+      ['api', 'repos/acme/widgets/pulls/3/reviews?per_page=100'],
+      { cwd: '/repo/path' }
+    )
+  })
+
+  it('propagates errors but still releases the semaphore', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock.mockRejectedValueOnce(new Error('gh boom'))
+    await expect(getPRReviews('/repo/path', 1)).rejects.toThrow('gh boom')
     expect(releaseMock).toHaveBeenCalledTimes(1)
   })
 })
