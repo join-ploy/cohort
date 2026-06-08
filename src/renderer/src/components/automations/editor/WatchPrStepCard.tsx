@@ -94,6 +94,14 @@ export function WatchPrStepCard(props: WatchPrStepCardProps): React.JSX.Element 
           available={props.available}
           ariaLabel="Worktree ref"
         />
+        {/* startsWith (not includes): a whole-group ref is exactly `group:<id>`,
+            whereas a member-scoped ref (`member:group:…`) targets one member and
+            isn't batched, so the all-members hint would mislead there. */}
+        {config.worktreeRef.startsWith('group:') && (
+          <span className="text-muted-foreground text-xs">
+            Watches all member PRs; batches responses on the shared pane.
+          </span>
+        )}
       </label>
       <label className="flex flex-col gap-1 text-xs">
         <span className="text-muted-foreground">Supervised pane</span>
