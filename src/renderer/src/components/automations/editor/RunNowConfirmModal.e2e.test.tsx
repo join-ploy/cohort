@@ -90,7 +90,10 @@ function baseStoreState(): StoreState {
     searchLinearIssues: vi.fn().mockResolvedValue([]),
     listLinearIssues: vi.fn().mockResolvedValue([]),
     openSettingsTarget: vi.fn(),
-    repos: [repoA]
+    repos: [repoA],
+    // The http picker reads runs from the store and refetches on open.
+    automationRunsById: {},
+    fetchAutomationRuns: vi.fn()
   }
 }
 

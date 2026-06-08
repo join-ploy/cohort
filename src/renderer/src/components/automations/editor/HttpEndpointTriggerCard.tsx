@@ -12,6 +12,7 @@ import { parseDateValue } from '../../../../../shared/http-endpoint-mapping'
 import {
   setDateGateField,
   setDedupeFields,
+  setIdField,
   setIntervalMs,
   setLabelField,
   setManualEnabled,
@@ -313,6 +314,26 @@ export function HttpEndpointTriggerCard(props: HttpEndpointTriggerCardProps): Re
                     ))}
                   </NativeSelect>
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground">Status match field</p>
+                <div>
+                  <NativeSelect
+                    ariaLabel="Status match field"
+                    value={http.idField ?? ''}
+                    onChange={(v) => onChange(setIdField(trigger, v === '' ? undefined : v))}
+                  >
+                    <option value="">— None —</option>
+                    {scalarFields.map((field) => (
+                      <option key={field.path} value={field.path}>
+                        {field.path}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Items whose runs share this field&apos;s value show a run-status mark.
+                </p>
               </div>
             </div>
           </>

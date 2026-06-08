@@ -38,6 +38,10 @@ export function setSubtitleField(
   return withHttp(trigger, (http) => ({ ...http, subtitleField }))
 }
 
+export function setIdField(trigger: AutoTrigger, idField: string | undefined): AutoTrigger {
+  return withHttp(trigger, (http) => ({ ...http, idField }))
+}
+
 // --- Capability toggles ----------------------------------------------------
 
 export function setPollingEnabled(trigger: AutoTrigger, value: boolean): AutoTrigger {
