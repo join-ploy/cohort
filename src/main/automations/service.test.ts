@@ -1459,6 +1459,99 @@ describe('AutomationService watch-pr child runs', () => {
     ).toThrow(/run nope not found/)
   })
 
+  it('retryRunFromStep cancels a detached watcher spawned by a dropped step', async () => {
+    const { store, service, automationId } = await seedWatchAutomation()
+    const stored = store.listAutomations().find((a) => a.id === automationId)!
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    // The watch step ran detached: it returned done immediately and spawned a
+    // background watcher carrying the loop. The flat step state records that.
+    parent.stepStates = [
+      {
+        stepId: 'watch',
+        status: 'succeeded',
+        startedAt: 0,
+        finishedAt: 1,
+        output: { detached: true },
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(parent)
+
+    // Distinct scheduledFor so createAutomationRun's dedup gate gives a new row.
+    vi.advanceTimersByTime(1000)
+    const detachedId = service.spawnDetachedWatcher({
+      fromRunId: parent.id,
+      stepId: 'watch',
+      context: {}
+    })
+    expect(store.getAutomationRun(detachedId)!.status).toBe('running')
+
+    // Retrying from the watch step drops it — the background watcher it spawned
+    // must be cancelled too, otherwise the stale watcher keeps running while the
+    // re-tick spawns a duplicate. Detached runs link by detachedFromRunId (not
+    // parentRunId), so the parentRunId-keyed child cancel can't reach them.
+    service.retryRunFromStep(parent.id, 0)
+
+    expect(store.getAutomationRun(detachedId)!.status).toBe('cancelled')
+  })
+
+  it('Retry all on a parallel group cancels a downstream detached watcher', async () => {
+    // Reported topology: a completed parallel group, then a few steps later a
+    // watch-pr that ran detached (still polling in the background). "Retry all
+    // parallel steps" drops the group AND everything downstream of it — the
+    // dropped watch step's detached watcher must be torn down so it can't keep
+    // touching the group's panes while the re-tick restarts them.
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'p1' }))
+    const automation = store.createAutomation({
+      name: 'Group then detached watch',
+      prompt: '',
+      agentId: 'claude',
+      projectId: 'p1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: '',
+      dtstart: 0,
+      trigger: { kind: 'manual' },
+      steps: [[runPromptStep('a'), runPromptStep('b')], watchStep('watch')]
+    })
+    const stored = store.listAutomations().find((e) => e.id === automation.id)!
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({ isDestroyed: () => false, send: vi.fn() } as never)
+
+    const parent = store.createAutomationRun(stored, Date.now(), 'manual')
+    parent.status = 'running'
+    parent.stepStates = [
+      { stepId: 'a', status: 'succeeded', startedAt: 0, finishedAt: 1, output: null, error: null },
+      { stepId: 'b', status: 'succeeded', startedAt: 0, finishedAt: 1, output: null, error: null },
+      {
+        stepId: 'watch',
+        status: 'succeeded',
+        startedAt: 0,
+        finishedAt: 1,
+        output: { detached: true },
+        error: null
+      }
+    ]
+    store.replaceAutomationRun(parent)
+
+    vi.advanceTimersByTime(1000)
+    const detachedId = service.spawnDetachedWatcher({
+      fromRunId: parent.id,
+      stepId: 'watch',
+      context: {}
+    })
+    expect(store.getAutomationRun(detachedId)!.status).toBe('running')
+
+    // "Retry all parallel steps" routes to retryRunFromStep at the group's first
+    // flat index (0), dropping the group + the downstream detached watch step.
+    service.retryRunFromStep(parent.id, 0)
+
+    expect(store.getAutomationRun(detachedId)!.status).toBe('cancelled')
+  })
+
   it('resolveDetachedRunAutomation returns the single watch step (not its branchSteps)', async () => {
     const branch = [runPromptStep('rp')]
     const { store, service, automationId } = await seedWatchAutomation(branch)

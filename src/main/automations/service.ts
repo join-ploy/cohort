@@ -1142,6 +1142,25 @@ export class AutomationService {
     }
   }
 
+  /** Cancel every active detached watcher spawned by a (spawnerRunId, stepId).
+   *  Retry-only: re-running a step that spawned a background detached watch-pr
+   *  must tear down the old watcher, else the stale one keeps polling while the
+   *  re-tick spawns a duplicate. Detached runs link by `detachedFromRunId` (not
+   *  `parentRunId`), so the child-cancel path can't reach them — and the plain
+   *  Stop path intentionally leaves them running, which is why only retry calls
+   *  this. */
+  private cancelDetachedRunsForStep(spawnerRunId: string, stepId: string): void {
+    for (const r of this.store.listAutomationRuns()) {
+      if (
+        r.detachedFromRunId === spawnerRunId &&
+        r.parentStepId === stepId &&
+        isActiveChainRunStatus(r.status)
+      ) {
+        this.cancelRun(r.id)
+      }
+    }
+  }
+
   /** Cancel every non-terminal child (branch) run of a parent run, regardless of
    *  step. Store-querying so it survives a restart that wiped runner trackers.
    *  Used by cancelRun so a Stop/delete also stops the watch loop's in-flight cycle. */
@@ -1275,6 +1294,9 @@ export class AutomationService {
       // Restart-safe: cancel any watch-pr child runs owned by this dropped step
       // so the old loop stops before the chain re-reaches the node.
       this.cancelChildRunsForStep(run.id, state.stepId)
+      // A dropped step may have spawned a detached background watcher; tear it
+      // down too so the re-tick replaces it instead of duplicating it.
+      this.cancelDetachedRunsForStep(run.id, state.stepId)
     }
     // Why: close any panes the prior steps opened. The runner-tracker path
     // above only fires when the runner still has an in-memory tracker, which
@@ -1402,12 +1424,15 @@ export class AutomationService {
     // Restart-safe: cancel any watch-pr child runs owned by this dropped step
     // so the old loop stops before the chain re-reaches the node.
     this.cancelChildRunsForStep(run.id, targetState.stepId)
+    this.cancelDetachedRunsForStep(run.id, targetState.stepId)
     for (const downstream of droppedStates) {
       for (const runner of this.allRunners()) {
         runner.dropStep?.(run.id, downstream.stepId)
       }
       // Restart-safe: cancel any watch-pr child runs owned by this dropped step.
       this.cancelChildRunsForStep(run.id, downstream.stepId)
+      // …and any detached watcher it spawned (links by detachedFromRunId).
+      this.cancelDetachedRunsForStep(run.id, downstream.stepId)
     }
     // Why: persistent fallback — same rationale as retryRunFromStep. Includes
     // the target's pre-reset snapshot plus every downstream state so the
