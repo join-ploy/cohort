@@ -510,13 +510,16 @@ export function getSetupCommandSource(
   return null
 }
 
-function getSetupEnvVars(
+export function getSetupEnvVars(
   repo: Repo,
   worktreePath: string,
   workspaceName?: string,
   groupRepos?: readonly string[]
 ): Record<string, string> {
   return {
+    // Why: user-defined vars first so the built-ins below override on key
+    // collision — a stray ORCA_WORKTREE_PATH can never break the runner.
+    ...repo.hookSettings?.envVars,
     ORCA_ROOT_PATH: repo.path,
     ORCA_WORKTREE_PATH: worktreePath,
     // Why: Conductor users key shell scripts and Postgres DB names off
