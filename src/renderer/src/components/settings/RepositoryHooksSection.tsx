@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { OrcaHooks, Repo, SetupRunPolicy } from '../../../../shared/types'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  envVarsEqual,
+  envVarsToRows,
+  isValidEnvVarName,
+  rowsToEnvVars,
+  type EnvVarRow
+} from './repo-env-vars'
 import { Button } from '../ui/button'
 import { SearchableSetting } from './SearchableSetting'
 
@@ -17,6 +24,7 @@ type RepositoryHooksSectionProps = {
   onUpdateDatabaseUrl: (databaseUrl: string) => void
   onUpdateReviewPreferences: (reviewPreferences: string) => void
   onUpdateCreatePrPreferences: (createPrPreferences: string) => void
+  onUpdateEnvVars: (envVars: Record<string, string>) => void
 }
 
 type PolicyOption<P> = { policy: P; label: string; description: string }
@@ -157,7 +165,8 @@ export function RepositoryHooksSection({
   onUpdateSetupRunPolicy,
   onUpdateDatabaseUrl,
   onUpdateReviewPreferences,
-  onUpdateCreatePrPreferences
+  onUpdateCreatePrPreferences,
+  onUpdateEnvVars
 }: RepositoryHooksSectionProps): React.JSX.Element {
   // Why: distinguish "file has unrecognised top-level keys" from "file is
   // genuinely malformed" so users see a helpful update prompt instead of a
@@ -298,6 +307,44 @@ export function RepositoryHooksSection({
     setCreatePrPrefsDraft(trimmed)
     onUpdateCreatePrPreferences(trimmed)
   }, [createPrPrefsDraft, persistedCreatePrPrefs, onUpdateCreatePrPreferences])
+
+  // Why: resync rows only on repo switch (not on every persisted-object
+  // identity change) so in-flight edits are not clobbered mid-typing. Local
+  // rows are the source of truth while the section is mounted for one repo.
+  const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(hs?.envVars ?? {}))
+  useEffect(() => {
+    setEnvVarRows(envVarsToRows(repo.hookSettings?.envVars ?? {}))
+  }, [repo.id])
+
+  const commitEnvVars = useCallback(
+    (rows: EnvVarRow[]): void => {
+      const next = rowsToEnvVars(rows)
+      if (envVarsEqual(next, repo.hookSettings?.envVars ?? {})) {
+        return
+      }
+      onUpdateEnvVars(next)
+    },
+    [repo.hookSettings?.envVars, onUpdateEnvVars]
+  )
+
+  const updateEnvVarRow = useCallback((id: string, patch: Partial<EnvVarRow>): void => {
+    setEnvVarRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  }, [])
+
+  const removeEnvVarRow = useCallback(
+    (id: string): void => {
+      setEnvVarRows((rows) => {
+        const next = rows.filter((r) => r.id !== id)
+        commitEnvVars(next)
+        return next
+      })
+    },
+    [commitEnvVars]
+  )
+
+  const addEnvVarRow = useCallback((): void => {
+    setEnvVarRows((rows) => [...rows, { id: crypto.randomUUID(), key: '', value: '' }])
+  }, [])
 
   return (
     <section className="space-y-6">
@@ -526,6 +573,83 @@ export function RepositoryHooksSection({
                 ? 'Leave blank to fall back to the shared `orca.yaml` value shown above.'
                 : 'Leave blank to disable the Open in Database action when no `orca.yaml` value is set.'}
             </p>
+          </div>
+        </div>
+      </SearchableSetting>
+
+      <SearchableSetting
+        title="Extra Environment Variables"
+        description="Per-repo env vars injected into run, setup, and archive scripts."
+        keywords={['env', 'environment', 'variables', 'env vars', 'run', 'export']}
+      >
+        <div className="space-y-3 rounded-2xl border border-border/50 bg-background/80 p-4 shadow-sm">
+          <div className="space-y-1">
+            <h5 className="text-sm font-semibold">Extra Environment Variables</h5>
+            <p className="text-xs text-muted-foreground">
+              Injected into the run (⌘R), setup, and archive scripts for this repo. Stored locally
+              and never written to <code className="rounded bg-muted px-1 py-0.5">orca.yaml</code>.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            {envVarRows.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No variables set.</p>
+            ) : (
+              envVarRows.map((row) => {
+                const invalidKey = row.key.trim() !== '' && !isValidEnvVarName(row.key.trim())
+                return (
+                  <div key={row.id} className="flex items-start gap-2">
+                    <div className="flex-1 space-y-1">
+                      <input
+                        value={row.key}
+                        onChange={(e) => updateEnvVarRow(row.id, { key: e.target.value })}
+                        onBlur={() => commitEnvVars(envVarRows)}
+                        placeholder="MY_API_KEY"
+                        className={`w-full min-w-0 rounded-md border bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+                          invalidKey
+                            ? 'border-destructive focus-visible:border-destructive'
+                            : 'border-input focus-visible:border-ring'
+                        }`}
+                      />
+                      {invalidKey ? (
+                        <p className="text-[11px] text-destructive">
+                          Names must start with a letter or underscore and contain only letters,
+                          digits, and underscores. This variable will not be saved.
+                        </p>
+                      ) : null}
+                    </div>
+                    <input
+                      value={row.value}
+                      onChange={(e) => updateEnvVarRow(row.id, { value: e.target.value })}
+                      onBlur={() => commitEnvVars(envVarRows)}
+                      placeholder="value"
+                      className="flex-1 min-w-0 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="mt-0.5 size-9 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeEnvVarRow(row.id)}
+                      aria-label="Remove variable"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                )
+              })
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={addEnvVarRow}
+            >
+              <Plus className="size-4" />
+              Add variable
+            </Button>
           </div>
         </div>
       </SearchableSetting>
