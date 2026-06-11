@@ -198,7 +198,7 @@ export function RepositoryPane({
     updates: Partial<
       Pick<
         RepoHookSettings,
-        'setupRunPolicy' | 'databaseUrl' | 'reviewPreferences' | 'createPrPreferences'
+        'setupRunPolicy' | 'databaseUrl' | 'reviewPreferences' | 'createPrPreferences' | 'envVars'
       >
     >
   ) => {
@@ -421,6 +421,7 @@ export function RepositoryPane({
         onUpdateCreatePrPreferences={(createPrPreferences) =>
           updateSelectedRepoHookSettings({ createPrPreferences })
         }
+        onUpdateEnvVars={(envVars) => updateSelectedRepoHookSettings({ envVars })}
       />
     ) : null
   ].filter(Boolean)

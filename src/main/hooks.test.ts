@@ -1,7 +1,7 @@
 import type { Repo } from '../shared/types'
 
 import { describe, expect, it, vi } from 'vitest'
-import { parseConductorJson, parseOrcaYaml } from './hooks'
+import { getSetupEnvVars, parseConductorJson, parseOrcaYaml } from './hooks'
 
 // Mock fs and path used by loadHooks
 vi.mock('fs', () => ({
@@ -1138,6 +1138,38 @@ describe('runHook', () => {
         value: originalPlatform
       })
     }
+  })
+})
+
+describe('getSetupEnvVars', () => {
+  const baseRepo = { id: 'r1', path: '/repo', hookSettings: {} } as unknown as Repo
+
+  it('returns built-in vars and no extras when envVars is absent', () => {
+    const env = getSetupEnvVars(baseRepo, '/repo/wt')
+    expect(env.ORCA_ROOT_PATH).toBe('/repo')
+    expect(env.ORCA_WORKTREE_PATH).toBe('/repo/wt')
+    expect(env.FOO).toBeUndefined()
+  })
+
+  it('merges user envVars alongside built-ins', () => {
+    const repo = {
+      ...baseRepo,
+      hookSettings: { envVars: { FOO: 'bar', POOL: '20' } }
+    } as unknown as Repo
+    const env = getSetupEnvVars(repo, '/repo/wt')
+    expect(env.FOO).toBe('bar')
+    expect(env.POOL).toBe('20')
+    expect(env.ORCA_WORKTREE_PATH).toBe('/repo/wt')
+  })
+
+  it('never lets a user var override a built-in', () => {
+    const repo = {
+      ...baseRepo,
+      hookSettings: { envVars: { ORCA_WORKTREE_PATH: '/evil', GHOSTX_ROOT_PATH: '/evil' } }
+    } as unknown as Repo
+    const env = getSetupEnvVars(repo, '/repo/wt')
+    expect(env.ORCA_WORKTREE_PATH).toBe('/repo/wt')
+    expect(env.GHOSTX_ROOT_PATH).toBe('/repo')
   })
 })
 

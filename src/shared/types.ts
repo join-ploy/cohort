@@ -958,6 +958,10 @@ export type RepoHookSettings = {
   /** Persisted override of orca.yaml's `createPrPreferences` field. Same
    *  precedence as `reviewPreferences`. */
   createPrPreferences?: string
+  /** Per-user, per-repo extra environment variables merged into every hook/run
+   *  surface (run, setup, archive, issue-command). Stored locally, never in
+   *  orca.yaml. Built-in ORCA_* / CONDUCTOR_* / GHOSTX_* vars win on key collision. */
+  envVars?: Record<string, string>
 }
 
 /** A configurable command surfaced in the right-sidebar Review / Create PR
