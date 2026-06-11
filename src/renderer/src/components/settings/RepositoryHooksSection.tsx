@@ -333,13 +333,13 @@ export function RepositoryHooksSection({
 
   const removeEnvVarRow = useCallback(
     (id: string): void => {
-      setEnvVarRows((rows) => {
-        const next = rows.filter((r) => r.id !== id)
-        commitEnvVars(next)
-        return next
-      })
+      // Why: keep the side effect out of the setState updater — StrictMode
+      // double-invokes updaters in dev, which would fire the IPC write twice.
+      const next = envVarRows.filter((r) => r.id !== id)
+      setEnvVarRows(next)
+      commitEnvVars(next)
     },
-    [commitEnvVars]
+    [envVarRows, commitEnvVars]
   )
 
   const addEnvVarRow = useCallback((): void => {
